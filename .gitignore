@@ -9,3 +9,8 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# tsc build artifacts
+vite.config.d.ts
+vite.config.js
+*.tsbuildinfo
