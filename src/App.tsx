@@ -59,6 +59,10 @@ export default function App() {
                 valueLabelDisplay="auto"
               />
             </Stack>
+            <Typography variant="caption" color="text.secondary">
+              Free-fly camera — WASD move, Shift faster, right-mouse look, wheel /
+              middle-mouse zoom.
+            </Typography>
           </Stack>
         )}
       </Paper>

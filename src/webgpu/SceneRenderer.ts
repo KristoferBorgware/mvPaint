@@ -6,11 +6,14 @@ import { createGpuContext } from './GpuContext'
 import { CubeGeometry } from './CubeGeometry'
 import { createCubePipeline, DEPTH_FORMAT } from './pipeline'
 import { Cube } from './Cube'
-import { Matrix4x4 } from '../math/Matrix4x4'
+import { FreeFloatCamera } from '../camera/FreeFloatCamera'
+import { FreeFlyController } from '../camera/FreeFlyController'
 import { Vector3 } from '../math/Vector3'
 
 export interface SceneRendererHandle {
   setSpeed: (speed: number) => void
+  /** The active free-fly camera, e.g. to read/adjust pose or FOV. */
+  camera: FreeFloatCamera
   destroy: () => void
 }
 
@@ -31,6 +34,14 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
     new Cube(device, pipeline, geometry, { position: [-2.2, 0, 0], spinScale: 1 }),
     new Cube(device, pipeline, geometry, { position: [2.2, 0, 0], spinScale: -1.4 }),
   ]
+
+  // Default camera: an FPS free-fly camera looking down -Z at the cubes. WASD to move,
+  // right-mouse to look, wheel / middle-mouse to zoom (see FreeFlyController).
+  const camera = new FreeFloatCamera()
+  camera.active = true
+  camera.eye = new Vector3(0, 0, 9)
+  camera.fovY = (60 * Math.PI) / 180
+  const controller = new FreeFlyController(canvas, camera)
 
   // --- Depth texture (recreated on resize) ---
   let depthTexture: GPUTexture | null = null
@@ -78,12 +89,11 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
 
     resize()
 
-    // Shared camera matrix, pulled back to fit both cubes in frame. Column-vector
-    // convention (M * p): projection * view.
+    // Advance the free-fly camera with this frame's input, then build its
+    // view-projection (column-vector: projection * view).
+    controller.update(dt)
     const aspect = canvas.width / canvas.height
-    const proj = Matrix4x4.perspectiveFovRH((60 * Math.PI) / 180, aspect, 0.1, 100)
-    const view = Matrix4x4.translation(new Vector3(0, 0, -9))
-    const viewProjection = proj.mul(view)
+    const viewProjection = camera.viewProjection(aspect)
 
     const encoder = device.createCommandEncoder()
     const pass = encoder.beginRenderPass({
@@ -119,9 +129,11 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
     setSpeed(next: number) {
       speed = next
     },
+    camera,
     destroy() {
       disposed = true
       cancelAnimationFrame(rafId)
+      controller.dispose()
       resizeObserver.disconnect()
       depthTexture?.destroy()
       for (const cube of cubes) {
