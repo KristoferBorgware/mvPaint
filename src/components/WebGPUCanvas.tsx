@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { createCubeRenderer, type CubeRendererHandle } from '../webgpu/CubeRenderer'
+import { createSceneRenderer, type SceneRendererHandle } from '../webgpu/SceneRenderer'
 
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
@@ -10,7 +10,7 @@ interface WebGPUCanvasProps {
 
 export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const handleRef = useRef<CubeRendererHandle | null>(null)
+  const handleRef = useRef<SceneRendererHandle | null>(null)
 
   // Initialize the renderer once, on mount.
   useEffect(() => {
@@ -19,7 +19,7 @@ export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
 
     let cancelled = false
 
-    createCubeRenderer(canvas)
+    createSceneRenderer(canvas)
       .then((handle) => {
         if (cancelled) {
           handle.destroy()

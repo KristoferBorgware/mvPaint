@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/webgpucanvas.tsx","./src/webgpu/cuberenderer.ts","./src/webgpu/cube.wgsl.ts","./src/webgpu/mat4.ts"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/WebGPUCanvas.tsx","./src/webgpu/Cube.ts","./src/webgpu/CubeGeometry.ts","./src/webgpu/GpuContext.ts","./src/webgpu/SceneRenderer.ts","./src/webgpu/cube.wgsl.ts","./src/webgpu/mat4.ts","./src/webgpu/pipeline.ts"],"version":"5.9.3"}
