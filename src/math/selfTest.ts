@@ -2,7 +2,12 @@
 // `npx tsx src/math/selfTest.ts` to verify the TypeScript math matches the
 // original DirectXMath-based behaviour.
 
-import { AABB, Matrix4x4, Quaternion, Ray, Transform, Vector3 } from './index'
+import { AABB } from './AABB'
+import { Matrix4x4 } from './Matrix4x4'
+import { Quaternion } from './Quaternion'
+import { Ray } from './Ray'
+import { Transform } from './Transform'
+import { Vector3 } from './Vector3'
 
 const PIDIV2 = Math.PI / 2
 const PIDIV4 = Math.PI / 4

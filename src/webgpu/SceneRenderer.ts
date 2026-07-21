@@ -6,7 +6,8 @@ import { createGpuContext } from './GpuContext'
 import { CubeGeometry } from './CubeGeometry'
 import { createCubePipeline, DEPTH_FORMAT } from './pipeline'
 import { Cube } from './Cube'
-import { multiply, perspective, translation } from './mat4'
+import { Matrix4x4 } from '../math/Matrix4x4'
+import { Vector3 } from '../math/Vector3'
 
 export interface SceneRendererHandle {
   setSpeed: (speed: number) => void
@@ -77,11 +78,12 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
 
     resize()
 
-    // Shared camera matrix, pulled back to fit both cubes in frame.
+    // Shared camera matrix, pulled back to fit both cubes in frame. Row-vector
+    // convention (p * M): view first, then projection.
     const aspect = canvas.width / canvas.height
-    const proj = perspective((60 * Math.PI) / 180, aspect, 0.1, 100)
-    const view = translation(0, 0, -9)
-    const viewProjection = multiply(proj, view)
+    const proj = Matrix4x4.perspectiveFovRH((60 * Math.PI) / 180, aspect, 0.1, 100)
+    const view = Matrix4x4.translation(new Vector3(0, 0, -9))
+    const viewProjection = view.mul(proj)
 
     const encoder = device.createCommandEncoder()
     const pass = encoder.beginRenderPass({

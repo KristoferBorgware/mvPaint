@@ -3,7 +3,8 @@
 
 import type { CubeGeometry } from './CubeGeometry'
 import { createCubeBindGroup, UNIFORM_SIZE } from './pipeline'
-import { multiply, rotationX, rotationY, translation, type Mat4 } from './mat4'
+import { Matrix4x4 } from '../math/Matrix4x4'
+import { Vector3 } from '../math/Vector3'
 
 export interface CubeOptions {
   /** World-space position of the cube's center. */
@@ -42,21 +43,27 @@ export class Cube {
     this.bindGroup = createCubeBindGroup(device, pipeline, this.uniformBuffer)
   }
 
-  /** Local model matrix for this cube at the given spin angle. */
-  private modelMatrix(angle: number): Mat4 {
+  /**
+   * Local model matrix for this cube at the given spin angle. Row-vector
+   * convention (p * M), so factors are ordered by application: spin, then translate.
+   */
+  private modelMatrix(angle: number): Matrix4x4 {
     const spin = angle * this.spinScale
-    const rotation = multiply(rotationY(spin), rotationX(spin * 0.6))
     const [x, y, z] = this.position
-    return multiply(translation(x, y, z), rotation)
+    return Matrix4x4.rotationX(spin * 0.6)
+      .mul(Matrix4x4.rotationY(spin))
+      .mul(Matrix4x4.translation(new Vector3(x, y, z)))
   }
 
   /**
    * Uploads this cube's MVP uniform and records its draw call onto the pass.
    * `viewProjection` is the shared camera matrix; `angle` drives the spin.
    */
-  draw(pass: GPURenderPassEncoder, viewProjection: Mat4, angle: number): void {
-    const mvp = multiply(viewProjection, this.modelMatrix(angle))
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, mvp as BufferSource)
+  draw(pass: GPURenderPassEncoder, viewProjection: Matrix4x4, angle: number): void {
+    // Row-vector pipeline (local -> world/view -> clip): model, then view-projection.
+    // toGPU() hands WGSL the column-major buffer its `mvp * pos` shader expects.
+    const mvp = this.modelMatrix(angle).mul(viewProjection)
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, mvp.toGPU() as BufferSource)
 
     pass.setBindGroup(0, this.bindGroup)
     this.geometry.bind(pass)

@@ -3,9 +3,10 @@
 // convention is right-handed, row-vector: points multiply on the left, p' = p * M,
 // and A.mul(B) applies A first then B.
 //
-// Note for WGSL/WebGPU consumers: WGSL matrices are column-major with column-vector
-// convention (M * p), so upload `transpose()` (or `toColumnMajorArray()`) when
-// feeding a shader that expects that layout.
+// Note for WGSL/WebGPU consumers: WGSL is column-major with column-vector convention
+// (clip = mvp * pos). A row-vector matrix's row-major bytes, read back as column-major
+// by WGSL, are exactly the transpose that convention needs - so for a `mvp * pos`
+// shader upload `.m` directly (see toGPU()); no explicit transpose is required.
 
 import { Quaternion } from './Quaternion'
 import { Vector3 } from './Vector3'
@@ -45,9 +46,14 @@ export class Matrix4x4 {
     return Array.from(this.m)
   }
 
-  /** Column-major copy (for WGSL/WebGPU uniform uploads). */
-  toColumnMajorArray(): Float32Array {
-    return this.transpose().m
+  /**
+   * Buffer to upload to a WGSL uniform consumed as `mvp * pos` (WebGPU's native
+   * column-vector convention). Our row-major storage of this row-vector matrix is,
+   * byte-for-byte, the column-major layout of its transpose - which is precisely the
+   * column-vector matrix WGSL's `M * p` expects. So this is just the backing `.m`.
+   */
+  toGPU(): Float32Array {
+    return this.m
   }
 
   // ---- factories ----
