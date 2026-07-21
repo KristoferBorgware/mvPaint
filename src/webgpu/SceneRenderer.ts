@@ -78,12 +78,12 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
 
     resize()
 
-    // Shared camera matrix, pulled back to fit both cubes in frame. Row-vector
-    // convention (p * M): view first, then projection.
+    // Shared camera matrix, pulled back to fit both cubes in frame. Column-vector
+    // convention (M * p): projection * view.
     const aspect = canvas.width / canvas.height
     const proj = Matrix4x4.perspectiveFovRH((60 * Math.PI) / 180, aspect, 0.1, 100)
     const view = Matrix4x4.translation(new Vector3(0, 0, -9))
-    const viewProjection = view.mul(proj)
+    const viewProjection = proj.mul(view)
 
     const encoder = device.createCommandEncoder()
     const pass = encoder.beginRenderPass({

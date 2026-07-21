@@ -44,15 +44,15 @@ export class Cube {
   }
 
   /**
-   * Local model matrix for this cube at the given spin angle. Row-vector
-   * convention (p * M), so factors are ordered by application: spin, then translate.
+   * Local model matrix for this cube at the given spin angle. Column-vector (M * p),
+   * so factors read outermost-first: translate * spin, i.e. spin then translate.
    */
   private modelMatrix(angle: number): Matrix4x4 {
     const spin = angle * this.spinScale
     const [x, y, z] = this.position
-    return Matrix4x4.rotationX(spin * 0.6)
+    return Matrix4x4.translation(new Vector3(x, y, z))
       .mul(Matrix4x4.rotationY(spin))
-      .mul(Matrix4x4.translation(new Vector3(x, y, z)))
+      .mul(Matrix4x4.rotationX(spin * 0.6))
   }
 
   /**
@@ -60,9 +60,9 @@ export class Cube {
    * `viewProjection` is the shared camera matrix; `angle` drives the spin.
    */
   draw(pass: GPURenderPassEncoder, viewProjection: Matrix4x4, angle: number): void {
-    // Row-vector pipeline (local -> world/view -> clip): model, then view-projection.
-    // toGPU() hands WGSL the column-major buffer its `mvp * pos` shader expects.
-    const mvp = this.modelMatrix(angle).mul(viewProjection)
+    // Column-vector MVP (textbook order): projection*view * model. toGPU() is the
+    // column-major buffer WGSL's `mvp * pos` shader consumes directly.
+    const mvp = viewProjection.mul(this.modelMatrix(angle))
     this.device.queue.writeBuffer(this.uniformBuffer, 0, mvp.toGPU() as BufferSource)
 
     pass.setBindGroup(0, this.bindGroup)

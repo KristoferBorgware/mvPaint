@@ -1,24 +1,24 @@
-// Matrix4x4 - general 4x4 matrix. TypeScript port of Fungine3D's Core/Matrix4x4.h
-// (a DirectXMath XMFLOAT4X4 / XMMatrix* wrapper). Storage is row-major and the
-// convention is right-handed, row-vector: points multiply on the left, p' = p * M,
-// and A.mul(B) applies A first then B.
+// Matrix4x4 - general 4x4 matrix, WebGPU-native. Storage is column-major and the
+// convention is right-handed, column-vector: points multiply on the right, p' = M * p,
+// and A.mul(B) is the product A*B (so (A*B)*p runs B first, then A). This is the same
+// layout and convention as WGSL, glMatrix and the WebGPU tutorials, so an MVP is
+// composed the textbook way - projection * view * model - and its `.m` uploads straight
+// into a `mvp * pos` uniform with no transpose (see toGPU()).
 //
-// Note for WGSL/WebGPU consumers: WGSL is column-major with column-vector convention
-// (clip = mvp * pos). A row-vector matrix's row-major bytes, read back as column-major
-// by WGSL, are exactly the transpose that convention needs - so for a `mvp * pos`
-// shader upload `.m` directly (see toGPU()); no explicit transpose is required.
+// Derived from Fungine3D's Core/Matrix4x4.h (a DirectXMath / row-vector type),
+// transposed into WebGPU's column-vector convention.
 
 import { Quaternion } from './Quaternion'
 import { Vector3 } from './Vector3'
 import { Vector4 } from './Vector4'
 
-/** Element accessor for a row-major 16-float array: row-major index row*4 + col. */
+/** Element accessor for a column-major 16-float array: index col*4 + row. */
 function idx(row: number, col: number): number {
-  return row * 4 + col
+  return col * 4 + row
 }
 
 export class Matrix4x4 {
-  /** 16 floats, row-major (m[row*4 + col]). */
+  /** 16 floats, column-major (m[col*4 + row]) - WGSL's native layout. */
   readonly m: Float32Array
 
   constructor(elements?: ArrayLike<number>) {
@@ -41,16 +41,15 @@ export class Matrix4x4 {
     return this.m[idx(row, col)]
   }
 
-  /** Row-major copy (native storage order). */
+  /** Column-major copy (native storage order). */
   toArray(): number[] {
     return Array.from(this.m)
   }
 
   /**
-   * Buffer to upload to a WGSL uniform consumed as `mvp * pos` (WebGPU's native
-   * column-vector convention). Our row-major storage of this row-vector matrix is,
-   * byte-for-byte, the column-major layout of its transpose - which is precisely the
-   * column-vector matrix WGSL's `M * p` expects. So this is just the backing `.m`.
+   * Buffer to upload to a WGSL uniform consumed as `mvp * pos`. Storage is already
+   * column-major / column-vector - identical to WGSL's layout - so this is simply the
+   * backing `.m`, with no transpose.
    */
   toGPU(): Float32Array {
     return this.m
@@ -193,15 +192,16 @@ export class Matrix4x4 {
     return r
   }
 
-  // Compose scale, rotation, translation (row-vector: S * R * T).
+  // Compose translation, rotation, scale (column-vector: T * R * S, so a point is
+  // scaled, then rotated, then translated).
   static trs(translation: Vector3, rotation: Quaternion, scale: Vector3): Matrix4x4 {
-    return Matrix4x4.scaling(scale)
+    return Matrix4x4.translation(translation)
       .mul(Matrix4x4.rotationQuaternion(rotation))
-      .mul(Matrix4x4.translation(translation))
+      .mul(Matrix4x4.scaling(scale))
   }
 
   // ---- operations ----
-  // result = this * r  (row-vector: this applied first, then r).
+  // Matrix product this * r. Applied to a point, (this * r) * p runs r first, then this.
   mul(rhs: Matrix4x4): Matrix4x4 {
     const a = this.m
     const b = rhs.m
@@ -320,7 +320,7 @@ export class Matrix4x4 {
     return new Matrix4x4(out)
   }
 
-  // Transform a position: (x,y,z,1) * M, then perspective-divide by w.
+  // Transform a position: M * (x,y,z,1), then perspective-divide by w.
   transformPoint(p: Vector3): Vector3 {
     const m = this.m
     const x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12]
@@ -331,7 +331,7 @@ export class Matrix4x4 {
     return new Vector3(x * inv, y * inv, z * inv)
   }
 
-  // Transform a direction: (x,y,z,0) * M (ignores translation, no divide).
+  // Transform a direction: M * (x,y,z,0) (ignores translation, no divide).
   transformDirection(d: Vector3): Vector3 {
     const m = this.m
     return new Vector3(
@@ -341,7 +341,7 @@ export class Matrix4x4 {
     )
   }
 
-  // Full 4-component transform: v * M (no divide).
+  // Full 4-component transform: M * v (no divide).
   transformVector4(v: Vector4): Vector4 {
     const m = this.m
     return new Vector4(
@@ -358,7 +358,7 @@ export class Matrix4x4 {
     const m = this.m
     const translation = new Vector3(m[12], m[13], m[14])
 
-    // Rows 0..2 are the scaled basis vectors.
+    // The upper-3x3 basis vectors (as laid out in storage); their lengths are the scales.
     let r0 = new Vector3(m[0], m[1], m[2])
     let r1 = new Vector3(m[4], m[5], m[6])
     let r2 = new Vector3(m[8], m[9], m[10])
@@ -384,7 +384,7 @@ export class Matrix4x4 {
     r2 = r2.div(sz)
 
     // Build the pure-rotation matrix and convert to a quaternion (Shepperd's method,
-    // matching the row-vector convention of rotationQuaternion()).
+    // matching the convention of rotationQuaternion()).
     const r00 = r0.x
     const r01 = r0.y
     const r02 = r0.z

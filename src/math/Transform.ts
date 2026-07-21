@@ -1,7 +1,7 @@
 // Transform - a decomposed SRT transform (position / rotation / scale) plus the
 // operations a scene node needs. TypeScript port of Fungine3D's Core/Transform.h.
-// Right-handed, row-vector: world = S * R * T, Forward = -Z. For general 4x4 math
-// (projection, inverse, decompose) use Matrix4x4.
+// Right-handed, column-vector (WebGPU-native): world = T * R * S, Forward = -Z. For
+// general 4x4 math (projection, inverse, decompose) use Matrix4x4.
 
 import { Matrix4x4 } from './Matrix4x4'
 import { Quaternion } from './Quaternion'
@@ -83,9 +83,10 @@ export class Transform {
   }
 
   // Hierarchical compose: returns `child` expressed in this (parent) space.
+  // Column-vector, so parent * child (and (parent*child)*p == parent*(child*p)).
   // Goes through matrices, so non-uniform scale under rotation is baked (and
   // decompose cannot recover shear) - fine for rigid/uniform-scale nodes.
   mul(child: Transform): Transform {
-    return Transform.fromMatrix(child.toMatrix().mul(this.toMatrix()))
+    return Transform.fromMatrix(this.toMatrix().mul(child.toMatrix()))
   }
 }
