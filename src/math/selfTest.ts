@@ -1,8 +1,8 @@
-// Self-test ported from Fungine3D's Core/MathSelfTest.cpp (Ray tests omitted, since
-// Ray was not part of this port). Run with `npx tsx src/math/selfTest.ts` to verify
-// the TypeScript math matches the original DirectXMath-based behaviour.
+// Self-test ported from Fungine3D's Core/MathSelfTest.cpp. Run with
+// `npx tsx src/math/selfTest.ts` to verify the TypeScript math matches the
+// original DirectXMath-based behaviour.
 
-import { AABB, Matrix4x4, Quaternion, Transform, Vector3 } from './index'
+import { AABB, Matrix4x4, Quaternion, Ray, Transform, Vector3 } from './index'
 
 const PIDIV2 = Math.PI / 2
 const PIDIV4 = Math.PI / 4
@@ -125,6 +125,28 @@ assert(Transform.identity().forward().nearEquals(Vector3.forward()), 'identity f
     grow.valid() && grow.min.nearEquals(new Vector3(1, 2, 3)) && grow.max.nearEquals(new Vector3(1, 2, 3)),
     'encapsulate point',
   )
+}
+
+// --- Ray vs AABB --- slab test: front hit, miss, inside-origin, flat box.
+{
+  const unit = new AABB(new Vector3(-1, -1, -1), new Vector3(1, 1, 1))
+
+  // Straight down -Z from z=5 hits the +Z face at distance 4.
+  const hit = new Ray(new Vector3(0, 0, 5), new Vector3(0, 0, -1)).intersectAABB(unit)
+  assert(hit !== null && near(hit.t, 4.0) && hit.normal.nearEquals(new Vector3(0, 0, 1)), 'ray front hit')
+
+  // Parallel, offset above the box: miss.
+  const miss = new Ray(new Vector3(0, 5, 5), new Vector3(0, 0, -1)).intersectAABB(unit)
+  assert(miss === null, 'ray parallel miss')
+
+  // Origin inside: hit at t = 0.
+  const inside = new Ray(new Vector3(0, 0, 0), new Vector3(1, 0, 0)).intersectAABB(unit)
+  assert(inside !== null && near(inside.t, 0.0), 'ray inside origin')
+
+  // Zero-thickness (ground-like) box: a downward ray crosses the plane.
+  const flat = new AABB(new Vector3(-15, 0, -15), new Vector3(15, 0, 15))
+  const down = new Ray(new Vector3(0, 10, 0), new Vector3(0, -1, 0)).intersectAABB(flat)
+  assert(down !== null && near(down.t, 10.0), 'ray flat box')
 }
 
 // A little extra: FromToRotation and inverse.
