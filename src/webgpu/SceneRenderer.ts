@@ -33,6 +33,7 @@ export class SceneRenderer {
   private readonly pipeline: GPURenderPipeline
   private readonly frameUniforms: FrameUniforms
   private readonly batcher: MeshBatcher
+  private readonly canvas: HTMLCanvasElement
 
   private speed = 1 // spin multiplier (radians per second)
   private angle = 0
@@ -40,7 +41,8 @@ export class SceneRenderer {
   // Per-rect spin rates, so update() can drive their rotation (transform-only, no rebuild).
   private readonly spins = new Map<Rect, number>()
 
-  constructor(device: GPUDevice, format: GPUTextureFormat, _canvas: HTMLCanvasElement) {
+  constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement) {
+    this.canvas = canvas
     const frameLayout = createFrameBindGroupLayout(device)
     const objectLayout = createObjectBindGroupLayout(device)
     const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
@@ -48,35 +50,38 @@ export class SceneRenderer {
     this.frameUniforms = new FrameUniforms(device, frameLayout)
     this.batcher = new MeshBatcher(device, objectLayout)
 
-    // 2D orthographic camera looking down -Z, parented to the scene root.
+    // 2D orthographic camera looking down -Z, parented to the scene root. viewHeight is
+    // set from the canvas's CSS height every frame (see draw()), so 1 world unit = 1 CSS
+    // pixel on every device - device pixel ratio only changes how many physical pixels
+    // render each logical one, never the logical (world-unit) size.
     this.camera = new OrthographicCamera('camera')
     this.camera.active = true
-    this.camera.viewHeight = 10
     this.scene.root.addChild(this.camera)
 
-    // Two rects side by side, filled + stroked, spinning about their centers.
+    // Two rects side by side, filled + stroked, spinning about their centers. Sized in
+    // (now pixel-equivalent) world units.
     const left = this.scene.root.addChild(
       new Rect({
         name: 'rect-left',
-        x: -3,
+        x: -110,
         y: 0,
-        width: 3,
-        height: 3,
+        width: 160,
+        height: 160,
         fill: [0.9, 0.28, 0.24, 1],
         stroke: [0.5, 0.1, 0.08, 1],
-        strokeWidth: 0.25,
+        strokeWidth: 6,
       }),
     )
     const right = this.scene.root.addChild(
       new Rect({
         name: 'rect-right',
-        x: 2.5,
+        x: 120,
         y: 0,
-        width: 4,
-        height: 2.5,
+        width: 200,
+        height: 130,
         fill: [0.2, 0.45, 0.9, 1],
         stroke: [0.08, 0.18, 0.5, 1],
-        strokeWidth: 0.25,
+        strokeWidth: 6,
       }),
     )
     this.spins.set(left, 1)
@@ -88,10 +93,10 @@ export class SceneRenderer {
         name: 'circle',
         x: 0,
         y: 0,
-        radius: 2,
+        radius: 90,
         fill: [0.2, 0.72, 0.36, 1],
         stroke: [0.1, 0.4, 0.2, 1],
-        strokeWidth: 0.25,
+        strokeWidth: 6,
       }),
     )
 
@@ -123,6 +128,13 @@ export class SceneRenderer {
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
     const camera = this.scene.activeCamera
     if (!camera) return
+
+    // 1 world unit = 1 CSS pixel: use the canvas's logical (DPR-independent) height, not
+    // the device-pixel backing-store height passed in `height`. Aspect is unaffected -
+    // device pixels and CSS pixels share the same aspect ratio (dpr cancels).
+    if (camera instanceof OrthographicCamera) {
+      camera.viewHeight = Math.max(1, this.canvas.clientHeight)
+    }
 
     this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
 
