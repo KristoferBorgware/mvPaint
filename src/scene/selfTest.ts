@@ -1,10 +1,10 @@
-// Self-test for the ported scene graph (Node + Scene). Mirrors the non-GameObject
-// parts of Fungine3D's Scene/SceneSelfTest.cpp. Run with:
+// Self-test for the ported scene graph (Node / Container / Shape + Scene). Run with:
 //   npx tsx src/scene/selfTest.ts
 
+import { Container } from './Container'
 import { Node } from './Node'
 import { Scene } from './Scene'
-import { FreeFloatCamera } from '../camera/FreeFloatCamera'
+import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Transform } from '../math/Transform'
@@ -18,9 +18,8 @@ function assert(cond: boolean, msg: string): void {
 const eq = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i])
 
-// A minimal node carrying a local transform, so the hierarchy math can be checked
-// without a GameObject/Mesh (mirrors the C++ TestNode).
-class TransformNode extends Node {
+// A container carrying a local transform, so hierarchy math can be checked without GPU.
+class TransformGroup extends Container {
   readonly local = new Transform()
   override localMatrix(): Matrix4x4 {
     return this.local.toMatrix()
@@ -29,11 +28,11 @@ class TransformNode extends Node {
 
 // --- hierarchy composition: child_world == parent_local * child_local (column-vector) ---
 {
-  const parent = new TransformNode('parent')
+  const parent = new TransformGroup('parent')
   parent.local.position = new Vector3(10, 0, 0)
   parent.local.rotation = Quaternion.fromAxisAngle(Vector3.up(), Math.PI / 2)
 
-  const child = new TransformNode('child')
+  const child = new TransformGroup('child')
   child.local.position = new Vector3(0, 0, 5)
   parent.addChild(child)
 
@@ -53,8 +52,8 @@ class TransformNode extends Node {
 //    |   +- a2
 //    +- b
 {
-  const root = new Node('root')
-  const a = root.addChild(new Node('a'))
+  const root = new Container('root')
+  const a = root.addChild(new Container('a'))
   a.addChild(new Node('a1'))
   a.addChild(new Node('a2'))
   root.addChild(new Node('b'))
@@ -72,13 +71,16 @@ class TransformNode extends Node {
   const found = root.findByName('a2')
   assert(found !== null && found.name === 'a2', 'findByName hit')
   assert(root.findByName('missing') === null, 'findByName miss')
+
+  assert(root.removeChild(a) && root.children.length === 1, 'removeChild detaches')
+  assert(a.parent === null, 'removeChild clears parent')
 }
 
 // --- Scene resolves the active camera anywhere in the tree ---
 {
   const scene = new Scene()
-  const rig = scene.root.addChild(new Node('rig'))
-  const cam = rig.addChild(new FreeFloatCamera('main-cam'))
+  const rig = scene.root.addChild(new Container('rig'))
+  const cam = rig.addChild(new OrthographicCamera('main-cam'))
   cam.active = true
 
   assert(scene.activeCamera === null, 'no active camera before refresh')

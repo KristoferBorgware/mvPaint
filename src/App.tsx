@@ -35,7 +35,7 @@ export default function App() {
         }}
       >
         <Typography variant="h6" gutterBottom>
-          WebGPU Spinning Cube
+          WebGPU 2D Rects
         </Typography>
 
         {error ? (
@@ -60,8 +60,7 @@ export default function App() {
               />
             </Stack>
             <Typography variant="caption" color="text.secondary">
-              Free-fly camera — WASD move, Shift faster, right-mouse look, wheel /
-              middle-mouse zoom.
+              Two rects in the Z=0 plane, viewed through a 2D orthographic camera.
             </Typography>
           </Stack>
         )}
