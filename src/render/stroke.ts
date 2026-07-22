@@ -80,7 +80,7 @@ function emitArc(
     const a = startAngle + (sweep * k) / steps
     const x = center.x + Math.cos(a) * radius
     const y = center.y + Math.sin(a) * radius
-    const idx = sink.vertex(x, y, color)
+    const idx = sink.vertex(x, y, color, false)
     sink.triangle(hubIdx, prevIdx, idx)
     prevIdx = idx
   }
@@ -108,10 +108,10 @@ function strokeCap(
   if (cap === 'square') {
     const e0 = { x: p0.x + dx * s, y: p0.y + dy * s }
     const e1 = { x: p1.x + dx * s, y: p1.y + dy * s }
-    const i0 = sink.vertex(p0.x, p0.y, color)
-    const i1 = sink.vertex(p1.x, p1.y, color)
-    const ie0 = sink.vertex(e0.x, e0.y, color)
-    const ie1 = sink.vertex(e1.x, e1.y, color)
+    const i0 = sink.vertex(p0.x, p0.y, color, false)
+    const i1 = sink.vertex(p1.x, p1.y, color, false)
+    const ie0 = sink.vertex(e0.x, e0.y, color, false)
+    const ie1 = sink.vertex(e1.x, e1.y, color, false)
     sink.triangle(i0, ie0, ie1)
     sink.triangle(i0, ie1, i1)
     return
@@ -119,8 +119,8 @@ function strokeCap(
 
   // round: a half-circle from +normal to -normal, sweeping +π (which always passes
   // through the outward direction, since outward is exactly +90° from +normal).
-  const hubIdx = sink.vertex(p.x, p.y, color)
-  const firstIdx = sink.vertex(p0.x, p0.y, color)
+  const hubIdx = sink.vertex(p.x, p.y, color, false)
+  const firstIdx = sink.vertex(p0.x, p0.y, color, false)
   const startAngle = Math.atan2(ny, nx)
   emitArc(sink, color, p, s, startAngle, Math.PI, Math.max(2, roundSegments), hubIdx, firstIdx)
 }
@@ -162,10 +162,10 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const a = points[e]
     const b = points[(e + 1) % n]
     const [nx, ny] = norms[e]
-    const ia0 = sink.vertex(a.x + nx * s, a.y + ny * s, color)
-    const ia1 = sink.vertex(a.x - nx * s, a.y - ny * s, color)
-    const ib0 = sink.vertex(b.x + nx * s, b.y + ny * s, color)
-    const ib1 = sink.vertex(b.x - nx * s, b.y - ny * s, color)
+    const ia0 = sink.vertex(a.x + nx * s, a.y + ny * s, color, false)
+    const ia1 = sink.vertex(a.x - nx * s, a.y - ny * s, color, false)
+    const ib0 = sink.vertex(b.x + nx * s, b.y + ny * s, color, false)
+    const ib1 = sink.vertex(b.x - nx * s, b.y - ny * s, color, false)
     sink.triangle(ia0, ib0, ib1)
     sink.triangle(ia0, ib1, ia1)
   }
@@ -192,11 +192,11 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const innerIn = { x: p.x - inNx * s * outerSign, y: p.y - inNy * s * outerSign }
     const innerOut = { x: p.x - outNx * s * outerSign, y: p.y - outNy * s * outerSign }
 
-    const pIdx = sink.vertex(p.x, p.y, color)
+    const pIdx = sink.vertex(p.x, p.y, color, false)
 
     // Concave side: direct fill (see the module-level note on overlap at sharp turns).
-    const iInIdx = sink.vertex(innerIn.x, innerIn.y, color)
-    const iOutIdx = sink.vertex(innerOut.x, innerOut.y, color)
+    const iInIdx = sink.vertex(innerIn.x, innerIn.y, color, false)
+    const iOutIdx = sink.vertex(innerOut.x, innerOut.y, color, false)
     sink.triangle(pIdx, iInIdx, iOutIdx)
 
     // Convex side: miter (falling back to bevel past the limit), round, or bevel.
@@ -206,9 +206,9 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       const miterRatio = cosHalf > 1e-6 ? 1 / cosHalf : Infinity
       if (miterRatio <= miterLimit) {
         const miterLen = s * miterRatio
-        const mIdx = sink.vertex(p.x + bisector[0] * miterLen, p.y + bisector[1] * miterLen, color)
-        const oInIdx = sink.vertex(outerIn.x, outerIn.y, color)
-        const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color)
+        const mIdx = sink.vertex(p.x + bisector[0] * miterLen, p.y + bisector[1] * miterLen, color, false)
+        const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
+        const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color, false)
         sink.triangle(pIdx, oInIdx, mIdx)
         sink.triangle(pIdx, mIdx, oOutIdx)
         continue
@@ -223,14 +223,14 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       while (sweep > Math.PI) sweep -= TWO_PI
       while (sweep < -Math.PI) sweep += TWO_PI
       const steps = Math.max(1, Math.ceil((Math.abs(sweep) / Math.PI) * roundSegments))
-      const oInIdx = sink.vertex(outerIn.x, outerIn.y, color)
+      const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
       emitArc(sink, color, p, s, a0, sweep, steps, pIdx, oInIdx)
       continue
     }
 
     // bevel (default, and the miter-limit fallback)
-    const oInIdx = sink.vertex(outerIn.x, outerIn.y, color)
-    const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color)
+    const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
+    const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color, false)
     sink.triangle(pIdx, oInIdx, oOutIdx)
   }
 

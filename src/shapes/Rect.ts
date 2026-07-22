@@ -1,9 +1,9 @@
-// Rect - a filled, optionally stroked rectangle (Konva-style). Centered at (x, y) in
-// the Z=0 plane, sized width×height, rotatable about its center (Z). It owns no GPU
-// resources: it tessellates a fill quad into the mesh lane and strokes its own outline
-// (a 4-corner contour) through the shared general-purpose stroker. Position/rotation
-// ride the per-object transform (size lives in the geometry, so the local matrix
-// carries no scale).
+// Rect - a filled, optionally stroked rectangle. Centered at (x, y) in the Z=0 plane,
+// sized width×height, rotatable about its center (Z). It owns no GPU resources: it
+// tessellates a fill quad in the mesh lane (fill color or gradient, via the inherited
+// Shape fill API) and strokes its own outline (a 4-corner contour) through the shared
+// general-purpose stroker. Position/rotation ride the per-object transform (size lives
+// in the geometry, so the local matrix carries no scale).
 
 import { Shape } from '../scene/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -33,7 +33,6 @@ export class Rect extends Shape {
   width: number
   height: number
   rotation: number
-  fill: RGBA
   stroke: RGBA
   strokeWidth: number
 
@@ -60,18 +59,20 @@ export class Rect extends Shape {
     const hw = this.width / 2
     const hh = this.height / 2
 
-    // Fill: centered quad (two triangles).
-    const f0 = sink.vertex(-hw, -hh, this.fill)
-    const f1 = sink.vertex(hw, -hh, this.fill)
-    const f2 = sink.vertex(hw, hh, this.fill)
-    const f3 = sink.vertex(-hw, hh, this.fill)
+    // Fill: centered quad (two triangles). The vertex color is a placeholder when
+    // fillPriority selects a gradient - the fragment shader computes the displayed
+    // color from the object's gradient parameters instead.
+    const f0 = sink.vertex(-hw, -hh, this.fill, true)
+    const f1 = sink.vertex(hw, -hh, this.fill, true)
+    const f2 = sink.vertex(hw, hh, this.fill, true)
+    const f3 = sink.vertex(-hw, hh, this.fill, true)
     sink.triangle(f0, f1, f2)
     sink.triangle(f0, f2, f3)
 
     // Stroke: the 4-corner outline, through the shared contour stroker. A rectangle's
     // corners are all 90 degrees, so a miter join here always lands exactly on the
-    // diagonal bisector - equivalent to the old hand-rolled "offset each corner by
-    // ±strokeWidth/2 in x and y independently" trick, just expressed generally.
+    // diagonal bisector - equivalent to offsetting each corner by ±strokeWidth/2 in x
+    // and y independently.
     if (this.strokeWidth > 0) {
       const corners = [
         { x: -hw, y: -hh },

@@ -1,9 +1,10 @@
-// Circle - a filled, optionally stroked circle (Konva-style). Centered at (x, y) in the
-// Z=0 plane. Tessellated in the mesh lane: a triangle fan for the fill; the stroke is
-// the same n-point rim contour run through the shared general-purpose stroker (round
-// join - the exact offset for a smooth curve, with no faceting overshoot even at low
-// segment counts, unlike miter). The segment count is chosen adaptively from the
-// radius so it stays smooth without wasting triangles on tiny circles.
+// Circle - a filled, optionally stroked circle. Centered at (x, y) in the Z=0 plane.
+// Tessellated in the mesh lane: a triangle fan for the fill (fill color or gradient,
+// via the inherited Shape fill API); the stroke is the same n-point rim contour run
+// through the shared general-purpose stroker (round join - the exact offset for a
+// smooth curve, with no faceting overshoot even at low segment counts, unlike miter).
+// The segment count is chosen adaptively from the radius so it stays smooth without
+// wasting triangles on tiny circles.
 //
 // Note: adaptivity here is by WORLD radius (tessellate() has no camera/zoom context).
 // True screen-aware density (re-tessellate when the on-screen size changes) is a
@@ -44,7 +45,6 @@ export class Circle extends Shape {
   x: number
   y: number
   radius: number
-  fill: RGBA
   stroke: RGBA
   strokeWidth: number
   segments?: number
@@ -69,14 +69,16 @@ export class Circle extends Shape {
     const n = this.segments ?? circleSegments(this.radius)
     const r = this.radius
 
-    // Fill: a triangle fan from the center to n perimeter points.
+    // Fill: a triangle fan from the center to n perimeter points. The vertex color is a
+    // placeholder when fillPriority selects a gradient - the fragment shader computes
+    // the displayed color from the object's gradient parameters instead.
     const rim: Point2[] = []
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
       rim.push({ x: Math.cos(a) * r, y: Math.sin(a) * r })
     }
-    const center = sink.vertex(0, 0, this.fill)
-    const rimIdx = rim.map((p) => sink.vertex(p.x, p.y, this.fill))
+    const center = sink.vertex(0, 0, this.fill, true)
+    const rimIdx = rim.map((p) => sink.vertex(p.x, p.y, this.fill, true))
     for (let i = 0; i < n; i++) {
       sink.triangle(center, rimIdx[i], rimIdx[(i + 1) % n])
     }

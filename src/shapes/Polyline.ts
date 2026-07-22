@@ -1,5 +1,5 @@
-// Polyline - a stroked (no fill), open or closed path (Konva-style Line). Points are in
-// local space, positioned by (x, y); line style matches the Canvas2D API: lineJoin
+// Polyline - a stroked (no fill), open or closed path. Points are in local space,
+// positioned by (x, y); line style matches the Canvas2D API: lineJoin
 // ('miter'|'round'|'bevel'), lineCap ('butt'|'round'|'square', open paths only), and
 // miterLimit. Delegates entirely to the shared contour stroker - this is the shape
 // that most directly exercises "any contour, with any join/cap style".

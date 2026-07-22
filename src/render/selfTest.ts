@@ -1,11 +1,20 @@
 // Self-test for the mesh-lane data path (no GPU). Tessellates shapes through a
-// capturing MeshSink and asserts the vertex/index/color/objectId layout, the format
-// constants, and the general contour stroker (joins/caps/multi-contour).
+// capturing MeshSink and asserts the vertex/index/color/isFill layout, the format
+// constants, the fill-type encoding, and the general contour stroker (joins/caps/
+// multi-contour). WGSL fragment-shader math (gradient evaluation) cannot run without a
+// GPU and is not covered here - it's checked by numeric reference calculations instead.
 // Run with: npx tsx src/render/selfTest.ts
 
 import { Rect } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
-import { MESH_VERTEX_LAYOUT, MESH_VERTEX_STRIDE, OBJECT_STRIDE, type MeshSink, type RGBA } from './meshFormat'
+import {
+  FILL_TYPE_CODE,
+  MESH_VERTEX_LAYOUT,
+  MESH_VERTEX_STRIDE,
+  OBJECT_STRIDE,
+  type MeshSink,
+  type RGBA,
+} from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { Shape } from '../scene/Shape'
 import { Vector3 } from '../math/Vector3'
@@ -20,6 +29,7 @@ interface CapturedVertex {
   x: number
   y: number
   color: RGBA
+  isFill: boolean
 }
 interface Captured {
   verts: CapturedVertex[]
@@ -30,8 +40,8 @@ function capturingSink(): { sink: MeshSink } & Captured {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
-    vertex: (x, y, color) => {
-      verts.push({ x, y, color })
+    vertex: (x, y, color, isFill) => {
+      verts.push({ x, y, color, isFill })
       return verts.length - 1
     },
     triangle: (a, b, c) => {
@@ -55,7 +65,7 @@ const hasVertexNear = (verts: CapturedVertex[], x: number, y: number, eps = 1e-6
 // --- format constants match the WGSL structs ---
 assert(MESH_VERTEX_STRIDE === 28, 'mesh vertex stride is 28 bytes')
 assert(MESH_VERTEX_LAYOUT.arrayStride === MESH_VERTEX_STRIDE, 'layout stride matches')
-assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
+assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient material (208B)')
 
 // --- stroked rect: fill (4v/2t) + a 4-corner miter-joined contour ---
 {
@@ -68,11 +78,14 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   assert(verts.length === 4 + 40, 'stroked rect: 4 fill + 40 general-stroker vertices')
   assert(tris.length === 2 + 20, 'stroked rect: 2 fill + 20 general-stroker triangles')
 
-  // Fill verts (still emitted first, unchanged) carry the fill color and sit at (±w/2,±h/2).
+  // Fill verts (still emitted first, unchanged) carry the fill color, are marked
+  // isFill (gradient-eligible), and sit at (±w/2,±h/2).
   assert(verts.slice(0, 4).every((v) => v.color === fill), 'first 4 verts are fill-colored')
+  assert(verts.slice(0, 4).every((v) => v.isFill), 'first 4 verts are marked isFill')
   assert(near(verts[0].x, -2) && near(verts[0].y, -1), 'fill corner at (-w/2,-h/2)')
   assert(near(verts[2].x, 2) && near(verts[2].y, 1), 'fill corner at (+w/2,+h/2)')
   assert(verts.slice(4).every((v) => v.color === stroke), 'remaining verts are stroke-colored')
+  assert(verts.slice(4).every((v) => !v.isFill), 'stroke verts are never marked isFill (no gradient on stroke)')
 
   // A 90° miter offsets the OUTER (convex) corner by strokeWidth/2 in x AND y
   // independently - the exact geometry the old hand-rolled Rect stroke produced, now
@@ -109,7 +122,9 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   assert(near(verts[0].x, 0) && near(verts[0].y, 0), 'fan center at origin')
   assert(near(Math.hypot(verts[1].x, verts[1].y), r), 'first rim vertex is at the radius')
   assert(verts.slice(0, n + 1).every((v) => v.color === fill), 'fan verts are fill-colored')
+  assert(verts.slice(0, n + 1).every((v) => v.isFill), 'fan verts are marked isFill')
   assert(verts.slice(n + 1).every((v) => v.color === stroke), 'stroke verts are stroke-colored')
+  assert(verts.slice(n + 1).every((v) => !v.isFill), 'stroke verts are never marked isFill')
   // The round join tracks the true offset circle closely (not exactly, since the round
   // arc is discretized per joint and the straight segment quads facet slightly inward -
   // the same faceting any polygon approximation of a circle has). Check the overall
@@ -133,6 +148,39 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   // A local corner at (w/2, h/2) = (5,5) maps to center + corner (translation only).
   const p = world.transformPoint(new Vector3(5, 5, 0))
   assert(near(p.x, 10) && near(p.y, 2), 'no scale: corner offset is unscaled (5,5)->(10,2)')
+}
+
+// ============================================================================
+// Shape-level fill/gradient API (src/scene/Shape.ts) and its numeric encoding.
+// ============================================================================
+
+// --- fill-type encoding matches the shader's expected FILL_COLOR/LINEAR/RADIAL values ---
+{
+  assert(FILL_TYPE_CODE.color === 0, 'solid color encodes to fill type 0')
+  assert(FILL_TYPE_CODE['linear-gradient'] === 1, 'linear gradient encodes to fill type 1')
+  assert(FILL_TYPE_CODE['radial-gradient'] === 2, 'radial gradient encodes to fill type 2')
+}
+
+// --- a shape defaults to a solid color fill with empty gradient stops ---
+{
+  const rect = new Rect({ fill: [0.5, 0.5, 0.5, 1] })
+  assert(rect.fillPriority === 'color', 'default fillPriority is color')
+  assert(rect.fillLinearGradientColorStops.length === 0, 'default linear stops are empty')
+  assert(rect.fillRadialGradientColorStops.length === 0, 'default radial stops are empty')
+  assert(rect.fillRadialGradientStartRadius === 0, 'default radial start radius is 0')
+
+  // Switching fillPriority is a plain property assignment (Shape-level API), and it
+  // doesn't affect what tessellate() emits per vertex - the fragment shader decides
+  // whether to use the vertex color or a gradient, based on the object's fillType.
+  rect.fillPriority = 'linear-gradient'
+  rect.fillLinearGradientStartPoint = { x: -1, y: 0 }
+  rect.fillLinearGradientEndPoint = { x: 1, y: 0 }
+  rect.fillLinearGradientColorStops = [
+    { offset: 0, color: [1, 0, 0, 1] },
+    { offset: 1, color: [0, 0, 1, 1] },
+  ]
+  assert(rect.fillPriority === 'linear-gradient', 'fillPriority is mutable')
+  assert(rect.fillLinearGradientColorStops.length === 2, 'gradient stops are mutable')
 }
 
 // ============================================================================

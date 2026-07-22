@@ -1,12 +1,29 @@
-// MeshBatcher - owns the shared vertex/index buffers, the per-object transform storage
-// buffer, and the group(1) bind group. Shapes tessellate into it once (rebuild); their
-// world matrices are refreshed every frame (updateTransforms) without touching geometry.
-// One lane = one drawIndexed. Geometry buffers are recreated on rebuild (rebuilds are
-// rare); per-slice incremental updates and capacity pooling are a later optimization.
+// MeshBatcher - owns the shared vertex/index buffers, the per-object storage buffer
+// (transform + fill/gradient material), and the group(1) bind group. Shapes tessellate
+// into it once (rebuild); each object's transform and material are refreshed every
+// frame (updateObjects) without touching geometry, so animating a position, rotation,
+// or gradient parameter never requires a rebuild. One lane = one drawIndexed. Geometry
+// buffers are recreated on rebuild (rebuilds are rare); per-slice incremental updates
+// and capacity pooling are a later optimization.
 
 import type { Shape } from '../scene/Shape'
-import type { MeshSink } from './meshFormat'
-import { MESH_VERTEX_FLOATS, MESH_VERTEX_STRIDE, OBJECT_FLOATS, OBJECT_STRIDE } from './meshFormat'
+import {
+  FILL_TYPE_CODE,
+  MAX_GRADIENT_STOPS,
+  MESH_FILL_BIT,
+  MESH_VERTEX_FLOATS,
+  MESH_VERTEX_STRIDE,
+  OBJECT_FILL_TYPE_OFFSET,
+  OBJECT_GRADIENT_END_OFFSET,
+  OBJECT_GRADIENT_END_RADIUS_OFFSET,
+  OBJECT_GRADIENT_START_OFFSET,
+  OBJECT_GRADIENT_START_RADIUS_OFFSET,
+  OBJECT_STOP_COLORS_OFFSET,
+  OBJECT_STOP_COUNT_OFFSET,
+  OBJECT_STOP_POSITIONS_OFFSET,
+  OBJECT_STRIDE,
+  type MeshSink,
+} from './meshFormat'
 
 export class MeshBatcher {
   private readonly device: GPUDevice
@@ -28,7 +45,7 @@ export class MeshBatcher {
   /** Re-tessellate all shapes (objectId = index) into the shared buffers and upload. */
   rebuild(shapes: readonly Shape[]): void {
     const posColor: number[] = [] // 6 per vertex: x,y,r,g,b,a
-    const objectIds: number[] = [] // 1 per vertex
+    const packedIds: number[] = [] // 1 per vertex: object index, top bit = isFill
     const indices: number[] = []
     let vertexCount = 0
 
@@ -36,9 +53,9 @@ export class MeshBatcher {
       if (!shape.visible) return
       const start = vertexCount
       const sink: MeshSink = {
-        vertex: (x, y, color) => {
+        vertex: (x, y, color, isFill) => {
           posColor.push(x, y, color[0], color[1], color[2], color[3])
-          objectIds.push(objectId)
+          packedIds.push(isFill ? objectId | MESH_FILL_BIT : objectId)
           return vertexCount++ - start
         },
         triangle: (a, b, c) => {
@@ -48,7 +65,7 @@ export class MeshBatcher {
       shape.tessellate(sink)
     })
 
-    // Pack the interleaved vertex buffer (floats for pos/color, u32 bits for objectId).
+    // Pack the interleaved vertex buffer (floats for pos/color, u32 bits for packedId).
     const vtx = new ArrayBuffer(vertexCount * MESH_VERTEX_STRIDE)
     const f32 = new Float32Array(vtx)
     const u32 = new Uint32Array(vtx)
@@ -60,7 +77,7 @@ export class MeshBatcher {
       f32[b + 3] = posColor[i * 6 + 3]
       f32[b + 4] = posColor[i * 6 + 4]
       f32[b + 5] = posColor[i * 6 + 5]
-      u32[b + 6] = objectIds[i]
+      u32[b + 6] = packedIds[i]
     }
     const idx = new Uint32Array(indices)
 
@@ -99,15 +116,63 @@ export class MeshBatcher {
     })
   }
 
-  /** Refresh each shape's world matrix into the object buffer (cheap, per frame). */
-  updateTransforms(shapes: readonly Shape[]): void {
+  /**
+   * Refresh every object's transform and fill/gradient material into the storage
+   * buffer (cheap, per frame). Each object's record is OBJECT_STRIDE bytes; f32/u32
+   * views share one ArrayBuffer so integer fields (fillType, stopCount) can be written
+   * alongside the float fields (matrix, gradient points/radii, stops) at their exact
+   * byte offsets.
+   */
+  updateObjects(shapes: readonly Shape[]): void {
     if (!this.objectBuffer || this.objectCount === 0) return
-    const data = new Float32Array(this.objectCount * OBJECT_FLOATS)
     const n = Math.min(this.objectCount, shapes.length)
+    const buf = new ArrayBuffer(this.objectCount * OBJECT_STRIDE)
+    const f32 = new Float32Array(buf)
+    const u32 = new Uint32Array(buf)
+
     for (let i = 0; i < n; i++) {
-      data.set(shapes[i].worldMatrix().toGPU(), i * OBJECT_FLOATS)
+      const shape = shapes[i]
+      const floatBase = (i * OBJECT_STRIDE) / 4
+
+      f32.set(shape.worldMatrix().toGPU(), floatBase)
+
+      u32[floatBase + OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[shape.fillPriority]
+
+      const stops =
+        shape.fillPriority === 'linear-gradient'
+          ? shape.fillLinearGradientColorStops
+          : shape.fillPriority === 'radial-gradient'
+            ? shape.fillRadialGradientColorStops
+            : []
+      const stopCount = Math.min(stops.length, MAX_GRADIENT_STOPS)
+      u32[floatBase + OBJECT_STOP_COUNT_OFFSET / 4] = stopCount
+
+      if (shape.fillPriority === 'linear-gradient') {
+        f32[floatBase + OBJECT_GRADIENT_START_OFFSET / 4] = shape.fillLinearGradientStartPoint.x
+        f32[floatBase + OBJECT_GRADIENT_START_OFFSET / 4 + 1] = shape.fillLinearGradientStartPoint.y
+        f32[floatBase + OBJECT_GRADIENT_END_OFFSET / 4] = shape.fillLinearGradientEndPoint.x
+        f32[floatBase + OBJECT_GRADIENT_END_OFFSET / 4 + 1] = shape.fillLinearGradientEndPoint.y
+      } else if (shape.fillPriority === 'radial-gradient') {
+        f32[floatBase + OBJECT_GRADIENT_START_OFFSET / 4] = shape.fillRadialGradientStartPoint.x
+        f32[floatBase + OBJECT_GRADIENT_START_OFFSET / 4 + 1] = shape.fillRadialGradientStartPoint.y
+        f32[floatBase + OBJECT_GRADIENT_START_RADIUS_OFFSET / 4] = shape.fillRadialGradientStartRadius
+        f32[floatBase + OBJECT_GRADIENT_END_OFFSET / 4] = shape.fillRadialGradientEndPoint.x
+        f32[floatBase + OBJECT_GRADIENT_END_OFFSET / 4 + 1] = shape.fillRadialGradientEndPoint.y
+        f32[floatBase + OBJECT_GRADIENT_END_RADIUS_OFFSET / 4] = shape.fillRadialGradientEndRadius
+      }
+
+      for (let s = 0; s < stopCount; s++) {
+        f32[floatBase + OBJECT_STOP_POSITIONS_OFFSET / 4 + s] = stops[s].offset
+        const [r, g, bch, a] = stops[s].color
+        const colorBase = floatBase + OBJECT_STOP_COLORS_OFFSET / 4 + s * 4
+        f32[colorBase + 0] = r
+        f32[colorBase + 1] = g
+        f32[colorBase + 2] = bch
+        f32[colorBase + 3] = a
+      }
     }
-    this.device.queue.writeBuffer(this.objectBuffer, 0, data as BufferSource)
+
+    this.device.queue.writeBuffer(this.objectBuffer, 0, buf)
   }
 
   draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup): void {

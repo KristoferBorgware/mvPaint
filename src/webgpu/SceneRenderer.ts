@@ -1,6 +1,6 @@
 // SceneRenderer - the 2D shape scene. It builds a Scene tree (root -> camera, root ->
 // shapes) and renders by collecting visible shapes in painter order and handing them to
-// the mesh renderer (frame uniforms + instance batcher + one mesh pipeline). It does NOT
+// the mesh renderer (frame uniforms + mesh batcher + one mesh pipeline). It does NOT
 // own the GPU context, resize observer, or frame loop - those are system components
 // wired together by createSceneRenderer() below.
 
@@ -73,6 +73,15 @@ export class SceneRenderer {
         strokeWidth: 6,
       }),
     )
+    // Linear gradient across the rect's own diagonal, in its local (pre-transform)
+    // space - it moves and rotates with the rect.
+    left.fillPriority = 'linear-gradient'
+    left.fillLinearGradientStartPoint = { x: -80, y: -80 }
+    left.fillLinearGradientEndPoint = { x: 80, y: 80 }
+    left.fillLinearGradientColorStops = [
+      { offset: 0, color: [1, 0.9, 0.3, 1] },
+      { offset: 1, color: [0.9, 0.1, 0.2, 1] },
+    ]
     const right = this.scene.root.addChild(
       new Rect({
         name: 'rect-right',
@@ -89,7 +98,7 @@ export class SceneRenderer {
     this.spins.set(right, -1.4)
 
     // A circle centered between the rects, drawn last so it layers on top (painter order).
-    this.scene.root.addChild(
+    const circle = this.scene.root.addChild(
       new Circle({
         name: 'circle',
         x: 0,
@@ -100,6 +109,17 @@ export class SceneRenderer {
         strokeWidth: 6,
       }),
     )
+    // Radial gradient from the circle's own center out to its own radius, in local
+    // space - a concentric center-to-edge fade.
+    circle.fillPriority = 'radial-gradient'
+    circle.fillRadialGradientStartPoint = { x: 0, y: 0 }
+    circle.fillRadialGradientStartRadius = 0
+    circle.fillRadialGradientEndPoint = { x: 0, y: 0 }
+    circle.fillRadialGradientEndRadius = 90
+    circle.fillRadialGradientColorStops = [
+      { offset: 0, color: [0.9, 1, 0.6, 1] },
+      { offset: 1, color: [0.1, 0.5, 0.2, 1] },
+    ]
 
     // An open zigzag polyline below the shapes, demonstrating the general contour
     // stroker on a non-rectangular, non-circular path: round join + round caps
@@ -136,7 +156,7 @@ export class SceneRenderer {
     }
   }
 
-  /** Collect visible shapes in painter (traversal) order; index becomes the objectId. */
+  /** Collect visible shapes in painter (traversal) order; index becomes the object id. */
   private collectShapes(): Shape[] {
     const shapes: Shape[] = []
     this.scene.root.traversePreOrder((node) => {
@@ -164,7 +184,7 @@ export class SceneRenderer {
       this.batcher.rebuild(shapes)
       this.geometryDirty = false
     }
-    this.batcher.updateTransforms(shapes)
+    this.batcher.updateObjects(shapes)
 
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup)
@@ -184,9 +204,9 @@ export interface SceneRendererHandle {
 
 /**
  * Composition root: wires the GPU context, resize observer and frame loop (system
- * components) to a SceneRenderer, and starts rendering two filled + stroked rects on a
- * white background through a 2D orthographic camera, MSAA 4x. Throws if WebGPU is
- * unavailable.
+ * components) to a SceneRenderer, and starts rendering the scene (gradient-filled and
+ * stroked shapes, plus a stroked polyline) on a white background through a 2D
+ * orthographic camera, MSAA 4x. Throws if WebGPU is unavailable.
  */
 export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<SceneRendererHandle> {
   const gpu = await createGpuContext(canvas)
