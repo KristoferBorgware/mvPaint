@@ -11,8 +11,9 @@ import { Matrix4x4 } from '../math/Matrix4x4'
 import { Ray } from '../math/Ray'
 import { Vector3 } from '../math/Vector3'
 import { Vector4 } from '../math/Vector4'
+import { Node } from '../scene/Node'
 
-export class Camera {
+export class Camera extends Node {
   /** The scene renders through the camera whose flag is set. */
   active = false
 
@@ -22,6 +23,10 @@ export class Camera {
   fovY = Math.PI / 4
   nearZ = 0.1
   farZ = 500
+
+  constructor(name = '') {
+    super(name)
+  }
 
   view(): Matrix4x4 {
     return Matrix4x4.lookAtRH(this.eye, this.target, this.up)
@@ -57,8 +62,8 @@ export class Camera {
     return new Ray(nearW, farW.sub(nearW).safeNormalized(Vector3.forward()))
   }
 
-  /** Camera world matrix (inverse view). Rendering itself uses view(). */
-  localMatrix(): Matrix4x4 {
+  /** Camera world matrix (inverse view) - the Node localMatrix() seam. */
+  override localMatrix(): Matrix4x4 {
     return this.view().inverse()
   }
 }
