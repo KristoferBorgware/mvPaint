@@ -1,58 +1,28 @@
-// Rect - a filled, optionally stroked rectangle. Centered at (x, y) in the Z=0 plane,
-// sized width×height, rotatable about its center (Z). It owns no GPU resources: it
-// tessellates a fill quad in the mesh lane (fill color or gradient, via the inherited
-// Shape fill API) and strokes its own outline (a 4-corner contour) through the shared
-// general-purpose stroker. Position/rotation ride the per-object transform (size lives
-// in the geometry, so the local matrix carries no scale).
+// Rect - a filled, optionally stroked rectangle. Centered at (x, y) in the Z=0 plane
+// (before any offset), sized width×height, transformed by the common Shape parameters
+// (position, scale, rotation, offset). It owns no GPU resources: it tessellates a fill
+// quad in the mesh lane (fill color or gradient, via the inherited Shape fill API) and
+// strokes its own outline (a 4-corner contour) through the shared general-purpose
+// stroker.
 
-import { Shape } from '../scene/Shape'
-import { Matrix4x4 } from '../math/Matrix4x4'
-import { Quaternion } from '../math/Quaternion'
-import { Vector3 } from '../math/Vector3'
+import { Shape, type ShapeOptions } from '../scene/Shape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokePolyline } from '../render/stroke'
 
-export interface RectOptions {
-  name?: string
-  /** Center position in world units. */
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  /** Rotation about the center (radians, about +Z). */
-  rotation?: number
-  fill?: RGBA
+export interface RectOptions extends ShapeOptions {
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
   strokeWidth?: number
 }
 
 export class Rect extends Shape {
-  x: number
-  y: number
-  width: number
-  height: number
-  rotation: number
   stroke: RGBA
   strokeWidth: number
 
   constructor(options: RectOptions = {}) {
-    super(options.name)
-    this.x = options.x ?? 0
-    this.y = options.y ?? 0
-    this.width = options.width ?? 1
-    this.height = options.height ?? 1
-    this.rotation = options.rotation ?? 0
-    this.fill = options.fill ?? [0, 0, 0, 1]
+    super({ ...options, width: options.width ?? 1, height: options.height ?? 1 })
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0
-  }
-
-  // Position + rotation only; the rect's size is baked into its geometry.
-  override localMatrix(): Matrix4x4 {
-    return Matrix4x4.translation(new Vector3(this.x, this.y, 0)).mul(
-      Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)),
-    )
   }
 
   override tessellate(sink: MeshSink): void {

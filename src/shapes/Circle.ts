@@ -1,18 +1,22 @@
-// Circle - a filled, optionally stroked circle. Centered at (x, y) in the Z=0 plane.
-// Tessellated in the mesh lane: a triangle fan for the fill (fill color or gradient,
-// via the inherited Shape fill API); the stroke is the same n-point rim contour run
-// through the shared general-purpose stroker (round join - the exact offset for a
-// smooth curve, with no faceting overshoot even at low segment counts, unlike miter).
-// The segment count is chosen adaptively from the radius so it stays smooth without
-// wasting triangles on tiny circles.
+// Circle - a filled, optionally stroked circle. Centered at (x, y) in the Z=0 plane
+// (before any offset), transformed by the common Shape parameters (position, scale,
+// rotation, offset) - a non-uniform scaleX/scaleY turns it into an ellipse. Tessellated
+// in the mesh lane: a triangle fan for the fill (fill color or gradient, via the
+// inherited Shape fill API); the stroke is the same n-point rim contour run through the
+// shared general-purpose stroker (round join - the exact offset for a smooth curve,
+// with no faceting overshoot even at low segment counts, unlike miter). The segment
+// count is chosen adaptively from the radius so it stays smooth without wasting
+// triangles on tiny circles.
 //
-// Note: adaptivity here is by WORLD radius (tessellate() has no camera/zoom context).
-// True screen-aware density (re-tessellate when the on-screen size changes) is a
-// follow-up once the batcher can pass pixels-per-unit into tessellation.
+// width/height are derived from radius (width = height = radius*2) rather than stored
+// independently - overriding the inherited Shape accessors so `circle.width = 100` and
+// `circle.radius` stay consistent with each other.
+//
+// Note: segment-count adaptivity here is by WORLD radius (tessellate() has no camera/
+// zoom context). True screen-aware density (re-tessellate when the on-screen size
+// changes) is a follow-up once the batcher can pass pixels-per-unit into tessellation.
 
-import { Shape } from '../scene/Shape'
-import { Matrix4x4 } from '../math/Matrix4x4'
-import { Vector3 } from '../math/Vector3'
+import { Shape, type ShapeOptions } from '../scene/Shape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokePolyline, type Point2 } from '../render/stroke'
 
@@ -28,12 +32,8 @@ export function circleSegments(radius: number, tolerance = 0.02, min = 12, max =
   return Math.min(max, Math.max(min, n))
 }
 
-export interface CircleOptions {
-  name?: string
-  x?: number
-  y?: number
+export interface CircleOptions extends ShapeOptions {
   radius?: number
-  fill?: RGBA
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
   strokeWidth?: number
@@ -42,27 +42,39 @@ export interface CircleOptions {
 }
 
 export class Circle extends Shape {
-  x: number
-  y: number
   radius: number
   stroke: RGBA
   strokeWidth: number
   segments?: number
 
   constructor(options: CircleOptions = {}) {
-    super(options.name)
-    this.x = options.x ?? 0
-    this.y = options.y ?? 0
-    this.radius = options.radius ?? 1
-    this.fill = options.fill ?? [0, 0, 0, 1]
+    super(options)
+    // radius is authoritative over width/height when more than one is given.
+    if (options.radius !== undefined) {
+      this.radius = options.radius
+    } else if (options.width !== undefined) {
+      this.radius = options.width / 2
+    } else if (options.height !== undefined) {
+      this.radius = options.height / 2
+    } else {
+      this.radius = 1
+    }
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0
     this.segments = options.segments
   }
 
-  // Position only; a circle is rotation-symmetric and its size lives in the geometry.
-  override localMatrix(): Matrix4x4 {
-    return Matrix4x4.translation(new Vector3(this.x, this.y, 0))
+  override get width(): number {
+    return this.radius * 2
+  }
+  override set width(value: number) {
+    this.radius = value / 2
+  }
+  override get height(): number {
+    return this.radius * 2
+  }
+  override set height(value: number) {
+    this.radius = value / 2
   }
 
   override tessellate(sink: MeshSink): void {

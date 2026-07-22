@@ -17,6 +17,8 @@ import {
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { Shape } from '../scene/Shape'
+import { Matrix4x4 } from '../math/Matrix4x4'
+import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
 
 let count = 0
@@ -148,6 +150,62 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   // A local corner at (w/2, h/2) = (5,5) maps to center + corner (translation only).
   const p = world.transformPoint(new Vector3(5, 5, 0))
   assert(near(p.x, 10) && near(p.y, 2), 'no scale: corner offset is unscaled (5,5)->(10,2)')
+}
+
+// --- scaleX/scaleY scale local geometry about the shape's own local origin ---
+{
+  const rect = new Rect({ x: 100, y: 50, width: 10, height: 10, scaleX: 2, scaleY: 3 })
+  const world = rect.worldMatrix()
+  // Local corner (5,5) scales to (10,15), then translates by (x,y).
+  const p = world.transformPoint(new Vector3(5, 5, 0))
+  assert(near(p.x, 110) && near(p.y, 65), 'scaleX/scaleY scale local geometry independently')
+}
+
+// --- offsetX/offsetY shift the pivot (applied before scale/rotation, translation-only
+//     case is unambiguous regardless of rotation sign convention) ---
+{
+  const rect = new Rect({ x: 100, y: 50, offsetX: 4, offsetY: -6 })
+  const world = rect.worldMatrix()
+  // Local origin (0,0) -> subtract offset -> (-4,6) -> translate by (x,y) -> (96,56).
+  const p = world.transformPoint(new Vector3(0, 0, 0))
+  assert(near(p.x, 96) && near(p.y, 56), 'offset shifts the pivot: origin -> (x-offsetX, y-offsetY)')
+}
+
+// --- localMatrix composes translate(x,y) * rotate(rotation) * scale(scaleX,scaleY) *
+//     translate(-offsetX,-offsetY), matching the composition order of an established
+//     2D canvas library's Node transform. Cross-checked against an independently
+//     assembled equivalent using the same Matrix4x4 primitives, so this specifically
+//     verifies ORDER (rotation sign/trig itself is covered by the math self-test). ---
+{
+  const rect = new Rect({ x: 40, y: -10, rotation: 0.7, scaleX: 2, scaleY: 0.5, offsetX: 3, offsetY: -2 })
+  const expected = Matrix4x4.translation(new Vector3(40, -10, 0))
+    .mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), 0.7)))
+    .mul(Matrix4x4.scaling(new Vector3(2, 0.5, 1)))
+    .mul(Matrix4x4.translation(new Vector3(-3, 2, 0)))
+  const p = new Vector3(1.5, -4.25, 0)
+  assert(
+    rect.localMatrix().transformPoint(p).nearEquals(expected.transformPoint(p), 1e-5),
+    'localMatrix matches an independently composed T*R*S*T(-offset)',
+  )
+}
+
+// --- Circle's width/height are derived from radius, not stored independently ---
+{
+  const circle = new Circle({ radius: 25 })
+  assert(circle.width === 50 && circle.height === 50, 'width/height read as radius*2')
+  circle.width = 200
+  assert(circle.radius === 100, 'setting width updates radius (width/2)')
+  circle.height = 10
+  assert(circle.radius === 5, 'setting height also updates radius (height/2)')
+
+  // Constructing via width/height (no radius given) derives radius correctly - this is
+  // the scenario the constructor's radius/width/height priority logic must get right,
+  // since Shape's own constructor writes a default width/height through the SAME
+  // overridden accessor before Circle's constructor body runs.
+  const viaWidth = new Circle({ width: 60 })
+  assert(viaWidth.radius === 30, 'constructing via width alone sets radius = width/2')
+  const viaRadius = new Circle({ radius: 15, width: 999 })
+  assert(viaRadius.radius === 15, 'radius wins over width when both are given')
 }
 
 // ============================================================================
