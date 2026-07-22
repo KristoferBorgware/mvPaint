@@ -1,5 +1,6 @@
-// Reusable WebGPU device + canvas context setup.
-// Not specific to cubes — any scene can build on top of this.
+// System component: WebGPU device + canvas context setup. Owns all context-related
+// operations (adapter/device request, canvas configuration, preferred format). Not
+// specific to any scene - the renderer and systems build on top of this.
 
 export interface GpuContext {
   device: GPUDevice
