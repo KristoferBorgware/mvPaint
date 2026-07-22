@@ -3,7 +3,9 @@
 // Run with: npx tsx src/render/selfTest.ts
 
 import { Rect } from '../shapes/Rect'
+import { Circle, circleSegments } from '../shapes/Circle'
 import { MESH_VERTEX_LAYOUT, MESH_VERTEX_STRIDE, OBJECT_STRIDE, type MeshSink, type RGBA } from './meshFormat'
+import { Shape } from '../scene/Shape'
 import { Vector3 } from '../math/Vector3'
 
 let count = 0
@@ -19,7 +21,7 @@ interface CapturedVertex {
 }
 
 // A capturing sink that records exactly what a shape emits (indices local to the shape).
-function capture(shape: Rect): { verts: CapturedVertex[]; tris: [number, number, number][] } {
+function capture(shape: Shape): { verts: CapturedVertex[]; tris: [number, number, number][] } {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
@@ -68,6 +70,29 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   const { verts, tris } = capture(rect)
   assert(verts.length === 4, 'fill-only rect has 4 vertices')
   assert(tris.length === 2, 'fill-only rect has 2 triangles')
+}
+
+// --- circle: fill fan (n+1 verts, n tris) + stroke ring (2n verts, 2n tris) ---
+{
+  const n = 24
+  const fill: RGBA = [0.2, 0.7, 0.35, 1]
+  const stroke: RGBA = [0, 0, 0, 1]
+  const circle = new Circle({ x: 0, y: 0, radius: 2, fill, stroke, strokeWidth: 0.4, segments: n })
+  const { verts, tris } = capture(circle)
+
+  assert(verts.length === n + 1 + 2 * n, 'circle verts = center + rim + ring (n+1 + 2n)')
+  assert(tris.length === n + 2 * n, 'circle tris = fan (n) + ring (2n)')
+  assert(near(verts[0].x, 0) && near(verts[0].y, 0), 'fan center at origin')
+  assert(near(Math.hypot(verts[1].x, verts[1].y), 2), 'first rim vertex is at the radius')
+  assert(verts.slice(0, n + 1).every((v) => v.color === fill), 'fan verts are fill-colored')
+  assert(verts.slice(n + 1).every((v) => v.color === stroke), 'ring verts are stroke-colored')
+}
+
+// --- adaptive segment count grows with radius and is clamped ---
+{
+  assert(circleSegments(0.001) === 12, 'tiny circle clamps to the minimum segments')
+  assert(circleSegments(1000) === 256, 'huge circle clamps to the maximum segments')
+  assert(circleSegments(50) > circleSegments(2), 'more segments for a larger radius')
 }
 
 // --- localMatrix carries position + rotation but NO scale (size is in geometry) ---

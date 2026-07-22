@@ -5,6 +5,7 @@
 // wired together by createSceneRenderer() below.
 
 import { Rect } from '../shapes/Rect'
+import { Circle } from '../shapes/Circle'
 import { Shape } from '../scene/Shape'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
@@ -80,6 +81,19 @@ export class SceneRenderer {
     )
     this.spins.set(left, 1)
     this.spins.set(right, -1.4)
+
+    // A circle centered between the rects, drawn last so it layers on top (painter order).
+    this.scene.root.addChild(
+      new Circle({
+        name: 'circle',
+        x: 0,
+        y: 0,
+        radius: 2,
+        fill: [0.2, 0.72, 0.36, 1],
+        stroke: [0.1, 0.4, 0.2, 1],
+        strokeWidth: 0.25,
+      }),
+    )
 
     this.scene.refreshActiveCamera()
   }
