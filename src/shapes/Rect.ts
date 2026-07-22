@@ -1,16 +1,14 @@
-// Rect - a solid-colored rectangle shape (Konva-style). Positioned by its center (x, y)
-// in the Z=0 plane, sized by width/height, optionally rotated about its center (Z axis).
-// Owns its per-instance uniform (MVP + color) and bind group; shares the unit-quad
-// geometry and rect pipeline.
+// Rect - a filled, optionally stroked rectangle (Konva-style). Centered at (x, y) in
+// the Z=0 plane, sized width×height, rotatable about its center (Z). It owns no GPU
+// resources: it tessellates a fill quad (+ a stroke ring) into the mesh lane, and its
+// position/rotation ride the per-object transform (size lives in the geometry, so the
+// local matrix carries no scale).
 
 import { Shape } from '../scene/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
-import type { QuadGeometry } from '../webgpu/QuadGeometry'
-import { createRectBindGroup, RECT_COLOR_OFFSET, RECT_UNIFORM_SIZE } from '../webgpu/rectPipeline'
-
-export type RGBA = [number, number, number, number]
+import type { MeshSink, RGBA } from '../render/meshFormat'
 
 export interface RectOptions {
   name?: string
@@ -21,7 +19,10 @@ export interface RectOptions {
   height?: number
   /** Rotation about the center (radians, about +Z). */
   rotation?: number
-  color?: RGBA
+  fill?: RGBA
+  stroke?: RGBA
+  /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
+  strokeWidth?: number
 }
 
 export class Rect extends Shape {
@@ -30,60 +31,61 @@ export class Rect extends Shape {
   width: number
   height: number
   rotation: number
+  fill: RGBA
+  stroke: RGBA
+  strokeWidth: number
 
-  private readonly device: GPUDevice
-  private readonly geometry: QuadGeometry
-  private readonly uniformBuffer: GPUBuffer
-  private readonly bindGroup: GPUBindGroup
-  private readonly color: Float32Array
-
-  constructor(
-    device: GPUDevice,
-    pipeline: GPURenderPipeline,
-    geometry: QuadGeometry,
-    options: RectOptions = {},
-  ) {
+  constructor(options: RectOptions = {}) {
     super(options.name)
-    this.device = device
-    this.geometry = geometry
     this.x = options.x ?? 0
     this.y = options.y ?? 0
     this.width = options.width ?? 1
     this.height = options.height ?? 1
     this.rotation = options.rotation ?? 0
-    this.color = new Float32Array(options.color ?? [1, 1, 1, 1])
-
-    this.uniformBuffer = device.createBuffer({
-      size: RECT_UNIFORM_SIZE,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    })
-    this.bindGroup = createRectBindGroup(device, pipeline, this.uniformBuffer)
+    this.fill = options.fill ?? [0, 0, 0, 1]
+    this.stroke = options.stroke ?? [0, 0, 0, 1]
+    this.strokeWidth = options.strokeWidth ?? 0
   }
 
-  setColor(color: RGBA): void {
-    this.color.set(color)
-  }
-
-  // Model matrix: translate(center) * rotateZ * scale(w, h) applied to the centered
-  // unit quad. Column-vector, so it reads outermost-first (translate, then rotate, scale).
+  // Position + rotation only; the rect's size is baked into its geometry.
   override localMatrix(): Matrix4x4 {
-    return Matrix4x4.translation(new Vector3(this.x, this.y, 0))
-      .mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
-      .mul(Matrix4x4.scaling(new Vector3(this.width, this.height, 1)))
+    return Matrix4x4.translation(new Vector3(this.x, this.y, 0)).mul(
+      Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)),
+    )
   }
 
-  override draw(pass: GPURenderPassEncoder, viewProjection: Matrix4x4): void {
-    if (!this.visible) return
-    const mvp = viewProjection.mul(this.worldMatrix())
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, mvp.toGPU() as BufferSource)
-    this.device.queue.writeBuffer(this.uniformBuffer, RECT_COLOR_OFFSET, this.color as BufferSource)
+  override tessellate(sink: MeshSink): void {
+    const hw = this.width / 2
+    const hh = this.height / 2
 
-    pass.setBindGroup(0, this.bindGroup)
-    this.geometry.bind(pass)
-    pass.drawIndexed(this.geometry.indexCount)
-  }
+    // Fill: centered quad (two triangles).
+    const f0 = sink.vertex(-hw, -hh, this.fill)
+    const f1 = sink.vertex(hw, -hh, this.fill)
+    const f2 = sink.vertex(hw, hh, this.fill)
+    const f3 = sink.vertex(-hw, hh, this.fill)
+    sink.triangle(f0, f1, f2)
+    sink.triangle(f0, f2, f3)
 
-  override destroy(): void {
-    this.uniformBuffer.destroy()
+    // Stroke: a ring between an outer and inner rect, centered on the edge.
+    if (this.strokeWidth > 0) {
+      const s = this.strokeWidth / 2
+      const o0 = sink.vertex(-hw - s, -hh - s, this.stroke)
+      const o1 = sink.vertex(hw + s, -hh - s, this.stroke)
+      const o2 = sink.vertex(hw + s, hh + s, this.stroke)
+      const o3 = sink.vertex(-hw - s, hh + s, this.stroke)
+      const i0 = sink.vertex(-hw + s, -hh + s, this.stroke)
+      const i1 = sink.vertex(hw - s, -hh + s, this.stroke)
+      const i2 = sink.vertex(hw - s, hh - s, this.stroke)
+      const i3 = sink.vertex(-hw + s, hh - s, this.stroke)
+      // Four sides, two triangles each (outer edge -> inner edge).
+      sink.triangle(o0, o1, i1)
+      sink.triangle(o0, i1, i0) // bottom
+      sink.triangle(o1, o2, i2)
+      sink.triangle(o1, i2, i1) // right
+      sink.triangle(o2, o3, i3)
+      sink.triangle(o2, i3, i2) // top
+      sink.triangle(o3, o0, i0)
+      sink.triangle(o3, i0, i3) // left
+    }
   }
 }

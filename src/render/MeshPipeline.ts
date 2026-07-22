@@ -1,0 +1,52 @@
+// The mesh-lane render pipeline: one shared vertex layout, alpha blending, no culling,
+// no depth (2D draw order), and MSAA. Built from an explicit pipeline layout so its
+// group(0)/group(1) bind groups are shared with any future lane.
+
+import { meshShaderCode } from './mesh.wgsl'
+import { MESH_VERTEX_LAYOUT } from './meshFormat'
+
+export function createMeshPipeline(
+  device: GPUDevice,
+  format: GPUTextureFormat,
+  sampleCount: number,
+  layout: GPUPipelineLayout,
+): GPURenderPipeline {
+  const module = device.createShaderModule({ code: meshShaderCode })
+
+  return device.createRenderPipeline({
+    layout,
+    vertex: {
+      module,
+      entryPoint: 'vs_main',
+      buffers: [MESH_VERTEX_LAYOUT],
+    },
+    fragment: {
+      module,
+      entryPoint: 'fs_main',
+      targets: [
+        {
+          format,
+          blend: {
+            color: {
+              srcFactor: 'src-alpha',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add',
+            },
+            alpha: {
+              srcFactor: 'one',
+              dstFactor: 'one-minus-src-alpha',
+              operation: 'add',
+            },
+          },
+        },
+      ],
+    },
+    primitive: {
+      topology: 'triangle-list',
+      cullMode: 'none',
+    },
+    multisample: {
+      count: sampleCount,
+    },
+  })
+}

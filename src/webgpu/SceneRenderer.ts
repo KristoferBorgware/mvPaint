@@ -1,37 +1,51 @@
 // SceneRenderer - the 2D shape scene. It builds a Scene tree (root -> camera, root ->
-// rect shapes) and drives updates and rendering by traversing that graph. It does NOT
-// own the GPU context, the resize observer, or the frame loop - those are system
-// components (see src/systems), wired together by createSceneRenderer() below.
+// shapes) and renders by collecting visible shapes in painter order and handing them to
+// the mesh renderer (frame uniforms + instance batcher + one mesh pipeline). It does NOT
+// own the GPU context, resize observer, or frame loop - those are system components
+// wired together by createSceneRenderer() below.
 
-import { QuadGeometry } from './QuadGeometry'
-import { createRectPipeline } from './rectPipeline'
 import { Rect } from '../shapes/Rect'
 import { Shape } from '../scene/Shape'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
+import {
+  createFrameBindGroupLayout,
+  createMeshPipelineLayout,
+  createObjectBindGroupLayout,
+} from '../render/layouts'
+import { FrameUniforms } from '../render/FrameUniforms'
+import { MeshBatcher } from '../render/MeshBatcher'
+import { createMeshPipeline } from '../render/MeshPipeline'
 import { createGpuContext } from '../systems/GpuContext'
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { FrameRenderer, type FrameContext } from '../systems/FrameRenderer'
 
 const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
+const SAMPLE_COUNT = 4
 
 export class SceneRenderer {
-  /** The scene graph: root -> camera, root -> rect shapes. */
+  /** The scene graph: root -> camera, root -> shapes. */
   readonly scene = new Scene()
   /** The active 2D orthographic camera (looks down -Z; X right, Y up). */
   readonly camera: OrthographicCamera
 
-  private readonly geometry: QuadGeometry
   private readonly pipeline: GPURenderPipeline
+  private readonly frameUniforms: FrameUniforms
+  private readonly batcher: MeshBatcher
 
   private speed = 1 // spin multiplier (radians per second)
   private angle = 0
-  // Per-rect spin rates, keyed by the shape, so update() can drive their rotation.
+  private geometryDirty = true
+  // Per-rect spin rates, so update() can drive their rotation (transform-only, no rebuild).
   private readonly spins = new Map<Rect, number>()
 
   constructor(device: GPUDevice, format: GPUTextureFormat, _canvas: HTMLCanvasElement) {
-    this.geometry = new QuadGeometry(device)
-    this.pipeline = createRectPipeline(device, format)
+    const frameLayout = createFrameBindGroupLayout(device)
+    const objectLayout = createObjectBindGroupLayout(device)
+    const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
+    this.pipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout)
+    this.frameUniforms = new FrameUniforms(device, frameLayout)
+    this.batcher = new MeshBatcher(device, objectLayout)
 
     // 2D orthographic camera looking down -Z, parented to the scene root.
     this.camera = new OrthographicCamera('camera')
@@ -39,25 +53,29 @@ export class SceneRenderer {
     this.camera.viewHeight = 10
     this.scene.root.addChild(this.camera)
 
-    // Two rects side by side, spinning about their centers at different rates.
+    // Two rects side by side, filled + stroked, spinning about their centers.
     const left = this.scene.root.addChild(
-      new Rect(device, this.pipeline, this.geometry, {
+      new Rect({
         name: 'rect-left',
         x: -3,
         y: 0,
         width: 3,
         height: 3,
-        color: [0.9, 0.28, 0.24, 1],
+        fill: [0.9, 0.28, 0.24, 1],
+        stroke: [0.5, 0.1, 0.08, 1],
+        strokeWidth: 0.25,
       }),
     )
     const right = this.scene.root.addChild(
-      new Rect(device, this.pipeline, this.geometry, {
+      new Rect({
         name: 'rect-right',
         x: 2.5,
         y: 0,
         width: 4,
         height: 2.5,
-        color: [0.2, 0.45, 0.9, 1],
+        fill: [0.2, 0.45, 0.9, 1],
+        stroke: [0.08, 0.18, 0.5, 1],
+        strokeWidth: 0.25,
       }),
     )
     this.spins.set(left, 1)
@@ -70,7 +88,7 @@ export class SceneRenderer {
     this.speed = next
   }
 
-  /** Advance the animation clock and each rect's rotation by dt seconds. */
+  /** Advance the animation clock and each rect's rotation (transform only). */
   update(dt: number): void {
     this.angle += dt * this.speed
     for (const [rect, spinScale] of this.spins) {
@@ -78,23 +96,36 @@ export class SceneRenderer {
     }
   }
 
-  /** Record the scene's draw calls by walking the graph through the active camera. */
+  /** Collect visible shapes in painter (traversal) order; index becomes the objectId. */
+  private collectShapes(): Shape[] {
+    const shapes: Shape[] = []
+    this.scene.root.traversePreOrder((node) => {
+      if (node instanceof Shape && node.visible) shapes.push(node)
+    })
+    return shapes
+  }
+
+  /** Update frame uniforms, (re)build geometry if dirty, refresh transforms, one draw. */
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
     const camera = this.scene.activeCamera
     if (!camera) return
 
-    const viewProjection = camera.viewProjection(width / height)
+    this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
+
+    const shapes = this.collectShapes()
+    if (this.geometryDirty) {
+      this.batcher.rebuild(shapes)
+      this.geometryDirty = false
+    }
+    this.batcher.updateTransforms(shapes)
+
     pass.setPipeline(this.pipeline)
-    this.scene.root.traversePreOrder((node) => {
-      if (node instanceof Shape) node.draw(pass, viewProjection)
-    })
+    this.batcher.draw(pass, this.frameUniforms.bindGroup)
   }
 
   destroy(): void {
-    this.scene.root.traversePreOrder((node) => {
-      if (node instanceof Shape) node.destroy()
-    })
-    this.geometry.destroy()
+    this.batcher.destroy()
+    this.frameUniforms.destroy()
   }
 }
 
@@ -106,8 +137,9 @@ export interface SceneRendererHandle {
 
 /**
  * Composition root: wires the GPU context, resize observer and frame loop (system
- * components) to a SceneRenderer, and starts rendering two rects on a white background
- * through a 2D orthographic camera. Throws if WebGPU is unavailable.
+ * components) to a SceneRenderer, and starts rendering two filled + stroked rects on a
+ * white background through a 2D orthographic camera, MSAA 4x. Throws if WebGPU is
+ * unavailable.
  */
 export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<SceneRendererHandle> {
   const gpu = await createGpuContext(canvas)
@@ -121,7 +153,7 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
       scene.update(dt)
       scene.draw(pass, width, height)
     },
-    { clearColor: WHITE }, // no depthFormat: 2D uses draw order
+    { clearColor: WHITE, sampleCount: SAMPLE_COUNT }, // no depthFormat: 2D uses draw order
   )
   frameRenderer.start()
 

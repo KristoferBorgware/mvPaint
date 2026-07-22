@@ -20,6 +20,8 @@ export interface FrameRendererOptions {
   clearColor?: GPUColor
   /** Depth attachment format; omit for a color-only pass. Must match the pipeline's. */
   depthFormat?: GPUTextureFormat
+  /** MSAA sample count (1 = no multisampling). Must match the pipeline's `multisample.count`. */
+  sampleCount?: number
 }
 
 export class FrameRenderer {
@@ -28,8 +30,10 @@ export class FrameRenderer {
   private readonly onFrame: (frame: FrameContext) => void
   private readonly clearColor: GPUColor
   private readonly depthFormat?: GPUTextureFormat
+  private readonly sampleCount: number
 
   private depthTexture: GPUTexture | null = null
+  private msaaTexture: GPUTexture | null = null
   private rafId = 0
   private lastTime = 0
   private running = false
@@ -45,6 +49,7 @@ export class FrameRenderer {
     this.onFrame = onFrame
     this.clearColor = options.clearColor ?? { r: 0.07, g: 0.07, b: 0.07, a: 1 }
     this.depthFormat = options.depthFormat
+    this.sampleCount = options.sampleCount ?? 1
   }
 
   start(): void {
@@ -66,6 +71,22 @@ export class FrameRenderer {
     cancelAnimationFrame(this.rafId)
     this.depthTexture?.destroy()
     this.depthTexture = null
+    this.msaaTexture?.destroy()
+    this.msaaTexture = null
+  }
+
+  private ensureMsaaTexture(width: number, height: number): void {
+    if (this.sampleCount <= 1) return
+    if (this.msaaTexture && this.msaaTexture.width === width && this.msaaTexture.height === height) {
+      return
+    }
+    this.msaaTexture?.destroy()
+    this.msaaTexture = this.gpu.device.createTexture({
+      size: [width, height],
+      sampleCount: this.sampleCount,
+      format: this.gpu.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
   }
 
   private ensureDepthTexture(width: number, height: number): void {
@@ -85,17 +106,28 @@ export class FrameRenderer {
     this.resizer.update()
     const { width, height } = this.resizer
     this.ensureDepthTexture(width, height)
+    this.ensureMsaaTexture(width, height)
 
-    const encoder = this.gpu.device.createCommandEncoder()
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: this.gpu.context.getCurrentTexture().createView(),
+    // With MSAA, render into the multisampled texture and resolve into the swapchain.
+    const swapchainView = this.gpu.context.getCurrentTexture().createView()
+    const colorAttachment: GPURenderPassColorAttachment = this.msaaTexture
+      ? {
+          view: this.msaaTexture.createView(),
+          resolveTarget: swapchainView,
           clearValue: this.clearColor,
           loadOp: 'clear',
           storeOp: 'store',
-        },
-      ],
+        }
+      : {
+          view: swapchainView,
+          clearValue: this.clearColor,
+          loadOp: 'clear',
+          storeOp: 'store',
+        }
+
+    const encoder = this.gpu.device.createCommandEncoder()
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [colorAttachment],
       depthStencilAttachment: this.depthTexture
         ? {
             view: this.depthTexture.createView(),
