@@ -1,4 +1,4 @@
-// Container - a Node that holds children (Konva-style). Concrete containers (a scene
+// Container - a Node that holds children. Concrete containers (a scene
 // root / group) can be instantiated directly; Shape and Camera are leaf Nodes. Adds the
 // child list and the eachChild() override that powers Node's traversal and search.
 

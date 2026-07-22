@@ -1,7 +1,7 @@
 // Right-handed perspective camera. Produces view/projection matrices; owns no GPU
-// state. Aspect ratio is supplied per-frame by the renderer. TypeScript port of
-// Fungine3D's Graphics/Camera.h/.cpp, minus the scene-graph Node base (mvPaint has
-// no scene graph yet). Column-vector / WebGPU-native, matching src/math.
+// state. Aspect ratio is supplied per-frame by the renderer. Column-vector /
+// WebGPU-native, matching src/math. Extends Node, so a camera can live anywhere in
+// the scene graph and picks up a world transform from its ancestors.
 //
 // view() is overridable so derived cameras (e.g. FreeFloatCamera) supply their own
 // orientation while sharing the projection. The `active` flag marks which camera the

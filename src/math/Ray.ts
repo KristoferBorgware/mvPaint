@@ -1,6 +1,5 @@
-// Ray - an origin + (unit) direction, with a slab test against an AABB. TypeScript
-// port of Fungine3D's Core/Ray.h. Reuses Vector3 and AABB. Right-handed, same space
-// as everything else.
+// Ray - an origin + (unit) direction, with a slab test against an AABB. Reuses
+// Vector3 and AABB. Right-handed, same space as everything else.
 
 import type { AABB } from './AABB'
 import { Vector3 } from './Vector3'

@@ -1,5 +1,4 @@
-// No-clip fly FPS camera: a free-moving observer. TypeScript port of Fungine3D's
-// Graphics/FreeFloatCamera.h/.cpp.
+// No-clip fly FPS camera: a free-moving observer.
 //
 // Controls (mapped by FreeFlyController): WASD moves; W/S fly along the full look
 // direction (look up/down to change altitude - there are no dedicated up/down keys),

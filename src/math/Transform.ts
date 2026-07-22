@@ -1,5 +1,5 @@
 // Transform - a decomposed SRT transform (position / rotation / scale) plus the
-// operations a scene node needs. TypeScript port of Fungine3D's Core/Transform.h.
+// operations a scene node needs.
 // Right-handed, column-vector (WebGPU-native): world = T * R * S, Forward = -Z. For
 // general 4x4 math (projection, inverse, decompose) use Matrix4x4.
 

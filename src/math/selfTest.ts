@@ -1,6 +1,5 @@
-// Self-test ported from Fungine3D's Core/MathSelfTest.cpp. Run with
-// `npx tsx src/math/selfTest.ts` to verify the TypeScript math matches the
-// original DirectXMath-based behaviour.
+// Self-test for the core math types (vectors, quaternion, matrix, transform, AABB,
+// ray). Run with `npx tsx src/math/selfTest.ts` to verify their behavior.
 
 import { AABB } from './AABB'
 import { Matrix4x4 } from './Matrix4x4'

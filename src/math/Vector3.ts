@@ -1,5 +1,5 @@
 // Vector3 - 3D float vector, the workhorse type (positions, directions).
-// TypeScript port of Fungine3D's Core/Vector3.h. Right-handed; Forward = -Z.
+// Right-handed; Forward = -Z.
 
 import { Vector2 } from './Vector2'
 

@@ -1,5 +1,4 @@
 // Vector4 - 4D float vector (homogeneous points, RGBA colors).
-// TypeScript port of Fungine3D's Core/Vector4.h.
 
 import { Vector3 } from './Vector3'
 

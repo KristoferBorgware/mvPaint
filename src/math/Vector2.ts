@@ -1,6 +1,4 @@
-// Vector2 - 2D float vector.
-// TypeScript port of Fungine3D's Core/Vector2.h (originally a DirectXMath XMFLOAT2
-// wrapper). SIMD is replaced with plain scalar math; the API and semantics match.
+// Vector2 - 2D float vector. Plain x/y storage; arithmetic uses ordinary scalar math.
 
 export class Vector2 {
   constructor(

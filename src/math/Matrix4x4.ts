@@ -4,9 +4,6 @@
 // layout and convention as WGSL, glMatrix and the WebGPU tutorials, so an MVP is
 // composed the textbook way - projection * view * model - and its `.m` uploads straight
 // into a `mvp * pos` uniform with no transpose (see toGPU()).
-//
-// Derived from Fungine3D's Core/Matrix4x4.h (a DirectXMath / row-vector type),
-// transposed into WebGPU's column-vector convention.
 
 import { Quaternion } from './Quaternion'
 import { Vector3 } from './Vector3'

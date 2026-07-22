@@ -1,6 +1,6 @@
 // Orbit (arcball) camera: rotates around a fixed focal point as if attached to a
-// sphere centred on it. TypeScript port of Fungine3D's Graphics/OrbitCamera.h/.cpp.
-// Dragging tumbles the camera over the sphere; wheel notches change `distance` (zoom).
+// sphere centred on it. Dragging tumbles the camera over the sphere; wheel notches
+// change `distance` (zoom).
 //
 // Orientation is azimuth (yaw) + elevation (pitch), radians. Elevation is clamped just
 // short of the poles so the view never degenerates - no gimbal lock, no roll.

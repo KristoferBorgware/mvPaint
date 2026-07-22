@@ -1,7 +1,5 @@
-// Quaternion - rotation. TypeScript port of Fungine3D's Core/Quaternion.h
-// (a DirectXMath XMQuaternion* wrapper). Convention: a.mul(b) = "rotation a
-// applied first, then rotation b" (matches XMQuaternionMultiply and the
-// row-vector matrices in Matrix4x4).
+// Quaternion - rotation. Convention: a.mul(b) = "rotation a applied first, then
+// rotation b".
 
 import { Vector3 } from './Vector3'
 

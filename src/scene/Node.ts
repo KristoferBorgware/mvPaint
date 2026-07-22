@@ -1,4 +1,4 @@
-// Node - the scene-graph base (Konva-style Node → Container → Shape). A Node has a
+// Node - the scene-graph base (Node → Container → Shape). A Node has a
 // name, a parent link, an overridable localMatrix() transform seam (identity by
 // default), and world-transform composition. It has NO children of its own - only
 // Container holds children - but traversal/search live here via the eachChild() seam

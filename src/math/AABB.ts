@@ -1,6 +1,6 @@
-// AABB - axis-aligned bounding box stored as its min/max corners. TypeScript port
-// of Fungine3D's Core/AABB.h. A composite value type (two Vector3s) that reuses
-// Vector3 and Matrix4x4.transformPoint for re-fitting under a transform.
+// AABB - axis-aligned bounding box stored as its min/max corners. A composite value
+// type (two Vector3s) that reuses Vector3 and Matrix4x4.transformPoint for re-fitting
+// under a transform.
 
 import type { Matrix4x4 } from './Matrix4x4'
 import { Vector3 } from './Vector3'
