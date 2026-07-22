@@ -1,7 +1,9 @@
 // Circle - a filled, optionally stroked circle (Konva-style). Centered at (x, y) in the
-// Z=0 plane. Tessellated in the mesh lane: a triangle fan for the fill and a ring strip
-// for the stroke. The segment count is chosen adaptively from the radius so it stays
-// smooth without wasting triangles on tiny circles.
+// Z=0 plane. Tessellated in the mesh lane: a triangle fan for the fill; the stroke is
+// the same n-point rim contour run through the shared general-purpose stroker (round
+// join - the exact offset for a smooth curve, with no faceting overshoot even at low
+// segment counts, unlike miter). The segment count is chosen adaptively from the
+// radius so it stays smooth without wasting triangles on tiny circles.
 //
 // Note: adaptivity here is by WORLD radius (tessellate() has no camera/zoom context).
 // True screen-aware density (re-tessellate when the on-screen size changes) is a
@@ -11,6 +13,7 @@ import { Shape } from '../scene/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import type { MeshSink, RGBA } from '../render/meshFormat'
+import { strokePolyline, type Point2 } from '../render/stroke'
 
 /**
  * Segments needed so the chord deviation (sagitta) stays within `tolerance` world units:
@@ -67,35 +70,26 @@ export class Circle extends Shape {
     const r = this.radius
 
     // Fill: a triangle fan from the center to n perimeter points.
-    const center = sink.vertex(0, 0, this.fill)
-    const rim: number[] = []
+    const rim: Point2[] = []
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
-      rim.push(sink.vertex(Math.cos(a) * r, Math.sin(a) * r, this.fill))
+      rim.push({ x: Math.cos(a) * r, y: Math.sin(a) * r })
     }
+    const center = sink.vertex(0, 0, this.fill)
+    const rimIdx = rim.map((p) => sink.vertex(p.x, p.y, this.fill))
     for (let i = 0; i < n; i++) {
-      sink.triangle(center, rim[i], rim[(i + 1) % n])
+      sink.triangle(center, rimIdx[i], rimIdx[(i + 1) % n])
     }
 
-    // Stroke: a ring between inner and outer radii, centered on the edge.
+    // Stroke: the rim contour through the shared stroker, round-joined.
     if (this.strokeWidth > 0) {
-      const s = this.strokeWidth / 2
-      const outerR = r + s
-      const innerR = Math.max(0, r - s)
-      const outer: number[] = []
-      const inner: number[] = []
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2
-        const cos = Math.cos(a)
-        const sin = Math.sin(a)
-        outer.push(sink.vertex(cos * outerR, sin * outerR, this.stroke))
-        inner.push(sink.vertex(cos * innerR, sin * innerR, this.stroke))
-      }
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n
-        sink.triangle(outer[i], outer[j], inner[j])
-        sink.triangle(outer[i], inner[j], inner[i])
-      }
+      strokePolyline(rim, sink, {
+        width: this.strokeWidth,
+        color: this.stroke,
+        closed: true,
+        join: 'round',
+        roundSegments: 4,
+      })
     }
   }
 }

@@ -6,6 +6,7 @@
 
 import { Rect } from '../shapes/Rect'
 import { Circle } from '../shapes/Circle'
+import { Polyline } from '../shapes/Polyline'
 import { Shape } from '../scene/Shape'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
@@ -97,6 +98,26 @@ export class SceneRenderer {
         fill: [0.2, 0.72, 0.36, 1],
         stroke: [0.1, 0.4, 0.2, 1],
         strokeWidth: 6,
+      }),
+    )
+
+    // An open zigzag polyline below the shapes, demonstrating the general contour
+    // stroker on a non-rectangular, non-circular path: round join + round caps
+    // (Canvas2D-style lineJoin/lineCap, both configurable per-instance).
+    this.scene.root.addChild(
+      new Polyline({
+        name: 'zigzag',
+        points: [
+          { x: -180, y: -180 },
+          { x: -90, y: -120 },
+          { x: 0, y: -180 },
+          { x: 90, y: -120 },
+          { x: 180, y: -180 },
+        ],
+        stroke: [0.55, 0.35, 0.85, 1],
+        strokeWidth: 14,
+        lineJoin: 'round',
+        lineCap: 'round',
       }),
     )
 

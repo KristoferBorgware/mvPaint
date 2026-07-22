@@ -1,14 +1,16 @@
 // Rect - a filled, optionally stroked rectangle (Konva-style). Centered at (x, y) in
 // the Z=0 plane, sized width×height, rotatable about its center (Z). It owns no GPU
-// resources: it tessellates a fill quad (+ a stroke ring) into the mesh lane, and its
-// position/rotation ride the per-object transform (size lives in the geometry, so the
-// local matrix carries no scale).
+// resources: it tessellates a fill quad into the mesh lane and strokes its own outline
+// (a 4-corner contour) through the shared general-purpose stroker. Position/rotation
+// ride the per-object transform (size lives in the geometry, so the local matrix
+// carries no scale).
 
 import { Shape } from '../scene/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
 import type { MeshSink, RGBA } from '../render/meshFormat'
+import { strokePolyline } from '../render/stroke'
 
 export interface RectOptions {
   name?: string
@@ -66,26 +68,23 @@ export class Rect extends Shape {
     sink.triangle(f0, f1, f2)
     sink.triangle(f0, f2, f3)
 
-    // Stroke: a ring between an outer and inner rect, centered on the edge.
+    // Stroke: the 4-corner outline, through the shared contour stroker. A rectangle's
+    // corners are all 90 degrees, so a miter join here always lands exactly on the
+    // diagonal bisector - equivalent to the old hand-rolled "offset each corner by
+    // ±strokeWidth/2 in x and y independently" trick, just expressed generally.
     if (this.strokeWidth > 0) {
-      const s = this.strokeWidth / 2
-      const o0 = sink.vertex(-hw - s, -hh - s, this.stroke)
-      const o1 = sink.vertex(hw + s, -hh - s, this.stroke)
-      const o2 = sink.vertex(hw + s, hh + s, this.stroke)
-      const o3 = sink.vertex(-hw - s, hh + s, this.stroke)
-      const i0 = sink.vertex(-hw + s, -hh + s, this.stroke)
-      const i1 = sink.vertex(hw - s, -hh + s, this.stroke)
-      const i2 = sink.vertex(hw - s, hh - s, this.stroke)
-      const i3 = sink.vertex(-hw + s, hh - s, this.stroke)
-      // Four sides, two triangles each (outer edge -> inner edge).
-      sink.triangle(o0, o1, i1)
-      sink.triangle(o0, i1, i0) // bottom
-      sink.triangle(o1, o2, i2)
-      sink.triangle(o1, i2, i1) // right
-      sink.triangle(o2, o3, i3)
-      sink.triangle(o2, i3, i2) // top
-      sink.triangle(o3, o0, i0)
-      sink.triangle(o3, i0, i3) // left
+      const corners = [
+        { x: -hw, y: -hh },
+        { x: hw, y: -hh },
+        { x: hw, y: hh },
+        { x: -hw, y: hh },
+      ]
+      strokePolyline(corners, sink, {
+        width: this.strokeWidth,
+        color: this.stroke,
+        closed: true,
+        join: 'miter',
+      })
     }
   }
 }

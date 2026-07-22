@@ -1,10 +1,12 @@
-// Self-test for the mesh-lane data path (no GPU). Tessellates rects through a capturing
-// MeshSink and asserts the vertex/index/color/objectId layout and the format constants.
+// Self-test for the mesh-lane data path (no GPU). Tessellates shapes through a
+// capturing MeshSink and asserts the vertex/index/color/objectId layout, the format
+// constants, and the general contour stroker (joins/caps/multi-contour).
 // Run with: npx tsx src/render/selfTest.ts
 
 import { Rect } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
 import { MESH_VERTEX_LAYOUT, MESH_VERTEX_STRIDE, OBJECT_STRIDE, type MeshSink, type RGBA } from './meshFormat'
+import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { Shape } from '../scene/Shape'
 import { Vector3 } from '../math/Vector3'
 
@@ -19,9 +21,12 @@ interface CapturedVertex {
   y: number
   color: RGBA
 }
+interface Captured {
+  verts: CapturedVertex[]
+  tris: [number, number, number][]
+}
 
-// A capturing sink that records exactly what a shape emits (indices local to the shape).
-function capture(shape: Shape): { verts: CapturedVertex[]; tris: [number, number, number][] } {
+function capturingSink(): { sink: MeshSink } & Captured {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
@@ -33,38 +38,53 @@ function capture(shape: Shape): { verts: CapturedVertex[]; tris: [number, number
       tris.push([a, b, c])
     },
   }
+  return { sink, verts, tris }
+}
+
+// A capturing sink that records exactly what a shape emits (indices local to the shape).
+function capture(shape: Shape): Captured {
+  const { sink, verts, tris } = capturingSink()
   shape.tessellate(sink)
   return { verts, tris }
 }
 
-const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6
+const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
+const hasVertexNear = (verts: CapturedVertex[], x: number, y: number, eps = 1e-6) =>
+  verts.some((v) => near(v.x, x, eps) && near(v.y, y, eps))
 
 // --- format constants match the WGSL structs ---
 assert(MESH_VERTEX_STRIDE === 28, 'mesh vertex stride is 28 bytes')
 assert(MESH_VERTEX_LAYOUT.arrayStride === MESH_VERTEX_STRIDE, 'layout stride matches')
 assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
 
-// --- stroked rect: 4 fill verts + 8 stroke verts, 2 + 8 triangles ---
+// --- stroked rect: fill (4v/2t) + a 4-corner miter-joined contour ---
 {
   const fill: RGBA = [0.9, 0.2, 0.1, 1]
   const stroke: RGBA = [0, 0, 0, 1]
   const rect = new Rect({ x: 0, y: 0, width: 4, height: 2, fill, stroke, strokeWidth: 0.4 })
   const { verts, tris } = capture(rect)
 
-  assert(verts.length === 12, 'stroked rect has 12 vertices (4 fill + 8 ring)')
-  assert(tris.length === 10, 'stroked rect has 10 triangles (2 fill + 8 ring)')
+  // Stroke = 4 edges * 4 verts (16v/8t) + 4 joints * (1 pivot + 2 concave + 3 miter) (24v/12t).
+  assert(verts.length === 4 + 40, 'stroked rect: 4 fill + 40 general-stroker vertices')
+  assert(tris.length === 2 + 20, 'stroked rect: 2 fill + 20 general-stroker triangles')
 
-  // Fill verts carry the fill color and sit at (±w/2, ±h/2).
+  // Fill verts (still emitted first, unchanged) carry the fill color and sit at (±w/2,±h/2).
   assert(verts.slice(0, 4).every((v) => v.color === fill), 'first 4 verts are fill-colored')
   assert(near(verts[0].x, -2) && near(verts[0].y, -1), 'fill corner at (-w/2,-h/2)')
   assert(near(verts[2].x, 2) && near(verts[2].y, 1), 'fill corner at (+w/2,+h/2)')
+  assert(verts.slice(4).every((v) => v.color === stroke), 'remaining verts are stroke-colored')
 
-  // Ring verts carry the stroke color; outer corner extends beyond the fill by sw/2.
-  assert(verts.slice(4).every((v) => v.color === stroke), 'ring verts are stroke-colored')
-  assert(near(verts[4].x, -2.2) && near(verts[4].y, -1.2), 'outer ring corner at edge + sw/2')
+  // A 90° miter offsets the OUTER (convex) corner by strokeWidth/2 in x AND y
+  // independently - the exact geometry the old hand-rolled Rect stroke produced, now
+  // via the general engine. The concave (inner) side is the documented simplification
+  // (fills to the original path point rather than a true inner-miter intersection), so
+  // it lands at each edge's own per-normal offset instead of a symmetric diagonal point.
+  assert(hasVertexNear(verts, -2.2, -1.2), 'outer miter corner at edge + sw/2 (matches the old formula)')
+  assert(hasVertexNear(verts, 1.8, 1.0), 'inner offset along one edge at the (hw,hh) corner')
+  assert(hasVertexNear(verts, 2.0, 0.8), 'inner offset along the other edge at the (hw,hh) corner')
 }
 
-// --- fill-only rect: 4 verts, 2 triangles ---
+// --- fill-only rect: 4 verts, 2 triangles (stroke path untouched) ---
 {
   const rect = new Rect({ width: 3, height: 3, fill: [1, 1, 1, 1], strokeWidth: 0 })
   const { verts, tris } = capture(rect)
@@ -72,20 +92,31 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   assert(tris.length === 2, 'fill-only rect has 2 triangles')
 }
 
-// --- circle: fill fan (n+1 verts, n tris) + stroke ring (2n verts, 2n tris) ---
+// --- circle: fill fan + a round-joined rim contour (structural checks; the general
+//     stroker's exact per-joint vertex count depends on its round-arc step count) ---
 {
   const n = 24
   const fill: RGBA = [0.2, 0.7, 0.35, 1]
   const stroke: RGBA = [0, 0, 0, 1]
-  const circle = new Circle({ x: 0, y: 0, radius: 2, fill, stroke, strokeWidth: 0.4, segments: n })
+  const r = 2
+  const sw = 0.4
+  const circle = new Circle({ x: 0, y: 0, radius: r, fill, stroke, strokeWidth: sw, segments: n })
   const { verts, tris } = capture(circle)
 
-  assert(verts.length === n + 1 + 2 * n, 'circle verts = center + rim + ring (n+1 + 2n)')
-  assert(tris.length === n + 2 * n, 'circle tris = fan (n) + ring (2n)')
+  const fillOnly = capture(new Circle({ radius: r, fill, strokeWidth: 0, segments: n }))
+  assert(verts.length > fillOnly.verts.length, 'stroke adds geometry beyond the fill fan')
+  assert(tris.length > fillOnly.tris.length, 'stroke adds triangles beyond the fill fan')
   assert(near(verts[0].x, 0) && near(verts[0].y, 0), 'fan center at origin')
-  assert(near(Math.hypot(verts[1].x, verts[1].y), 2), 'first rim vertex is at the radius')
+  assert(near(Math.hypot(verts[1].x, verts[1].y), r), 'first rim vertex is at the radius')
   assert(verts.slice(0, n + 1).every((v) => v.color === fill), 'fan verts are fill-colored')
-  assert(verts.slice(n + 1).every((v) => v.color === stroke), 'ring verts are stroke-colored')
+  assert(verts.slice(n + 1).every((v) => v.color === stroke), 'stroke verts are stroke-colored')
+  // The round join tracks the true offset circle closely (not exactly, since the round
+  // arc is discretized per joint and the straight segment quads facet slightly inward -
+  // the same faceting any polygon approximation of a circle has). Check the overall
+  // radial extent of the stroke geometry lands near r ± sw/2, within that faceting.
+  const dists = verts.slice(n + 1).map((v) => Math.hypot(v.x, v.y))
+  assert(near(Math.max(...dists), r + sw / 2, 0.01), 'outer stroke extent close to radius + sw/2')
+  assert(near(Math.min(...dists), r - sw / 2, 0.01), 'inner stroke extent close to radius - sw/2')
 }
 
 // --- adaptive segment count grows with radius and is clamped ---
@@ -102,6 +133,112 @@ assert(OBJECT_STRIDE === 64, 'object stride is one mat4 (64B)')
   // A local corner at (w/2, h/2) = (5,5) maps to center + corner (translation only).
   const p = world.transformPoint(new Vector3(5, 5, 0))
   assert(near(p.x, 10) && near(p.y, 2), 'no scale: corner offset is unscaled (5,5)->(10,2)')
+}
+
+// ============================================================================
+// General contour stroker (src/render/stroke.ts) - the shared engine itself.
+// ============================================================================
+
+// --- a 4-corner miter loop matches the closed-form 90° formula independent of Rect ---
+{
+  const corners: Point2[] = [
+    { x: -2, y: -1 },
+    { x: 2, y: -1 },
+    { x: 2, y: 1 },
+    { x: -2, y: 1 },
+  ]
+  const { sink, verts } = capturingSink()
+  strokePolyline(corners, sink, { width: 0.4, color: [0, 0, 0, 1], closed: true, join: 'miter' })
+  assert(hasVertexNear(verts, -2.2, -1.2), 'engine: outer miter corner (-hw-s,-hh-s)')
+  assert(hasVertexNear(verts, 2.2, 1.2), 'engine: outer miter corner (hw+s,hh+s)')
+  // Concave (inner) side: the documented simplification (see stroke.ts), landing at each
+  // edge's own per-normal offset rather than a symmetric inner-miter intersection.
+  assert(hasVertexNear(verts, -1.8, -1.0), 'engine: inner offset along one edge at (-hw,-hh)')
+  assert(hasVertexNear(verts, -2.0, -0.8), 'engine: inner offset along the other edge at (-hw,-hh)')
+}
+
+// --- miter limit: a near-180° hairpin turn falls back to bevel below the limit ---
+{
+  // An open 3-point path with a single joint at the origin, folding back on itself.
+  const points: Point2[] = [
+    { x: -1, y: 0.05 },
+    { x: 0, y: 0 },
+    { x: -1, y: -0.05 },
+  ]
+  function counts(miterLimit: number): { v: number; t: number } {
+    const { sink, verts, tris } = capturingSink()
+    strokePolyline(points, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'miter', miterLimit })
+    return { v: verts.length, t: tris.length }
+  }
+  const low = counts(1) // falls back to bevel: 2 edges (8v/4t) + 1 joint bevel (5v/2t)
+  const high = counts(1000) // true miter: 2 edges (8v/4t) + 1 joint miter (6v/3t)
+  assert(low.v === 13 && low.t === 6, 'low miterLimit forces the bevel fallback at the joint')
+  assert(high.v === 14 && high.t === 7, 'high miterLimit allows the true (longer) miter point')
+}
+
+// --- round join: a clean 90° turn sweeps a quarter-circle arc of the expected size ---
+{
+  const points: Point2[] = [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+  ]
+  const { sink, verts, tris } = capturingSink()
+  strokePolyline(points, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'round', roundSegments: 8 })
+  // 2 edges (8v/4t) + 1 joint: pivot(1) + concave(2v/1t) + round(start(1) + 4 arc steps/4t).
+  assert(verts.length === 16, 'round join at 90°: 8 segment + 8 joint vertices (1p+2+1+4 arc)')
+  assert(tris.length === 9, 'round join at 90°: 4 segment + 5 joint triangles (1 concave + 4 arc)')
+}
+
+// --- caps: butt adds nothing, square/round add the expected fixed geometry per end ---
+{
+  const line: Point2[] = [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+  ]
+  function capCounts(cap: LineCap): { v: number; t: number } {
+    const { sink, verts, tris } = capturingSink()
+    strokePolyline(line, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'miter', cap })
+    return { v: verts.length, t: tris.length }
+  }
+  const butt = capCounts('butt')
+  const square = capCounts('square')
+  const round = capCounts('round')
+  assert(butt.v === 4 && butt.t === 2, 'butt cap: no extra geometry beyond the segment quad')
+  assert(square.v === 4 + 2 * 4 && square.t === 2 + 2 * 2, 'square cap: 4v/2t per end, two ends')
+  assert(round.v === 4 + 2 * 10 && round.t === 2 + 2 * 8, 'round cap: hub+first+8 arc verts/8 tris per end')
+}
+
+// --- multi-contour: an outer loop and a hole are stroked independently ---
+{
+  const outer: Point2[] = [
+    { x: -2, y: -2 },
+    { x: 2, y: -2 },
+    { x: 2, y: 2 },
+    { x: -2, y: 2 },
+  ]
+  const hole: Point2[] = [
+    { x: -1, y: -1 },
+    { x: 1, y: -1 },
+    { x: 1, y: 1 },
+    { x: -1, y: 1 },
+  ]
+  const { sink, verts, tris } = capturingSink()
+  strokeContours(
+    [
+      { points: outer, closed: true },
+      { points: hole, closed: true },
+    ],
+    sink,
+    { width: 0.2, color: [0, 0, 0, 1], join: 'miter' },
+  )
+  // Each independent 4-corner miter loop contributes 40 vertices / 20 triangles (as above).
+  assert(verts.length === 80, 'two independent contours contribute 40 vertices each')
+  assert(tris.length === 40, 'two independent contours contribute 20 triangles each')
+  // Both loops' corners are offset AWAY from their own center - stroking treats a hole
+  // boundary exactly like any other contour, independent of fill semantics.
+  assert(hasVertexNear(verts, -2.1, -2.1), 'outer contour corner offset present')
+  assert(hasVertexNear(verts, -1.1, -1.1), 'hole contour corner offset present, same convention')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)
