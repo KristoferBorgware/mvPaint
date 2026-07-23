@@ -38,6 +38,7 @@ export class SceneRenderer {
 
   private speed = 1 // spin multiplier (radians per second)
   private angle = 0
+  private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   private geometryDirty = true
   // Per-rect spin rates, so update() can drive their rotation (transform-only, no rebuild).
   private readonly spins = new Map<Rect, number>()
@@ -148,6 +149,11 @@ export class SceneRenderer {
     this.speed = next
   }
 
+  /** Camera zoom: >1 zooms in (content appears larger), <1 zooms out. */
+  setZoom(next: number): void {
+    this.zoom = next > 0 ? next : 1
+  }
+
   /** Advance the animation clock and each rect's rotation (transform only). */
   update(dt: number): void {
     this.angle += dt * this.speed
@@ -170,11 +176,12 @@ export class SceneRenderer {
     const camera = this.scene.activeCamera
     if (!camera) return
 
-    // 1 world unit = 1 CSS pixel: use the canvas's logical (DPR-independent) height, not
-    // the device-pixel backing-store height passed in `height`. Aspect is unaffected -
-    // device pixels and CSS pixels share the same aspect ratio (dpr cancels).
+    // 1 world unit = 1 CSS pixel at zoom 1: use the canvas's logical (DPR-independent)
+    // height, not the device-pixel backing-store height passed in `height`. Aspect is
+    // unaffected - device pixels and CSS pixels share the same aspect ratio (dpr cancels).
+    // Dividing by zoom shrinks the visible world extent, so content appears larger.
     if (camera instanceof OrthographicCamera) {
-      camera.viewHeight = Math.max(1, this.canvas.clientHeight)
+      camera.viewHeight = Math.max(1, this.canvas.clientHeight / this.zoom)
     }
 
     this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
@@ -198,8 +205,19 @@ export class SceneRenderer {
 
 export interface SceneRendererHandle {
   setSpeed: (speed: number) => void
+  setZoom: (zoom: number) => void
   camera: OrthographicCamera
   destroy: () => void
+}
+
+export interface CreateSceneRendererOptions {
+  /**
+   * Called with a human-readable message on a GPU device error (e.g. an invalid
+   * pipeline from a shader/bind-group-layout mismatch). Such errors do NOT throw - they
+   * surface asynchronously via the device - so without this they render as a silently
+   * blank canvas. Reporting them makes that failure mode visible instead.
+   */
+  onDeviceError?: (message: string) => void
 }
 
 /**
@@ -208,10 +226,32 @@ export interface SceneRendererHandle {
  * stroked shapes, plus a stroked polyline) on a white background through a 2D
  * orthographic camera, MSAA 4x. Throws if WebGPU is unavailable.
  */
-export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<SceneRendererHandle> {
+export async function createSceneRenderer(
+  canvas: HTMLCanvasElement,
+  options: CreateSceneRendererOptions = {},
+): Promise<SceneRendererHandle> {
   const gpu = await createGpuContext(canvas)
-  const resizer = new CanvasResizer(canvas)
+
+  // Surface asynchronous device (validation) errors - an invalid pipeline or a bad
+  // draw does not throw; it just poisons the command buffer and the canvas stays blank.
+  gpu.device.addEventListener('uncapturederror', (event) => {
+    const message = (event as GPUUncapturedErrorEvent).error.message
+    console.error('WebGPU device error:', message)
+    options.onDeviceError?.(message)
+  })
+
+  // Catch the most common startup failure - an invalid render pipeline built from a
+  // shader/layout mismatch - which is created inside the SceneRenderer constructor.
+  gpu.device.pushErrorScope('validation')
   const scene = new SceneRenderer(gpu.device, gpu.format, canvas)
+  gpu.device.popErrorScope().then((error) => {
+    if (error) {
+      console.error('WebGPU pipeline setup error:', error.message)
+      options.onDeviceError?.(error.message)
+    }
+  })
+
+  const resizer = new CanvasResizer(canvas)
 
   const frameRenderer = new FrameRenderer(
     gpu,
@@ -227,6 +267,9 @@ export async function createSceneRenderer(canvas: HTMLCanvasElement): Promise<Sc
   return {
     setSpeed(next: number) {
       scene.setSpeed(next)
+    },
+    setZoom(next: number) {
+      scene.setZoom(next)
     },
     camera: scene.camera,
     destroy() {

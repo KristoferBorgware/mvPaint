@@ -4,11 +4,13 @@ import { createSceneRenderer, type SceneRendererHandle } from '../webgpu/SceneRe
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
   speed: number
-  /** Called with a human-readable message if WebGPU initialization fails. */
+  /** Camera zoom factor (>1 zooms in). Updated live without recreating the renderer. */
+  zoom: number
+  /** Called with a human-readable message on WebGPU init or device errors. */
   onError?: (message: string) => void
 }
 
-export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
+export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
 
@@ -19,7 +21,7 @@ export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
 
     let cancelled = false
 
-    createSceneRenderer(canvas)
+    createSceneRenderer(canvas, { onDeviceError: (message) => onError?.(message) })
       .then((handle) => {
         if (cancelled) {
           handle.destroy()
@@ -27,6 +29,7 @@ export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
         }
         handleRef.current = handle
         handle.setSpeed(speed)
+        handle.setZoom(zoom)
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -45,6 +48,11 @@ export function WebGPUCanvas({ speed, onError }: WebGPUCanvasProps) {
   useEffect(() => {
     handleRef.current?.setSpeed(speed)
   }, [speed])
+
+  // Push zoom changes to the running renderer.
+  useEffect(() => {
+    handleRef.current?.setZoom(zoom)
+  }, [zoom])
 
   return (
     <canvas

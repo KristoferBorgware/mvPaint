@@ -16,14 +16,19 @@ export function createFrameBindGroupLayout(device: GPUDevice): GPUBindGroupLayou
   })
 }
 
-/** group(1): per-batch object data (the transform storage buffer). */
+/**
+ * group(1): per-batch object data (transform + fill/gradient material). Read by BOTH
+ * shader stages - the vertex shader uses each object's model matrix, and the fragment
+ * shader reads its fillType and gradient parameters to evaluate gradient fills - so the
+ * binding must be visible to both.
+ */
 export function createObjectBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
   return device.createBindGroupLayout({
     label: 'objects',
     entries: [
       {
         binding: 0,
-        visibility: GPUShaderStage.VERTEX,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
         buffer: { type: 'read-only-storage' },
       },
     ],
