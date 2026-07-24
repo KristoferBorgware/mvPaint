@@ -8,6 +8,8 @@ import { Rect } from '../shapes/Rect'
 import { Circle } from '../shapes/Circle'
 import { Polyline } from '../shapes/Polyline'
 import { Shape } from '../scene/Shape'
+import { loadSvgDocument } from '../svg/loadSvg'
+import { EXAMPLE_SVG } from '../svg/exampleSvg'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
 import {
@@ -141,6 +143,13 @@ export class SceneRenderer {
         lineCap: 'round',
       }),
     )
+
+    // A whole SVG document loaded through the path pipeline: its shapes (gradient-filled
+    // ring with a hole, radial-filled stroked circle, stroked open curve) become Path
+    // nodes under one container. The root matrix flips Y (SVG is y-down, the scene is
+    // y-up) and lifts the 0..200 artwork into the upper-center of the view.
+    const svgDoc = loadSvgDocument(EXAMPLE_SVG, { rootMatrix: [1, 0, 0, -1, -100, 280] })
+    this.scene.root.addChild(svgDoc)
 
     this.scene.refreshActiveCamera()
   }
