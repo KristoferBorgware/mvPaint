@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen:fonts": "tsx scripts/genFontAtlas.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -20,10 +21,13 @@
   },
   "devDependencies": {
     "@types/earcut": "^3.0.0",
+    "@types/node": "^26.1.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "@webgpu/types": "^0.1.52",
+    "msdf-bmfont-xml": "^2.8.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.5"
   }

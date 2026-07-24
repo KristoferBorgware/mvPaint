@@ -7,6 +7,7 @@
 import { Rect } from '../shapes/Rect'
 import { Circle } from '../shapes/Circle'
 import { Polyline } from '../shapes/Polyline'
+import { Text } from '../shapes/Text'
 import { Shape } from '../scene/Shape'
 import { loadSvgDocument } from '../svg/loadSvg'
 import { EXAMPLE_SVG } from '../svg/exampleSvg'
@@ -16,10 +17,15 @@ import {
   createFrameBindGroupLayout,
   createMeshPipelineLayout,
   createObjectBindGroupLayout,
+  createTextPipelineLayout,
 } from '../render/layouts'
 import { FrameUniforms } from '../render/FrameUniforms'
 import { MeshBatcher } from '../render/MeshBatcher'
 import { createMeshPipeline } from '../render/MeshPipeline'
+import { TextBatcher } from '../render/TextBatcher'
+import { createTextPipeline } from '../render/TextPipeline'
+import { FontBook } from '../text/FontAtlas'
+import { addTextExamples } from './textExample'
 import { createGpuContext } from '../systems/GpuContext'
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { FrameRenderer, type FrameContext } from '../systems/FrameRenderer'
@@ -38,21 +44,33 @@ export class SceneRenderer {
   private readonly batcher: MeshBatcher
   private readonly canvas: HTMLCanvasElement
 
+  private readonly textPipeline: GPURenderPipeline
+  private readonly textBatcher: TextBatcher
+  private readonly fontBook: FontBook
+
   private speed = 1 // spin multiplier (radians per second)
   private angle = 0
   private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   private geometryDirty = true
+  private textGeometryDirty = true
   // Per-rect spin rates, so update() can drive their rotation (transform-only, no rebuild).
   private readonly spins = new Map<Rect, number>()
 
-  constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement) {
+  constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement, fontBook: FontBook) {
     this.canvas = canvas
+    this.fontBook = fontBook
     const frameLayout = createFrameBindGroupLayout(device)
     const objectLayout = createObjectBindGroupLayout(device)
     const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
     this.pipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout)
     this.frameUniforms = new FrameUniforms(device, frameLayout)
     this.batcher = new MeshBatcher(device, objectLayout)
+
+    // Text lane: its own pipeline (adds the atlas bind group) and batcher, sharing group(0)
+    // frame uniforms, group(1) object storage layout, and the MSAA sample count.
+    const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
+    this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
+    this.textBatcher = new TextBatcher(device, objectLayout)
 
     // 2D orthographic camera looking down -Z, parented to the scene root. viewHeight is
     // set from the canvas's CSS height every frame (see draw()), so 1 world unit = 1 CSS
@@ -151,6 +169,10 @@ export class SceneRenderer {
     const svgDoc = loadSvgDocument(EXAMPLE_SVG, { rootMatrix: [1, 0, 0, -1, -100, 280] })
     this.scene.root.addChild(svgDoc)
 
+    // Text nodes rendered through the MSDF text lane: the four styles, mixed sizes, per-letter
+    // stroke, underline/strikethrough, a gradient run, a highlighted run, and a wrapped block.
+    addTextExamples(this.scene.root)
+
     this.scene.refreshActiveCamera()
   }
 
@@ -180,6 +202,15 @@ export class SceneRenderer {
     return shapes
   }
 
+  /** Collect visible Text nodes in painter (traversal) order for the text lane. */
+  private collectTexts(): Text[] {
+    const texts: Text[] = []
+    this.scene.root.traversePreOrder((node) => {
+      if (node instanceof Text && node.visible) texts.push(node)
+    })
+    return texts
+  }
+
   /** Update frame uniforms, (re)build geometry if dirty, refresh transforms, one draw. */
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
     const camera = this.scene.activeCamera
@@ -204,10 +235,22 @@ export class SceneRenderer {
 
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup)
+
+    // Text lane, drawn after the mesh lane so glyphs layer on top (painter order, no depth).
+    const texts = this.collectTexts()
+    if (this.textGeometryDirty) {
+      this.textBatcher.rebuild(texts, this.fontBook)
+      this.textGeometryDirty = false
+    }
+    this.textBatcher.updateObjects()
+    pass.setPipeline(this.textPipeline)
+    this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
   }
 
   destroy(): void {
     this.batcher.destroy()
+    this.textBatcher.destroy()
+    this.fontBook.destroy()
     this.frameUniforms.destroy()
   }
 }
@@ -249,10 +292,14 @@ export async function createSceneRenderer(
     options.onDeviceError?.(message)
   })
 
+  // Load the MSDF font atlases (fetch each PNG + upload to the GPU) before building the scene,
+  // so the text lane has its textures ready on the first frame.
+  const fontBook = await FontBook.load(gpu.device)
+
   // Catch the most common startup failure - an invalid render pipeline built from a
   // shader/layout mismatch - which is created inside the SceneRenderer constructor.
   gpu.device.pushErrorScope('validation')
-  const scene = new SceneRenderer(gpu.device, gpu.format, canvas)
+  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fontBook)
   gpu.device.popErrorScope().then((error) => {
     if (error) {
       console.error('WebGPU pipeline setup error:', error.message)

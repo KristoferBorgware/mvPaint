@@ -42,3 +42,35 @@ export function createMeshPipelineLayout(
 ): GPUPipelineLayout {
   return device.createPipelineLayout({ bindGroupLayouts: [frameLayout, objectLayout] })
 }
+
+/**
+ * group(2): the MSDF font atlas - a sampled texture + its sampler - read by the text lane's
+ * fragment shader only. The mesh lane never binds group(2); it belongs solely to text.
+ */
+export function createAtlasBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+  return device.createBindGroupLayout({
+    label: 'atlas',
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        texture: { sampleType: 'float' },
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.FRAGMENT,
+        sampler: { type: 'filtering' },
+      },
+    ],
+  })
+}
+
+/** Text-lane pipeline layout: shared frame + per-object material (groups 0/1) plus the atlas. */
+export function createTextPipelineLayout(
+  device: GPUDevice,
+  frameLayout: GPUBindGroupLayout,
+  objectLayout: GPUBindGroupLayout,
+  atlasLayout: GPUBindGroupLayout,
+): GPUPipelineLayout {
+  return device.createPipelineLayout({ bindGroupLayouts: [frameLayout, objectLayout, atlasLayout] })
+}

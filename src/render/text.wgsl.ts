@@ -1,0 +1,194 @@
+// Text-lane shader (MSDF). Each vertex carries a local position, an atlas UV, a color, and a
+// packed id (object/material index + an "is glyph" flag). Glyph fragments recover coverage
+// from the multi-channel signed distance field (median of RGB) and anti-alias it in screen
+// space via the field's screen-pixel range (derived with fwidth, so it stays crisp at any
+// zoom); an optional per-letter outline widens that coverage. Non-glyph fragments (underline,
+// strikethrough, highlight) return their flat color or per-run gradient with no MSDF sampling.
+export const textShaderCode = /* wgsl */ `
+const MAX_STOPS: u32 = 8u;
+const GLYPH_BIT: u32 = 0x80000000u;
+const OBJECT_ID_MASK: u32 = 0x7fffffffu;
+const FILL_COLOR: u32 = 0u;
+const FILL_LINEAR: u32 = 1u;
+const FILL_RADIAL: u32 = 2u;
+
+struct Frame {
+  viewProjection : mat4x4<f32>,
+  resolution : vec2<f32>,
+};
+
+struct ObjectData {
+  model : mat4x4<f32>,
+  fillType : u32,
+  stopCount : u32,
+  gradientStart : vec2<f32>,
+  gradientStartRadius : f32,
+  gradientEnd : vec2<f32>,
+  gradientEndRadius : f32,
+  stopPositions : array<f32, MAX_STOPS>,
+  stopColors : array<vec4<f32>, MAX_STOPS>,
+  strokeColor : vec4<f32>,
+  strokeWidth : f32,
+  hasStroke : u32,
+  distanceRange : f32,
+  pad : f32,
+};
+
+@group(0) @binding(0) var<uniform> frame : Frame;
+@group(1) @binding(0) var<storage, read> objects : array<ObjectData>;
+@group(2) @binding(0) var atlasTex : texture_2d<f32>;
+@group(2) @binding(1) var atlasSampler : sampler;
+
+struct VertexInput {
+  @location(0) position : vec2<f32>,
+  @location(1) uv : vec2<f32>,
+  @location(2) color : vec4<f32>,
+  @location(3) packedId : u32,
+};
+
+struct VertexOutput {
+  @builtin(position) clip : vec4<f32>,
+  @location(0) uv : vec2<f32>,
+  @location(1) color : vec4<f32>,
+  @location(2) localPos : vec2<f32>,
+  @location(3) @interpolate(flat) packedId : u32,
+};
+
+@vertex
+fn vs_main(input : VertexInput) -> VertexOutput {
+  let objectId = input.packedId & OBJECT_ID_MASK;
+  let model = objects[objectId].model;
+  var out : VertexOutput;
+  out.clip = frame.viewProjection * model * vec4<f32>(input.position, 0.0, 1.0);
+  out.uv = input.uv;
+  out.color = input.color;
+  out.localPos = input.position;
+  out.packedId = input.packedId;
+  return out;
+}
+
+fn linearGradientT(p : vec2<f32>, start : vec2<f32>, end : vec2<f32>) -> f32 {
+  let axis = end - start;
+  let axisLenSq = dot(axis, axis);
+  if (axisLenSq < 1e-8) {
+    return 0.0;
+  }
+  return dot(p - start, axis) / axisLenSq;
+}
+
+fn radialGradientT(p : vec2<f32>, c0 : vec2<f32>, r0 : f32, c1 : vec2<f32>, r1 : f32) -> f32 {
+  let dc = c1 - c0;
+  let dr = r1 - r0;
+  let pc = p - c0;
+  let a = dot(dc, dc) - dr * dr;
+  let b = -2.0 * (dot(pc, dc) + r0 * dr);
+  let c = dot(pc, pc) - r0 * r0;
+
+  if (abs(a) < 1e-6) {
+    if (abs(b) < 1e-6) {
+      return 0.0;
+    }
+    return -c / b;
+  }
+
+  let disc = b * b - 4.0 * a * c;
+  if (disc < 0.0) {
+    return 1.0;
+  }
+  let sq = sqrt(disc);
+  let t0 = (-b + sq) / (2.0 * a);
+  let t1 = (-b - sq) / (2.0 * a);
+  let hi = max(t0, t1);
+  let lo = min(t0, t1);
+  if (r0 + hi * dr >= 0.0) {
+    return hi;
+  }
+  return lo;
+}
+
+fn sampleGradient(obj : ObjectData, t : f32) -> vec4<f32> {
+  let n = obj.stopCount;
+  if (n == 0u) {
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }
+  if (n == 1u || t <= obj.stopPositions[0]) {
+    return obj.stopColors[0];
+  }
+  if (t >= obj.stopPositions[n - 1u]) {
+    return obj.stopColors[n - 1u];
+  }
+  for (var i = 0u; i < n - 1u; i = i + 1u) {
+    let p0 = obj.stopPositions[i];
+    let p1 = obj.stopPositions[i + 1u];
+    if (t >= p0 && t <= p1) {
+      var localT = 0.0;
+      if (p1 > p0) {
+        localT = (t - p0) / (p1 - p0);
+      }
+      return mix(obj.stopColors[i], obj.stopColors[i + 1u], localT);
+    }
+  }
+  return obj.stopColors[n - 1u];
+}
+
+fn median(v : vec3<f32>) -> f32 {
+  return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
+}
+
+// Base fill for both glyph body and solid decoration: the per-vertex color, or the object's
+// per-run gradient evaluated at the fragment's local position.
+fn baseColor(obj : ObjectData, vertexColor : vec4<f32>, localPos : vec2<f32>) -> vec4<f32> {
+  if (obj.fillType == FILL_LINEAR) {
+    let t = clamp(linearGradientT(localPos, obj.gradientStart, obj.gradientEnd), 0.0, 1.0);
+    return sampleGradient(obj, t);
+  }
+  if (obj.fillType == FILL_RADIAL) {
+    let t = clamp(
+      radialGradientT(localPos, obj.gradientStart, obj.gradientStartRadius, obj.gradientEnd, obj.gradientEndRadius),
+      0.0, 1.0,
+    );
+    return sampleGradient(obj, t);
+  }
+  return vertexColor;
+}
+
+@fragment
+fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
+  let obj = objects[input.packedId & OBJECT_ID_MASK];
+
+  // Derivative-based quantities (texture sample + fwidth) must run in uniform control flow, so
+  // they are evaluated before any branch on the per-fragment glyph flag.
+  let msd = textureSample(atlasTex, atlasSampler, input.uv).rgb;
+  let uvDeriv = fwidth(input.uv);
+  let localDeriv = fwidth(input.localPos);
+
+  // Solid text decoration (underline / strikethrough / highlight): its own flat color, no MSDF.
+  if ((input.packedId & GLYPH_BIT) == 0u) {
+    return input.color;
+  }
+
+  // Glyph body: the run's flat color, or its per-run gradient evaluated in local space.
+  let base = baseColor(obj, input.color, input.localPos);
+
+  // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
+  let sd = median(msd);
+  let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
+  let screenTexSize = vec2<f32>(1.0) / uvDeriv;
+  let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+  let screenPxDist = screenPxRange * (sd - 0.5);
+  let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
+
+  if (obj.hasStroke == 0u) {
+    return vec4<f32>(base.rgb, base.a * fillAlpha);
+  }
+
+  // Outline: widen coverage by the stroke width, converted from world px to screen px using
+  // the local-position derivative, so the outline scales with the text under camera zoom.
+  let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
+  let strokePx = obj.strokeWidth * screenPerWorld;
+  let outlineAlpha = clamp(screenPxDist + 0.5 + strokePx, 0.0, 1.0);
+  let rgb = mix(obj.strokeColor.rgb, base.rgb, fillAlpha);
+  let a = outlineAlpha * mix(obj.strokeColor.a, base.a, fillAlpha);
+  return vec4<f32>(rgb, a);
+}
+`
