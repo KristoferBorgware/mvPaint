@@ -21,6 +21,7 @@ export * from './scene/Container'
 export * from './scene/Node'
 export * from './scene/Scene'
 export * from './scene/Shape'
+export * from './scene/picking'
 
 export * from './shapes/Circle'
 export * from './shapes/Path'
@@ -39,5 +40,9 @@ export * from './text/msdfMetrics'
 export * from './systems/CanvasResizer'
 export * from './systems/GpuContext'
 export * from './systems/FrameRenderer'
+
+export * from './input/viewport'
+export * from './input/cameraControls'
+export * from './input/SceneInputController'
 
 export * from './webgpu/SceneRenderer'

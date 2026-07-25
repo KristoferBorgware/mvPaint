@@ -1,20 +1,63 @@
-import { useEffect, useRef } from 'react'
-import { createSceneRenderer, type Rect, type SceneRendererHandle } from '@mvpaint/engine'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import {
+  createSceneRenderer,
+  SceneInputController,
+  type PickableNode,
+  type Rect,
+  type SceneRendererHandle,
+} from '@mvpaint/engine'
 import { buildDemoScene } from '../webgpu/demoScene'
+import { SelectionHighlight } from '../webgpu/selectionHighlight'
 
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
   speed: number
-  /** Camera zoom factor (>1 zooms in). Updated live without recreating the renderer. */
+  /** Camera zoom factor (>1 zooms in). Updated live without recreating the renderer;
+   * also updated live in the other direction by wheel/pinch/keyboard zoom. */
   zoom: number
+  onZoomChange?: (zoom: number) => void
   /** Called with a human-readable message on WebGPU init or device errors. */
   onError?: (message: string) => void
+  /** Called with the clicked/tapped node, or null on empty space / Escape. */
+  onSelect?: (node: PickableNode | null) => void
 }
 
-export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
+export interface WebGPUCanvasHandle {
+  /** Clears the current selection (and its highlight) the same way Escape does. */
+  clearSelection: () => void
+}
+
+export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
+  { speed, zoom, onZoomChange, onError, onSelect },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
+  const highlightRef = useRef<SelectionHighlight | null>(null)
   const speedRef = useRef(speed)
+  const onZoomChangeRef = useRef(onZoomChange)
+  const onSelectRef = useRef(onSelect)
+
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange
+  }, [onZoomChange])
+  useEffect(() => {
+    onSelectRef.current = onSelect
+  }, [onSelect])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      clearSelection: () => {
+        const handle = handleRef.current
+        const highlight = highlightRef.current
+        if (!handle || !highlight) return
+        highlight.update(handle, null)
+        onSelectRef.current?.(null)
+      },
+    }),
+    [],
+  )
 
   // Initialize the renderer once, on mount.
   useEffect(() => {
@@ -24,6 +67,10 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
     let cancelled = false
     let angle = 0
     let spins = new Map<Rect, number>()
+    let lastReportedZoom = zoom
+    let inputController: SceneInputController | null = null
+    const highlight = new SelectionHighlight()
+    highlightRef.current = highlight
 
     createSceneRenderer(canvas, {
       onDeviceError: (message) => onError?.(message),
@@ -35,6 +82,13 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
         for (const [rect, spinScale] of spins) {
           rect.rotation = angle * spinScale
         }
+        // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll
+        // it back so the zoom slider stays in sync, without a setState on every frame.
+        const currentZoom = handleRef.current?.getZoom()
+        if (currentZoom !== undefined && currentZoom !== lastReportedZoom) {
+          lastReportedZoom = currentZoom
+          onZoomChangeRef.current?.(currentZoom)
+        }
       },
     })
       .then((handle) => {
@@ -44,6 +98,12 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
         }
         handleRef.current = handle
         handle.setZoom(zoom)
+        inputController = new SceneInputController(canvas, handle, {
+          onPick: (node) => {
+            highlight.update(handle, node)
+            onSelectRef.current?.(node)
+          },
+        })
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -52,18 +112,20 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
 
     return () => {
       cancelled = true
+      inputController?.destroy()
       handleRef.current?.destroy()
       handleRef.current = null
+      highlightRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Keep the animation loop's speed reference current without recreating the renderer.
+  // Push speed changes to the running renderer.
   useEffect(() => {
     speedRef.current = speed
   }, [speed])
 
-  // Push zoom changes to the running renderer.
+  // Push zoom-slider changes to the running renderer.
   useEffect(() => {
     handleRef.current?.setZoom(zoom)
   }, [zoom])
@@ -74,4 +136,4 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
       style={{ display: 'block', width: '100%', height: '100%' }}
     />
   )
-}
+})

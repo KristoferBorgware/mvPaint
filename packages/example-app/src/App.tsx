@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Alert,
   Box,
+  Chip,
   Paper,
   Slider,
   Stack,
@@ -9,17 +10,27 @@ import {
 } from '@mui/material'
 import SpeedIcon from '@mui/icons-material/Speed'
 import ZoomInIcon from '@mui/icons-material/ZoomIn'
-import { WebGPUCanvas } from './components/WebGPUCanvas'
+import type { PickableNode } from '@mvpaint/engine'
+import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 
 export default function App() {
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [error, setError] = useState<string | null>(null)
+  const [selected, setSelected] = useState<PickableNode | null>(null)
+  const canvasRef = useRef<WebGPUCanvasHandle>(null)
 
   return (
     <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
       {/* WebGPU render surface fills the window */}
-      <WebGPUCanvas speed={speed} zoom={zoom} onError={setError} />
+      <WebGPUCanvas
+        ref={canvasRef}
+        speed={speed}
+        zoom={zoom}
+        onZoomChange={setZoom}
+        onError={setError}
+        onSelect={setSelected}
+      />
 
       {/* Floating control panel */}
       <Paper
@@ -72,9 +83,9 @@ export default function App() {
                 <ZoomInIcon fontSize="small" />
                 <Slider
                   aria-label="Camera zoom"
-                  value={zoom}
-                  min={0.1}
-                  max={5}
+                  value={Math.min(zoom, 10)}
+                  min={0.05}
+                  max={10}
                   step={0.05}
                   onChange={(_, value) => setZoom(value as number)}
                   valueLabelDisplay="auto"
@@ -82,9 +93,30 @@ export default function App() {
               </Stack>
             </Stack>
 
+            <Stack spacing={0.5}>
+              <Typography variant="body2" color="text.secondary">
+                Selection
+              </Typography>
+              {selected ? (
+                <Chip
+                  size="small"
+                  label={`${selected.constructor.name}${selected.name ? ` "${selected.name}"` : ''}`}
+                  onDelete={() => canvasRef.current?.clearSelection()}
+                  color="primary"
+                  variant="outlined"
+                  sx={{ alignSelf: 'flex-start' }}
+                />
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Nothing selected - click or tap a shape.
+                </Typography>
+              )}
+            </Stack>
+
             <Typography variant="caption" color="text.secondary">
               Gradient-filled and stroked shapes in the Z=0 plane, viewed through a 2D
-              orthographic camera.
+              orthographic camera. Drag to pan, scroll or pinch to zoom, click/tap to
+              select, Escape to deselect.
             </Typography>
           </Stack>
         )}

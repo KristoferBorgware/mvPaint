@@ -48,6 +48,8 @@ export interface ShapeOptions {
 export abstract class Shape extends Node {
   /** Skipped by the renderer when false. */
   visible = true
+  /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
+  pickable = true
 
   x = 0
   y = 0

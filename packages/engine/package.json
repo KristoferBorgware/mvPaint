@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "gen:fonts": "tsx scripts/genFontAtlas.ts",
-    "test": "tsx src/math/selfTest.ts && tsx src/camera/selfTest.ts && tsx src/render/selfTest.ts && tsx src/scene/selfTest.ts && tsx src/svg/selfTest.ts && tsx src/text/selfTest.ts"
+    "test": "tsx src/math/selfTest.ts && tsx src/camera/selfTest.ts && tsx src/render/selfTest.ts && tsx src/scene/selfTest.ts && tsx src/svg/selfTest.ts && tsx src/text/selfTest.ts && tsx src/input/selfTest.ts"
   },
   "dependencies": {
     "earcut": "^3.2.3",

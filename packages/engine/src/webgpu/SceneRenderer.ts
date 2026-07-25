@@ -8,6 +8,9 @@ import { Shape } from '../scene/Shape'
 import { Text } from '../shapes/Text'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
+import { AABB } from '../math/AABB'
+import { localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { screenToWorld } from '../input/viewport'
 import {
   createFrameBindGroupLayout,
   createMeshPipelineLayout,
@@ -75,6 +78,28 @@ export class SceneRenderer {
   /** Camera zoom: >1 zooms in (content appears larger), <1 zooms out. */
   setZoom(next: number): void {
     this.zoom = next > 0 ? next : 1
+  }
+
+  getZoom(): number {
+    return this.zoom
+  }
+
+  /**
+   * The topmost pickable shape/text under a viewport pixel (CSS px, relative to the
+   * canvas's own top-left - e.g. `event.clientX/Y` minus `canvas.getBoundingClientRect()`).
+   */
+  pick(screenX: number, screenY: number): PickableNode | null {
+    const world = screenToWorld(this.camera, screenX, screenY, {
+      width: this.canvas.clientWidth,
+      height: this.canvas.clientHeight,
+    })
+    if (!world) return null
+    return pickNode(this.scene, world.x, world.y, this.fontBook)
+  }
+
+  /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
+  localBoundsOf(node: PickableNode): AABB {
+    return localBoundsOf(node, this.fontBook)
   }
 
   /** Force a mesh-lane geometry rebuild on the next draw (call after adding/removing shapes). */
@@ -154,6 +179,11 @@ export interface SceneRendererHandle {
   scene: Scene
   camera: OrthographicCamera
   setZoom: (zoom: number) => void
+  getZoom: () => number
+  /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
+  pick: (screenX: number, screenY: number) => PickableNode | null
+  /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
+  localBoundsOf: (node: PickableNode) => AABB
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
   destroy: () => void
@@ -231,6 +261,15 @@ export async function createSceneRenderer(
     camera: scene.camera,
     setZoom(next: number) {
       scene.setZoom(next)
+    },
+    getZoom() {
+      return scene.getZoom()
+    },
+    pick(screenX: number, screenY: number) {
+      return scene.pick(screenX, screenY)
+    },
+    localBoundsOf(node: PickableNode) {
+      return scene.localBoundsOf(node)
     },
     markGeometryDirty() {
       scene.markGeometryDirty()
