@@ -167,36 +167,46 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   let uvDeriv = fwidth(input.uv);
   let localDeriv = fwidth(input.localPos);
 
-  // Solid text decoration (underline / strikethrough / highlight): its own flat color, no MSDF.
+  var color : vec4<f32>;
   if ((input.packedId & GLYPH_BIT) == 0u) {
-    return input.color;
+    // Solid text decoration (underline / strikethrough / highlight): its own flat color, no MSDF.
+    color = input.color;
+  } else {
+    // Glyph body: the run's flat color, or its per-run gradient evaluated in local space.
+    let base = baseColor(obj, input.color, input.localPos);
+
+    // World-px widths (stroke, dilation) are converted to screen px via the local derivative, so
+    // they scale with the text under camera zoom.
+    let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
+
+    // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
+    // The dilate term widens coverage (faux bold, and the soft spread of glow/shadow copies).
+    let sd = median(msd);
+    let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
+    let screenTexSize = vec2<f32>(1.0) / uvDeriv;
+    let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    let screenPxDist = screenPxRange * (sd - 0.5) + obj.dilate * screenPerWorld;
+    let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
+
+    if (obj.hasStroke == 0u) {
+      color = vec4<f32>(base.rgb, base.a * fillAlpha);
+    } else {
+      // Outline: widen coverage further by the stroke width, in the stroke color under the body.
+      let strokePx = obj.strokeWidth * screenPerWorld;
+      let outlineAlpha = clamp(screenPxDist + 0.5 + strokePx, 0.0, 1.0);
+      let rgb = mix(obj.strokeColor.rgb, base.rgb, fillAlpha);
+      let a = outlineAlpha * mix(obj.strokeColor.a, base.a, fillAlpha);
+      color = vec4<f32>(rgb, a);
+    }
   }
 
-  // Glyph body: the run's flat color, or its per-run gradient evaluated in local space.
-  let base = baseColor(obj, input.color, input.localPos);
-
-  // World-px widths (stroke, dilation) are converted to screen px via the local derivative, so
-  // they scale with the text under camera zoom.
-  let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
-
-  // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
-  // The dilate term widens coverage (faux bold, and the soft spread of glow/shadow copies).
-  let sd = median(msd);
-  let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
-  let screenTexSize = vec2<f32>(1.0) / uvDeriv;
-  let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
-  let screenPxDist = screenPxRange * (sd - 0.5) + obj.dilate * screenPerWorld;
-  let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
-
-  if (obj.hasStroke == 0u) {
-    return vec4<f32>(base.rgb, base.a * fillAlpha);
+  // A fully transparent fragment - most commonly a glyph quad's margin outside the
+  // actual glyph ink, where MSDF coverage alpha is 0 - must not write depth.
+  // depthWriteEnabled doesn't look at alpha, so without this every glyph's bounding quad
+  // would occlude whatever's behind it at a different zIndex, not just its visible ink.
+  if (color.a <= 0.0) {
+    discard;
   }
-
-  // Outline: widen coverage further by the stroke width, in the stroke color under the body.
-  let strokePx = obj.strokeWidth * screenPerWorld;
-  let outlineAlpha = clamp(screenPxDist + 0.5 + strokePx, 0.0, 1.0);
-  let rgb = mix(obj.strokeColor.rgb, base.rgb, fillAlpha);
-  let a = outlineAlpha * mix(obj.strokeColor.a, base.a, fillAlpha);
-  return vec4<f32>(rgb, a);
+  return color;
 }
 `

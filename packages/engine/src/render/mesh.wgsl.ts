@@ -137,20 +137,30 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   let isFill = (input.packedId & FILL_BIT) != 0u;
   let obj = objects[input.packedId & OBJECT_ID_MASK];
 
+  var color : vec4<f32>;
   if (!isFill || obj.fillType == FILL_COLOR) {
-    return input.color;
+    color = input.color;
+  } else {
+    var t : f32;
+    if (obj.fillType == FILL_LINEAR) {
+      t = linearGradientT(input.localPos, obj.gradientStart, obj.gradientEnd);
+    } else {
+      t = radialGradientT(
+        input.localPos, obj.gradientStart, obj.gradientStartRadius,
+        obj.gradientEnd, obj.gradientEndRadius,
+      );
+    }
+    t = clamp(t, 0.0, 1.0);
+    color = sampleGradient(obj, t);
   }
 
-  var t : f32;
-  if (obj.fillType == FILL_LINEAR) {
-    t = linearGradientT(input.localPos, obj.gradientStart, obj.gradientEnd);
-  } else {
-    t = radialGradientT(
-      input.localPos, obj.gradientStart, obj.gradientStartRadius,
-      obj.gradientEnd, obj.gradientEndRadius,
-    );
+  // A fully transparent fragment (e.g. a selection-highlight's invisible fill) must not
+  // write depth - depthWriteEnabled doesn't look at alpha, so without this a see-through
+  // fragment would still occlude whatever draws after it (the text lane, always second)
+  // at the same pixel, even though it contributes no visible color of its own.
+  if (color.a <= 0.0) {
+    discard;
   }
-  t = clamp(t, 0.0, 1.0);
-  return sampleGradient(obj, t);
+  return color;
 }
 `
