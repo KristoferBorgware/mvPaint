@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { createSceneRenderer, type SceneRendererHandle } from '../webgpu/SceneRenderer'
+import { createSceneRenderer, type Rect, type SceneRendererHandle } from '@mvpaint/engine'
+import { buildDemoScene } from '../webgpu/demoScene'
 
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
@@ -13,6 +14,7 @@ interface WebGPUCanvasProps {
 export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
+  const speedRef = useRef(speed)
 
   // Initialize the renderer once, on mount.
   useEffect(() => {
@@ -20,15 +22,27 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
     if (!canvas) return
 
     let cancelled = false
+    let angle = 0
+    let spins = new Map<Rect, number>()
 
-    createSceneRenderer(canvas, { onDeviceError: (message) => onError?.(message) })
+    createSceneRenderer(canvas, {
+      onDeviceError: (message) => onError?.(message),
+      populate: (scene) => {
+        spins = buildDemoScene(scene)
+      },
+      onFrame: (dt) => {
+        angle += dt * speedRef.current
+        for (const [rect, spinScale] of spins) {
+          rect.rotation = angle * spinScale
+        }
+      },
+    })
       .then((handle) => {
         if (cancelled) {
           handle.destroy()
           return
         }
         handleRef.current = handle
-        handle.setSpeed(speed)
         handle.setZoom(zoom)
       })
       .catch((err: unknown) => {
@@ -44,9 +58,9 @@ export function WebGPUCanvas({ speed, zoom, onError }: WebGPUCanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Push speed changes to the running renderer.
+  // Keep the animation loop's speed reference current without recreating the renderer.
   useEffect(() => {
-    handleRef.current?.setSpeed(speed)
+    speedRef.current = speed
   }, [speed])
 
   // Push zoom changes to the running renderer.
