@@ -114,6 +114,30 @@ export class FontBook {
     return STYLE_ORDER.indexOf(style)
   }
 
+  /**
+   * Resolve a requested style to a loaded atlas, synthesizing what is missing. When the exact
+   * style is present it is used as-is; otherwise the nearest available atlas is chosen and the
+   * missing weight/slant is flagged for synthesis (faux bold via distance dilation, faux italic
+   * via shear). With all four Inter styles loaded this always returns the real atlas.
+   */
+  resolve(style: FontStyle): { metrics: FontMetrics; atlasIndex: number; fauxBold: boolean; fauxItalic: boolean } {
+    const wantBold = style.includes('bold')
+    const wantItalic = style.includes('italic')
+    const candidates: FontStyle[] = [style, wantItalic ? 'italic' : 'regular', wantBold ? 'bold' : 'regular', 'regular']
+    for (const candidate of candidates) {
+      const idx = STYLE_ORDER.indexOf(candidate)
+      if (idx >= 0 && this.atlases[idx]) {
+        return {
+          metrics: this.atlases[idx].metrics,
+          atlasIndex: idx,
+          fauxBold: wantBold && !candidate.includes('bold'),
+          fauxItalic: wantItalic && !candidate.includes('italic'),
+        }
+      }
+    }
+    return { metrics: this.atlases[0].metrics, atlasIndex: 0, fauxBold: wantBold, fauxItalic: wantItalic }
+  }
+
   atlas(style: FontStyle): FontAtlas {
     return this.atlases[this.indexOf(style)]
   }

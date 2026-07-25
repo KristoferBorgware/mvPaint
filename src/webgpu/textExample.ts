@@ -122,17 +122,117 @@ export function addTextExamples(root: Container): void {
     }),
   )
 
+  // --- second column: the follow-up features ---
+
+  // Baseline shift: a superscript exponent and a subscript.
+  root.addChild(
+    new Text({
+      name: 'text-baseline',
+      x: 90,
+      y: 340,
+      runs: [
+        { text: 'E = mc', style: { fontSize: 34, color: NAVY } },
+        { text: '2', style: { fontSize: 22, color: NAVY, baselineShift: 16 } },
+        { text: '   H', style: { fontSize: 34, color: NAVY } },
+        { text: '2', style: { fontSize: 22, color: NAVY, baselineShift: -6 } },
+        { text: 'O', style: { fontSize: 34, color: NAVY } },
+      ],
+    }),
+  )
+
+  // Faux weight/slant synthesized on top of the regular atlas (dilation + shear).
+  root.addChild(
+    new Text({
+      name: 'text-faux',
+      x: 90,
+      y: 285,
+      runs: [
+        { text: 'Faux ', style: { fontSize: 30, color: NAVY } },
+        { text: 'bold ', style: { fontSize: 30, color: NAVY, fauxBold: true } },
+        { text: 'italic ', style: { fontSize: 30, color: NAVY, fauxItalic: true } },
+        { text: 'both', style: { fontSize: 30, color: NAVY, fauxBold: true, fauxItalic: true } },
+      ],
+    }),
+  )
+
+  // Drop shadow: an offset, softened copy behind the glyphs.
+  root.addChild(
+    new Text({
+      name: 'text-shadow',
+      x: 90,
+      y: 225,
+      text: 'Drop shadow',
+      style: {
+        fontStyle: 'bold',
+        fontSize: 44,
+        color: [0.15, 0.4, 0.85, 1],
+        shadow: { color: [0, 0, 0, 0.35], offsetX: 3, offsetY: 4, blur: 1 },
+      },
+    }),
+  )
+
+  // Soft glow: a dilated halo copy behind the glyphs.
+  root.addChild(
+    new Text({
+      name: 'text-glow',
+      x: 90,
+      y: 155,
+      text: 'Soft glow',
+      style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: { color: [1, 0.8, 0.15, 1], radius: 6 } },
+    }),
+  )
+
+  // Justified paragraph (spaces stretch so every non-final line fills the width).
+  root.addChild(
+    new Text({
+      name: 'text-justify',
+      x: 90,
+      y: 95,
+      maxWidth: 360,
+      align: 'justify',
+      lineHeight: 1.35,
+      text: 'Justified text spreads the inter-word spaces so every line except the last reaches the right edge.',
+      style: { fontSize: 18, color: SLATE },
+    }),
+  )
+
+  // Right-to-left flow (mechanical mirror; the first character lands rightmost).
+  root.addChild(
+    new Text({
+      name: 'text-rtl',
+      x: 90,
+      y: -15,
+      maxWidth: 360,
+      direction: 'rtl',
+      text: 'RTL flow 12345',
+      style: { fontSize: 28, color: CRIMSON },
+    }),
+  )
+
   // Center-aligned block with hard line breaks.
   root.addChild(
     new Text({
       name: 'text-centered',
-      x: 150,
-      y: 250,
+      x: 90,
+      y: -70,
       align: 'center',
       maxWidth: 260,
       lineHeight: 1.25,
-      text: 'Centered\nand aligned\ntext block',
-      style: { fontStyle: 'italic', fontSize: 30, color: NAVY },
+      text: 'Centered\nand aligned',
+      style: { fontStyle: 'italic', fontSize: 28, color: NAVY },
+    }),
+  )
+
+  // Vertical orientation: glyphs stack top-to-bottom in right-to-left columns.
+  root.addChild(
+    new Text({
+      name: 'text-vertical',
+      x: 470,
+      y: 340,
+      orientation: 'vertical',
+      lineHeight: 1.05,
+      text: 'Vertical\ntext',
+      style: { fontStyle: 'bold', fontSize: 30, color: TEAL },
     }),
   )
 }

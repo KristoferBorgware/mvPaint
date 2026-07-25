@@ -12,6 +12,7 @@ import type { TextMaterial } from '../text/layout'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
 import {
   TEXT_GLYPH_BIT,
+  TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
   TEXT_OBJECT_FILL_TYPE_OFFSET,
   TEXT_OBJECT_GRADIENT_END_OFFSET,
@@ -79,7 +80,9 @@ export class TextBatcher {
         const packed = (objectBase + q.material) | (q.isGlyph ? TEXT_GLYPH_BIT : 0)
         const b = vertexCount
         const push = (x: number, y: number, u: number, v: number): void => {
-          posUvColor.push(x, y, u, v, q.color[0], q.color[1], q.color[2], q.color[3])
+          // Faux-italic shear: offset x by skew * (y - pivot), turning the rect into a slanted
+          // parallelogram (0 skew leaves it axis-aligned).
+          posUvColor.push(x + q.skew * (y - q.skewPivotY), y, u, v, q.color[0], q.color[1], q.color[2], q.color[3])
           packedIds.push(packed)
           vertexCount++
         }
@@ -188,6 +191,7 @@ export class TextBatcher {
       f32[base + TEXT_OBJECT_STROKE_WIDTH_OFFSET / 4] = material.strokeWidth
       u32[base + TEXT_OBJECT_HAS_STROKE_OFFSET / 4] = material.strokeWidth > 0 ? 1 : 0
       f32[base + TEXT_OBJECT_DISTANCE_RANGE_OFFSET / 4] = material.distanceRange
+      f32[base + TEXT_OBJECT_DILATE_OFFSET / 4] = material.dilate
     })
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)

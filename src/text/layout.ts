@@ -1,23 +1,17 @@
 // Text shaping: turn styled runs into positioned quads for the text lane. It resolves each run
-// to a font atlas, lays glyphs out with kerning and letter-spacing, greedily wraps to an
-// optional max width, breaks on '\n', aligns each line, and emits three kinds of quad -
-// highlight backgrounds (behind), glyph quads (MSDF), and underline/strikethrough lines (in
-// front). Every run becomes one material (transform + fill/gradient + per-letter stroke),
-// referenced by its quads. Coordinates are the node's local text space: origin at the top-left
-// of the block, +x right, +y up, first line's top at y = 0 (lines descend to negative y).
+// to a font atlas (synthesizing a missing weight/slant as faux bold/italic), lays glyphs out
+// with kerning, letter-spacing, and baseline shift, greedily wraps to an optional max width,
+// breaks on '\n', aligns each line (left/center/right/justify), and emits quads back-to-front:
+// highlight backgrounds, drop shadows, soft glows, glyph bodies, then underline/strikethrough.
+// Horizontal text supports left-to-right and (mechanically mirrored) right-to-left; a vertical
+// orientation stacks glyphs top-to-bottom in right-to-left columns. Every run becomes one or
+// more materials (fill/gradient + per-letter stroke + coverage dilation) referenced by its
+// quads. Coordinates are the node's local space: +x right, +y up, the block's top-left at the
+// origin (horizontal lines descend to negative y; vertical columns extend to negative x).
 
 import type { FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
 import type { FontStyle } from './FontAtlas'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
-
-/**
- * The slice of a font source the shaper needs: a style's metrics and its atlas index. FontBook
- * satisfies this; decoupling it lets the shaper run (and be tested) without any GPU objects.
- */
-export interface FontProvider {
-  atlas(style: FontStyle): { metrics: FontMetrics }
-  indexOf(style: FontStyle): number
-}
 
 export interface TextGradient {
   type: 'linear' | 'radial'
@@ -27,6 +21,20 @@ export interface TextGradient {
   startRadius?: number
   endRadius?: number
   stops: GradientStop[]
+}
+
+/** Drop shadow: an offset copy of the glyphs drawn behind them. `blur` softens the edge (px). */
+export interface TextShadow {
+  color: RGBA
+  offsetX: number
+  offsetY: number
+  blur?: number
+}
+
+/** Soft glow: a dilated copy of the glyphs drawn behind them; `radius` is the spread in px. */
+export interface TextGlow {
+  color: RGBA
+  radius: number
 }
 
 export interface TextRunStyle {
@@ -44,6 +52,14 @@ export interface TextRunStyle {
   highlight?: RGBA
   /** Extra tracking in world px between glyphs. */
   letterSpacing?: number
+  /** Vertical shift from the baseline in world px (+up = superscript, -down = subscript). */
+  baselineShift?: number
+  /** Force synthetic bold (distance dilation) on top of the resolved atlas. */
+  fauxBold?: boolean
+  /** Force synthetic italic (horizontal shear) on top of the resolved atlas. */
+  fauxItalic?: boolean
+  shadow?: TextShadow
+  glow?: TextGlow
 }
 
 export interface TextRun {
@@ -51,17 +67,35 @@ export interface TextRun {
   style?: TextRunStyle
 }
 
-export type TextAlign = 'left' | 'center' | 'right'
+export type TextAlign = 'left' | 'center' | 'right' | 'justify'
+export type TextDirection = 'ltr' | 'rtl'
+export type TextOrientation = 'horizontal' | 'vertical'
 
 export interface TextLayoutOptions {
   align?: TextAlign
   /** Wrap width in world px; undefined = no wrapping (breaks only on '\n'). */
   maxWidth?: number
-  /** Line-height multiplier over the font's own line height; default 1. */
+  /** Line-height multiplier over the font's line height; default 1. */
   lineHeight?: number
+  /** Horizontal flow direction; ignored when orientation is vertical. Default 'ltr'. */
+  direction?: TextDirection
+  /** 'horizontal' (default) flows in lines; 'vertical' stacks glyphs in right-to-left columns. */
+  orientation?: TextOrientation
 }
 
-/** Per-run material: transform-independent fill/gradient + per-letter stroke + atlas range. */
+/** The slice of a font source the shaper needs: metrics, atlas index, and synthesis flags. */
+export interface ResolvedStyle {
+  metrics: FontMetrics
+  atlasIndex: number
+  fauxBold: boolean
+  fauxItalic: boolean
+}
+
+export interface FontProvider {
+  resolve(style: FontStyle): ResolvedStyle
+}
+
+/** Per-run material: transform-independent fill/gradient + per-letter stroke + coverage dilation. */
 export interface TextMaterial {
   fillPriority: FillPriority
   gradientStart: Point2
@@ -71,10 +105,12 @@ export interface TextMaterial {
   stops: GradientStop[]
   strokeColor: RGBA
   strokeWidth: number
+  /** Extra coverage in world px (faux bold, glow/shadow softening). */
+  dilate: number
   distanceRange: number
 }
 
-/** One axis-aligned quad in node-local space (y-up). Glyph quads also carry an atlas uv rect. */
+/** One quad in node-local space (y-up). Glyph quads carry an atlas uv rect; `skew` shears x. */
 export interface TextQuad {
   material: number
   atlasIndex: number
@@ -88,6 +124,9 @@ export interface TextQuad {
   u1: number
   v1: number
   color: RGBA
+  /** Faux-italic shear factor: each corner's x is offset by skew*(y - skewPivotY). */
+  skew: number
+  skewPivotY: number
 }
 
 export interface ShapedText {
@@ -100,108 +139,195 @@ export interface ShapedText {
 
 const BLACK: RGBA = [0, 0, 0, 1]
 const ORIGIN: Point2 = { x: 0, y: 0 }
+const FAUX_BOLD_DILATE = 0.03 // fraction of font size, in world px
+const FAUX_ITALIC_SKEW = 0.24 // tangent of the shear angle
 
-// One laid-out character (a glyph, or a space/blank that only advances the pen).
-interface Entry {
-  run: number
-  atlasIndex: number
+// A run resolved to its atlas + materials, shared by every entry of the run.
+interface RunResolved {
   metrics: FontMetrics
+  atlasIndex: number
   scale: number
   fontSize: number
-  cp: number
-  glyph: Glyph | undefined
-  isSpace: boolean
-  advance: number // pen advance in world px (xadvance*scale + letterSpacing)
   letterSpacing: number
+  baselineShift: number
   color: RGBA
   underline: boolean
   strikethrough: boolean
   highlight: RGBA | undefined
+  skew: number
+  mainMaterial: number
+  shadowMaterial: number
+  glowMaterial: number
+  shadow: TextShadow | undefined
+  glow: TextGlow | undefined
 }
 
-function materialForRun(style: TextRunStyle, distanceRange: number): TextMaterial {
-  const g = style.gradient
-  let fillPriority: FillPriority = 'color'
-  if (g) fillPriority = g.type === 'radial' ? 'radial-gradient' : 'linear-gradient'
+// One laid-out character: a glyph, or a space/spacer that only advances the pen (rr = -1).
+interface Entry {
+  rr: number
+  cp: number
+  glyph: Glyph | undefined
+  isSpace: boolean
+  advance: number
+}
+
+interface ResolveResult {
+  resolved: RunResolved[]
+  materials: TextMaterial[]
+}
+
+function solidMaterial(color: RGBA, dilate: number, distanceRange: number): TextMaterial {
+  // `color` rides the per-vertex channel; the material stays a solid (fillType 'color').
+  void color
   return {
-    fillPriority,
-    gradientStart: g ? g.start : ORIGIN,
-    gradientStartRadius: g?.startRadius ?? 0,
-    gradientEnd: g ? g.end : ORIGIN,
-    gradientEndRadius: g?.endRadius ?? 0,
-    stops: g ? g.stops : [],
-    strokeColor: style.strokeColor ?? BLACK,
-    strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
+    fillPriority: 'color',
+    gradientStart: ORIGIN,
+    gradientStartRadius: 0,
+    gradientEnd: ORIGIN,
+    gradientEndRadius: 0,
+    stops: [],
+    strokeColor: BLACK,
+    strokeWidth: 0,
+    dilate,
     distanceRange,
   }
 }
 
-/** Shape styled runs into positioned quads + per-run materials. */
-export function layoutText(
-  runs: readonly TextRun[],
-  options: TextLayoutOptions,
-  fonts: FontProvider,
-): ShapedText {
-  const lineHeightMult = options.lineHeight ?? 1
+function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResult {
+  const resolved: RunResolved[] = []
   const materials: TextMaterial[] = []
 
-  // Flatten runs into a single entry stream (glyphs, spaces, and hard '\n' breaks as null).
-  const stream: (Entry | null)[] = []
-  let fallback: { ascent: number; descent: number } | null = null
-
-  runs.forEach((run, runIndex) => {
+  for (const run of runs) {
     const style = run.style ?? {}
-    const fontStyle = style.fontStyle ?? 'regular'
     const fontSize = style.fontSize ?? 32
-    const atlas = fonts.atlas(fontStyle)
-    const metrics = atlas.metrics
-    const atlasIndex = fonts.indexOf(fontStyle)
+    const r = fonts.resolve(style.fontStyle ?? 'regular')
+    const metrics = r.metrics
     const scale = fontSize / metrics.size
-    const letterSpacing = style.letterSpacing ?? 0
-    const color = style.color ?? style.gradient?.stops[0]?.color ?? BLACK
-    const highlight = style.highlight
+    const fauxBold = r.fauxBold || (style.fauxBold ?? false)
+    const fauxItalic = r.fauxItalic || (style.fauxItalic ?? false)
+    const boldDilate = fauxBold ? fontSize * FAUX_BOLD_DILATE : 0
 
-    materials.push(materialForRun(style, metrics.distanceRange))
-    if (!fallback) {
-      fallback = { ascent: metrics.base * scale, descent: (metrics.lineHeight - metrics.base) * scale }
+    const g = style.gradient
+    let fillPriority: FillPriority = 'color'
+    if (g) fillPriority = g.type === 'radial' ? 'radial-gradient' : 'linear-gradient'
+    const mainMaterial = materials.length
+    materials.push({
+      fillPriority,
+      gradientStart: g ? g.start : ORIGIN,
+      gradientStartRadius: g?.startRadius ?? 0,
+      gradientEnd: g ? g.end : ORIGIN,
+      gradientEndRadius: g?.endRadius ?? 0,
+      stops: g ? g.stops : [],
+      strokeColor: style.strokeColor ?? BLACK,
+      strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
+      dilate: boldDilate,
+      distanceRange: metrics.distanceRange,
+    })
+
+    let glowMaterial = -1
+    if (style.glow) {
+      glowMaterial = materials.length
+      materials.push(solidMaterial(style.glow.color, style.glow.radius + boldDilate, metrics.distanceRange))
+    }
+    let shadowMaterial = -1
+    if (style.shadow) {
+      shadowMaterial = materials.length
+      materials.push(solidMaterial(style.shadow.color, (style.shadow.blur ?? 0) + boldDilate, metrics.distanceRange))
     }
 
+    resolved.push({
+      metrics,
+      atlasIndex: r.atlasIndex,
+      scale,
+      fontSize,
+      letterSpacing: style.letterSpacing ?? 0,
+      baselineShift: style.baselineShift ?? 0,
+      color: style.color ?? g?.stops[0]?.color ?? BLACK,
+      underline: style.underline ?? false,
+      strikethrough: style.strikethrough ?? false,
+      highlight: style.highlight,
+      skew: fauxItalic ? FAUX_ITALIC_SKEW : 0,
+      mainMaterial,
+      shadowMaterial,
+      glowMaterial,
+      shadow: style.shadow,
+      glow: style.glow,
+    })
+  }
+
+  return { resolved, materials }
+}
+
+// Flatten runs into an entry stream; null marks a hard '\n' break.
+function buildStream(runs: readonly TextRun[], resolved: RunResolved[]): (Entry | null)[] {
+  const stream: (Entry | null)[] = []
+  runs.forEach((run, runIndex) => {
+    const rr = resolved[runIndex]
     for (const ch of run.text) {
       const cp = ch.codePointAt(0) ?? 0
-      if (cp === 13) continue // ignore carriage returns
+      if (cp === 13) continue
       if (cp === 10) {
-        stream.push(null) // hard line break
+        stream.push(null)
         continue
       }
-      const glyph = glyphFor(metrics, cp)
+      const glyph = glyphFor(rr.metrics, cp)
       const isSpace = cp === 32 || glyph === undefined
-      const xadvance = glyph ? glyph.xadvance : (metrics.glyphs.get(32)?.xadvance ?? metrics.size * 0.3)
-      stream.push({
-        run: runIndex,
-        atlasIndex,
-        metrics,
-        scale,
-        fontSize,
-        cp,
-        glyph: isSpace ? undefined : glyph,
-        isSpace,
-        advance: xadvance * scale + letterSpacing,
-        letterSpacing,
-        color,
-        underline: style.underline ?? false,
-        strikethrough: style.strikethrough ?? false,
-        highlight,
-      })
+      const xadvance = glyph ? glyph.xadvance : (rr.metrics.glyphs.get(32)?.xadvance ?? rr.metrics.size * 0.3)
+      stream.push({ rr: runIndex, cp, glyph: isSpace ? undefined : glyph, isSpace, advance: xadvance * rr.scale + rr.letterSpacing })
     }
   })
+  return stream
+}
 
-  // Group into words (non-space runs) separated by spaces / breaks, for greedy wrapping.
+export function layoutText(runs: readonly TextRun[], options: TextLayoutOptions, fonts: FontProvider): ShapedText {
+  const { resolved, materials } = resolveRuns(runs, fonts)
+  if (options.orientation === 'vertical') {
+    return layoutVertical(runs, options, resolved, materials, fonts)
+  }
+  return layoutHorizontal(runs, options, resolved, materials)
+}
+
+// Kerning between two consecutive entries of the same run (0 across runs / spacers).
+function kernBetween(prev: Entry, cur: Entry, resolved: RunResolved[]): number {
+  if (prev.rr < 0 || cur.rr < 0 || prev.rr !== cur.rr) return 0
+  const rr = resolved[cur.rr]
+  return kerningFor(rr.metrics, prev.cp, cur.cp) * rr.scale
+}
+
+function lineExtent(entries: Entry[], resolved: RunResolved[]): number {
+  let pen = 0
+  for (let i = 0; i < entries.length; i++) {
+    if (i > 0) pen += kernBetween(entries[i - 1], entries[i], resolved)
+    pen += entries[i].advance
+  }
+  return pen
+}
+
+// A zero-glyph entry that only advances the pen (inter-word spaces on a line).
+function spacer(advance: number): Entry {
+  return { rr: -1, cp: 32, glyph: undefined, isSpace: true, advance }
+}
+
+interface Line {
+  entries: Entry[]
+  ended: 'wrap' | 'break' | 'end'
+}
+
+function layoutHorizontal(
+  runs: readonly TextRun[],
+  options: TextLayoutOptions,
+  resolved: RunResolved[],
+  materials: TextMaterial[],
+): ShapedText {
+  const stream = buildStream(runs, resolved)
+
+  // Group into words (non-space runs) separated by spaces / hard breaks.
   type Token = { kind: 'word'; entries: Entry[]; width: number } | { kind: 'space'; advance: number } | { kind: 'break' }
   const tokens: Token[] = []
   let word: Entry[] = []
   const flushWord = () => {
     if (word.length === 0) return
-    tokens.push({ kind: 'word', entries: word, width: wordWidth(word) })
+    tokens.push({ kind: 'word', entries: word, width: lineExtent(word, resolved) })
     word = []
   }
   for (const e of stream) {
@@ -217,169 +343,108 @@ export function layoutText(
   }
   flushWord()
 
-  // Greedy line assembly. A line is a list of word-entry groups; spaces contribute width only.
+  // Greedy line assembly; a line records why it ended (wrap vs break vs end) for justification.
   const maxWidth = options.maxWidth
-  const lines: Entry[][] = []
+  const lines: Line[] = []
   let line: Entry[] = []
   let lineWidth = 0
   let pendingSpace = 0
-  const flushLine = () => {
-    lines.push(line)
+  const flush = (ended: Line['ended']) => {
+    lines.push({ entries: line, ended })
     line = []
     lineWidth = 0
     pendingSpace = 0
   }
   for (const token of tokens) {
     if (token.kind === 'break') {
-      flushLine()
+      flush('break')
     } else if (token.kind === 'space') {
       pendingSpace = token.advance
     } else {
       const gap = line.length > 0 ? pendingSpace : 0
       if (maxWidth !== undefined && line.length > 0 && lineWidth + gap + token.width > maxWidth) {
-        flushLine()
+        flush('wrap')
         line.push(...token.entries)
         lineWidth = token.width
       } else {
-        lineWidth += gap
-        // Represent the inter-word space as a spacer entry so placement advances the pen.
-        if (gap > 0) line.push(spacer(gap))
+        if (gap > 0) {
+          line.push(spacer(gap))
+          lineWidth += gap
+        }
         line.push(...token.entries)
         lineWidth += token.width
       }
       pendingSpace = 0
     }
   }
-  flushLine()
+  flush('end')
 
-  return placeLines(lines, materials, options.align ?? 'left', maxWidth, lineHeightMult, fallback)
-}
+  const rtl = options.direction === 'rtl'
+  const align = options.align ?? (rtl ? 'right' : 'left')
+  const lineHeightMult = options.lineHeight ?? 1
+  const fallback = resolved[0]
+    ? { ascent: resolved[0].metrics.base * resolved[0].scale, descent: (resolved[0].metrics.lineHeight - resolved[0].metrics.base) * resolved[0].scale }
+    : { ascent: 0, descent: 0 }
 
-// Width of a word including internal kerning (glyphs within a word share a run).
-function wordWidth(entries: Entry[]): number {
-  let w = 0
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i]
-    if (i > 0) {
-      const prev = entries[i - 1]
-      if (prev.run === e.run) w += kerningFor(e.metrics, prev.cp, e.cp) * e.scale
-    }
-    w += e.advance
-  }
-  return w
-}
+  if (rtl) for (const l of lines) l.entries.reverse()
 
-// A zero-glyph entry that only advances the pen (used for inter-word spaces on a line).
-function spacer(advance: number): Entry {
-  return {
-    run: -1,
-    atlasIndex: 0,
-    metrics: null as unknown as FontMetrics,
-    scale: 1,
-    fontSize: 0,
-    cp: 32,
-    glyph: undefined,
-    isSpace: true,
-    advance,
-    letterSpacing: 0,
-    color: BLACK,
-    underline: false,
-    strikethrough: false,
-    highlight: undefined,
-  }
-}
-
-function lineExtent(entries: Entry[]): number {
-  let pen = 0
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i]
-    if (i > 0 && e.run >= 0) {
-      const prev = entries[i - 1]
-      if (prev.run === e.run) pen += kerningFor(e.metrics, prev.cp, e.cp) * e.scale
-    }
-    pen += e.advance
-  }
-  return pen
-}
-
-function placeLines(
-  lines: Entry[][],
-  materials: TextMaterial[],
-  align: TextAlign,
-  maxWidth: number | undefined,
-  lineHeightMult: number,
-  fallback: { ascent: number; descent: number } | null,
-): ShapedText {
-  const fb = fallback ?? { ascent: 0, descent: 0 }
   const highlights: TextQuad[] = []
+  const shadows: TextQuad[] = []
+  const glows: TextQuad[] = []
   const glyphs: TextQuad[] = []
   const decorations: TextQuad[] = []
 
-  const widths = lines.map(lineExtent)
+  const widths = lines.map((l) => lineExtent(l.entries, resolved))
   const blockWidth = maxWidth ?? Math.max(0, ...widths)
 
   let topY = 0
-  lines.forEach((entries, li) => {
-    let ascent = fb.ascent
-    let descent = fb.descent
-    for (const e of entries) {
-      if (e.run < 0) continue
-      ascent = Math.max(ascent, e.metrics.base * e.scale)
-      descent = Math.max(descent, (e.metrics.lineHeight - e.metrics.base) * e.scale)
+  lines.forEach((l, li) => {
+    let ascent = fallback.ascent
+    let descent = fallback.descent
+    for (const e of l.entries) {
+      if (e.rr < 0) continue
+      const rr = resolved[e.rr]
+      ascent = Math.max(ascent, rr.metrics.base * rr.scale)
+      descent = Math.max(descent, (rr.metrics.lineHeight - rr.metrics.base) * rr.scale)
     }
+    // The baseline is fixed by the (unshifted) ascent; a run's baselineShift then moves its
+    // glyphs relative to it (a small super/subscript rides within the line's leading).
     const baselineY = topY - ascent
-    const alignOffset = align === 'left' ? 0 : align === 'right' ? blockWidth - widths[li] : (blockWidth - widths[li]) / 2
 
-    // Place glyphs left-to-right, accumulating per-run spans for decorations/highlights. A run
-    // appears as one contiguous span per line (runs are ordered), and inter-word spacers
-    // (run -1) keep the current span open so decorations run continuously across spaces.
+    // Justify wrapped (non-final) lines by widening the inter-word spacers.
+    const spacerCount = l.entries.reduce((n, e) => n + (e.rr < 0 ? 1 : 0), 0)
+    const justify = align === 'justify' && l.ended === 'wrap' && maxWidth !== undefined && spacerCount > 0
+    const extraPerSpacer = justify ? (blockWidth - widths[li]) / spacerCount : 0
+    const alignOffset =
+      align === 'right' ? blockWidth - widths[li] : align === 'center' ? (blockWidth - widths[li]) / 2 : 0
+
     let pen = alignOffset
     let spanRun = -1
     let spanStart = 0
     let spanEnd = 0
     let spanEntry: Entry | null = null
     const flushSpan = () => {
-      if (spanEntry && spanEnd > spanStart) {
-        emitRunDecorations(spanEntry, spanStart, spanEnd, baselineY, highlights, decorations)
-      }
+      if (spanEntry && spanEnd > spanStart) emitRunDecorations(resolved[spanEntry.rr], spanStart, spanEnd, baselineY, highlights, decorations)
       spanEntry = null
       spanRun = -1
     }
 
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i]
-      if (i > 0 && e.run >= 0 && entries[i - 1].run === e.run) {
-        pen += kerningFor(e.metrics, entries[i - 1].cp, e.cp) * e.scale
-      }
-      if (e.run >= 0) {
-        if (e.run !== spanRun) {
+    for (let i = 0; i < l.entries.length; i++) {
+      const e = l.entries[i]
+      if (i > 0) pen += kernBetween(l.entries[i - 1], e, resolved)
+      if (e.rr >= 0) {
+        if (e.rr !== spanRun) {
           flushSpan()
-          spanRun = e.run
+          spanRun = e.rr
           spanStart = pen
           spanEntry = e
         }
         spanEnd = pen + e.advance
+        if (e.glyph) emitGlyphStack(resolved[e.rr], e.glyph, pen, baselineY, 0, glyphs, shadows, glows)
+        pen += e.advance
+      } else {
+        pen += e.advance + extraPerSpacer
       }
-      if (e.glyph) {
-        const g = e.glyph
-        const leftX = pen + g.xoffset * e.scale
-        const topGY = baselineY + (e.metrics.base - g.yoffset) * e.scale
-        glyphs.push({
-          material: e.run,
-          atlasIndex: e.atlasIndex,
-          isGlyph: true,
-          x0: leftX,
-          y0: topGY - g.height * e.scale,
-          x1: leftX + g.width * e.scale,
-          y1: topGY,
-          u0: g.u0,
-          v0: g.v0,
-          u1: g.u1,
-          v1: g.v1,
-          color: e.color,
-        })
-      }
-      pen += e.advance
     }
     flushSpan()
 
@@ -387,7 +452,7 @@ function placeLines(
   })
 
   return {
-    quads: [...highlights, ...glyphs, ...decorations],
+    quads: [...highlights, ...shadows, ...glows, ...glyphs, ...decorations],
     materials,
     width: blockWidth,
     height: -topY,
@@ -395,10 +460,62 @@ function placeLines(
   }
 }
 
-// Emit the highlight background (behind) and underline/strikethrough lines (in front) for one
-// run's contiguous span on a line, using that run's font-derived decoration metrics.
+// Emit a glyph's body, plus its drop-shadow and glow copies (behind it) when the run has them.
+function emitGlyphStack(
+  rr: RunResolved,
+  glyph: Glyph,
+  penX: number,
+  baselineY: number,
+  penYOffset: number,
+  glyphs: TextQuad[],
+  shadows: TextQuad[],
+  glows: TextQuad[],
+): void {
+  if (rr.glowMaterial >= 0 && rr.glow) {
+    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.glowMaterial, rr.glow.color, 0, 0))
+  }
+  if (rr.shadowMaterial >= 0 && rr.shadow) {
+    // offsetY is downward-positive; the scene is y-up, so subtract it.
+    shadows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.shadowMaterial, rr.shadow.color, rr.shadow.offsetX, -rr.shadow.offsetY))
+  }
+  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0))
+}
+
+function makeGlyphQuad(
+  rr: RunResolved,
+  g: Glyph,
+  penX: number,
+  baselineY: number,
+  penYOffset: number,
+  material: number,
+  color: RGBA,
+  offX: number,
+  offY: number,
+): TextQuad {
+  const scale = rr.scale
+  const leftX = penX + g.xoffset * scale + offX
+  const topGY = baselineY + rr.baselineShift + penYOffset + (rr.metrics.base - g.yoffset) * scale + offY
+  return {
+    material,
+    atlasIndex: rr.atlasIndex,
+    isGlyph: true,
+    x0: leftX,
+    y0: topGY - g.height * scale,
+    x1: leftX + g.width * scale,
+    y1: topGY,
+    u0: g.u0,
+    v0: g.v0,
+    u1: g.u1,
+    v1: g.v1,
+    color,
+    skew: rr.skew,
+    skewPivotY: baselineY,
+  }
+}
+
+// Highlight background (behind) + underline/strikethrough lines (in front) for one run's span.
 function emitRunDecorations(
-  e: Entry,
+  rr: RunResolved,
   startX: number,
   endX: number,
   baselineY: number,
@@ -406,22 +523,96 @@ function emitRunDecorations(
   decorations: TextQuad[],
 ): void {
   const solid = (x0: number, y0: number, x1: number, y1: number, color: RGBA, out: TextQuad[]) => {
-    out.push({ material: e.run, atlasIndex: e.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color })
+    out.push({ material: rr.mainMaterial, atlasIndex: rr.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color, skew: 0, skewPivotY: 0 })
   }
-  if (e.highlight) {
-    const ascent = e.metrics.base * e.scale
-    const descent = (e.metrics.lineHeight - e.metrics.base) * e.scale
-    solid(startX, baselineY - descent, endX, baselineY + ascent, e.highlight, highlights)
+  const shift = rr.baselineShift
+  if (rr.highlight) {
+    const ascent = rr.metrics.base * rr.scale
+    const descent = (rr.metrics.lineHeight - rr.metrics.base) * rr.scale
+    solid(startX, baselineY - descent, endX, baselineY + ascent, rr.highlight, highlights)
   }
-  const dec = e.metrics.decoration
-  if (e.underline) {
-    const cy = baselineY + dec.underlineOffset * e.fontSize
-    const th = dec.underlineThickness * e.fontSize
-    solid(startX, cy - th / 2, endX, cy + th / 2, e.color, decorations)
+  const dec = rr.metrics.decoration
+  if (rr.underline) {
+    const cy = baselineY + shift + dec.underlineOffset * rr.fontSize
+    const th = dec.underlineThickness * rr.fontSize
+    solid(startX, cy - th / 2, endX, cy + th / 2, rr.color, decorations)
   }
-  if (e.strikethrough) {
-    const cy = baselineY + dec.strikeOffset * e.fontSize
-    const th = dec.strikeThickness * e.fontSize
-    solid(startX, cy - th / 2, endX, cy + th / 2, e.color, decorations)
+  if (rr.strikethrough) {
+    const cy = baselineY + shift + dec.strikeOffset * rr.fontSize
+    const th = dec.strikeThickness * rr.fontSize
+    solid(startX, cy - th / 2, endX, cy + th / 2, rr.color, decorations)
   }
+}
+
+// Vertical text: glyphs stack top-to-bottom, columns advance right-to-left, breaking on '\n'.
+// A pragmatic subset - no wrap/justify/decorations/baseline-shift; faux bold, shadow, and glow
+// still apply. Glyphs are centered on their column axis.
+function layoutVertical(
+  runs: readonly TextRun[],
+  options: TextLayoutOptions,
+  resolved: RunResolved[],
+  materials: TextMaterial[],
+  _fonts: FontProvider,
+): ShapedText {
+  const lineHeightMult = options.lineHeight ?? 1
+  const stream = buildStream(runs, resolved)
+
+  const columns: Entry[][] = []
+  let column: Entry[] = []
+  for (const e of stream) {
+    if (e === null) {
+      columns.push(column)
+      column = []
+    } else {
+      column.push(e)
+    }
+  }
+  columns.push(column)
+
+  const shadows: TextQuad[] = []
+  const glows: TextQuad[] = []
+  const glyphs: TextQuad[] = []
+
+  let columnX = 0
+  let maxDepth = 0
+  for (const col of columns) {
+    let columnWidth = 0
+    for (const e of col) if (e.rr >= 0) columnWidth = Math.max(columnWidth, resolved[e.rr].fontSize)
+    if (columnWidth === 0) columnWidth = 32
+
+    let penY = 0
+    for (const e of col) {
+      if (e.rr >= 0 && e.glyph) {
+        const rr = resolved[e.rr]
+        const scale = rr.scale
+        const ascent = rr.metrics.base * scale
+        const step = rr.metrics.lineHeight * scale * lineHeightMult
+        // Center the glyph box on the column axis; place its cell baseline below the pen top.
+        const centerX = columnX - columnWidth / 2
+        const leftX = centerX - (e.glyph.width * scale) / 2 - e.glyph.xoffset * scale
+        const baselineY = penY - ascent
+        emitCenteredGlyph(rr, e.glyph, leftX, baselineY, glyphs, shadows, glows)
+        penY -= step
+      } else if (e.rr >= 0) {
+        penY -= resolved[e.rr].metrics.lineHeight * resolved[e.rr].scale * lineHeightMult
+      }
+    }
+    maxDepth = Math.max(maxDepth, -penY)
+    columnX -= columnWidth * lineHeightMult
+  }
+
+  return {
+    quads: [...shadows, ...glows, ...glyphs],
+    materials,
+    width: -columnX,
+    height: maxDepth,
+    lineCount: columns.length,
+  }
+}
+
+function emitCenteredGlyph(rr: RunResolved, glyph: Glyph, leftX: number, baselineY: number, glyphs: TextQuad[], shadows: TextQuad[], glows: TextQuad[]): void {
+  const penX = leftX - glyph.xoffset * rr.scale // makeGlyphQuad re-adds xoffset
+  if (rr.glowMaterial >= 0 && rr.glow) glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.glowMaterial, rr.glow.color, 0, 0))
+  if (rr.shadowMaterial >= 0 && rr.shadow) shadows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.shadowMaterial, rr.shadow.color, rr.shadow.offsetX, -rr.shadow.offsetY))
+  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0))
 }

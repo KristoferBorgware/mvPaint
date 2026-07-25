@@ -10,7 +10,15 @@ import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
 import { Node } from '../scene/Node'
 import type { FontBook } from '../text/FontAtlas'
-import { layoutText, type ShapedText, type TextAlign, type TextRun, type TextRunStyle } from '../text/layout'
+import {
+  layoutText,
+  type ShapedText,
+  type TextAlign,
+  type TextDirection,
+  type TextOrientation,
+  type TextRun,
+  type TextRunStyle,
+} from '../text/layout'
 
 export interface TextOptions {
   name?: string
@@ -29,6 +37,10 @@ export interface TextOptions {
   maxWidth?: number
   /** Line-height multiplier over the font's line height; default 1. */
   lineHeight?: number
+  /** Horizontal flow direction (ignored when vertical); default 'ltr'. */
+  direction?: TextDirection
+  /** 'horizontal' (default) or 'vertical' (top-to-bottom, right-to-left columns). */
+  orientation?: TextOrientation
 }
 
 export class Text extends Node {
@@ -45,6 +57,8 @@ export class Text extends Node {
   align: TextAlign
   maxWidth: number | undefined
   lineHeight: number
+  direction: TextDirection
+  orientation: TextOrientation
 
   private runsData: TextRun[]
   private shapedCache: ShapedText | null = null
@@ -59,6 +73,8 @@ export class Text extends Node {
     this.align = options.align ?? 'left'
     this.maxWidth = options.maxWidth
     this.lineHeight = options.lineHeight ?? 1
+    this.direction = options.direction ?? 'ltr'
+    this.orientation = options.orientation ?? 'horizontal'
     this.runsData = options.runs ?? (options.text !== undefined ? [{ text: options.text, style: options.style }] : [])
   }
 
@@ -88,7 +104,13 @@ export class Text extends Node {
     if (!this.shapedCache) {
       this.shapedCache = layoutText(
         this.runsData,
-        { align: this.align, maxWidth: this.maxWidth, lineHeight: this.lineHeight },
+        {
+          align: this.align,
+          maxWidth: this.maxWidth,
+          lineHeight: this.lineHeight,
+          direction: this.direction,
+          orientation: this.orientation,
+        },
         fontBook,
       )
     }

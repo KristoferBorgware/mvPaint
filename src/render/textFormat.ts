@@ -42,7 +42,7 @@ export const TEXT_VERTEX_LAYOUT: GPUVertexBufferLayout = {
 //   288 strokeWidth: f32 (world px; 0 = no outline)
 //   292 hasStroke: u32
 //   296 distanceRange: f32 (atlas SDF spread in texels)
-//   300 (padding to a 16-byte multiple)
+//   300 dilate: f32 (world px; widens glyph coverage - faux bold, glow/shadow softening)
 //   304 end
 export const TEXT_OBJECT_FILL_TYPE_OFFSET = 64
 export const TEXT_OBJECT_STOP_COUNT_OFFSET = 68
@@ -56,4 +56,5 @@ export const TEXT_OBJECT_STROKE_COLOR_OFFSET = 272
 export const TEXT_OBJECT_STROKE_WIDTH_OFFSET = 288
 export const TEXT_OBJECT_HAS_STROKE_OFFSET = 292
 export const TEXT_OBJECT_DISTANCE_RANGE_OFFSET = 296
+export const TEXT_OBJECT_DILATE_OFFSET = 300
 export const TEXT_OBJECT_STRIDE = 304 // bytes

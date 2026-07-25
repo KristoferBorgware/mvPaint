@@ -31,7 +31,7 @@ struct ObjectData {
   strokeWidth : f32,
   hasStroke : u32,
   distanceRange : f32,
-  pad : f32,
+  dilate : f32,
 };
 
 @group(0) @binding(0) var<uniform> frame : Frame;
@@ -170,21 +170,24 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   // Glyph body: the run's flat color, or its per-run gradient evaluated in local space.
   let base = baseColor(obj, input.color, input.localPos);
 
+  // World-px widths (stroke, dilation) are converted to screen px via the local derivative, so
+  // they scale with the text under camera zoom.
+  let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
+
   // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
+  // The dilate term widens coverage (faux bold, and the soft spread of glow/shadow copies).
   let sd = median(msd);
   let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
   let screenTexSize = vec2<f32>(1.0) / uvDeriv;
   let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
-  let screenPxDist = screenPxRange * (sd - 0.5);
+  let screenPxDist = screenPxRange * (sd - 0.5) + obj.dilate * screenPerWorld;
   let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
 
   if (obj.hasStroke == 0u) {
     return vec4<f32>(base.rgb, base.a * fillAlpha);
   }
 
-  // Outline: widen coverage by the stroke width, converted from world px to screen px using
-  // the local-position derivative, so the outline scales with the text under camera zoom.
-  let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
+  // Outline: widen coverage further by the stroke width, in the stroke color under the body.
   let strokePx = obj.strokeWidth * screenPerWorld;
   let outlineAlpha = clamp(screenPxDist + 0.5 + strokePx, 0.0, 1.0);
   let rgb = mix(obj.strokeColor.rgb, base.rgb, fillAlpha);

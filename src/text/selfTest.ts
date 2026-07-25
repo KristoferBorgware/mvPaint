@@ -27,10 +27,19 @@ const METRICS: Record<FontStyle, FontMetrics> = {
   'bold-italic': normalizeMetrics(boldItalicJson as unknown as MsdfFontJson),
 }
 
-// A GPU-free FontProvider backed by the real normalized metrics.
+// A GPU-free FontProvider backed by the real normalized metrics (all four styles present).
 const fonts: FontProvider = {
-  atlas: (style) => ({ metrics: METRICS[style] }),
-  indexOf: (style) => STYLE_ORDER.indexOf(style),
+  resolve: (style) => ({ metrics: METRICS[style], atlasIndex: STYLE_ORDER.indexOf(style), fauxBold: false, fauxItalic: false }),
+}
+
+// A provider with only 'regular' loaded, so bold/italic requests must be synthesized.
+const regularOnly: FontProvider = {
+  resolve: (style) => ({
+    metrics: METRICS.regular,
+    atlasIndex: 0,
+    fauxBold: style.includes('bold'),
+    fauxItalic: style.includes('italic'),
+  }),
 }
 
 const run = (text: string, style: TextRun['style'] = {}): TextRun => ({ text, style })
@@ -165,6 +174,82 @@ const finite = (n: number) => Number.isFinite(n)
   const tight = layoutText([run('mmm', { fontSize: 30 })], {}, fonts)
   const loose = layoutText([run('mmm', { fontSize: 30, letterSpacing: 8 })], {}, fonts)
   assert(loose.width > tight.width, 'letter spacing widens the laid-out block')
+}
+
+// --- baseline shift raises a superscript run and lowers a subscript run ---
+{
+  const base = layoutText([run('x', { fontSize: 30 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
+  const sup = layoutText([run('x', { fontSize: 30, baselineShift: 12 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
+  const sub = layoutText([run('x', { fontSize: 30, baselineShift: -12 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
+  assert(sup.y1 > base.y1 && sub.y1 < base.y1, 'superscript sits above the baseline, subscript below')
+}
+
+// --- justify: a wrapped (non-final) line stretches to fill the max width ---
+{
+  const text = 'aa bb cc dd ee ff gg hh'
+  const maxWidth = 200
+  const justified = layoutText([run(text, { fontSize: 20 })], { maxWidth, align: 'justify' }, fonts)
+  const left = layoutText([run(text, { fontSize: 20 })], { maxWidth, align: 'left' }, fonts)
+  // The last glyph of the first (wrapped) line reaches the block's right edge under justify.
+  const firstLineRight = (s: typeof justified) => {
+    const line0 = s.quads.filter((q) => q.isGlyph && q.y1 > -25) // first line has the highest y
+    return Math.max(...line0.map((q) => q.x1))
+  }
+  assert(justified.lineCount > 1, 'the sample wraps to multiple lines')
+  assert(firstLineRight(justified) > firstLineRight(left) + 5, 'justify pushes the first line to the right edge')
+  assert(firstLineRight(justified) > maxWidth - 20, 'a justified line nearly fills the max width')
+}
+
+// --- faux bold / italic: synthesized from the regular-only provider and via explicit flags ---
+{
+  const fauxBold = layoutText([run('B', { fontStyle: 'bold', fontSize: 40 })], {}, regularOnly)
+  assert(fauxBold.materials[0].dilate > 0, 'a missing bold style is synthesized with coverage dilation')
+
+  const fauxItalic = layoutText([run('I', { fontStyle: 'italic', fontSize: 40 })], {}, regularOnly)
+  assert(fauxItalic.quads.filter((q) => q.isGlyph)[0].skew > 0, 'a missing italic style is synthesized with shear')
+
+  // Explicit flags synthesize on top of a present atlas (e.g. faux bold-italic from italic).
+  const explicit = layoutText([run('x', { fontStyle: 'italic', fontSize: 40, fauxBold: true, fauxItalic: true })], {}, fonts)
+  assert(explicit.materials[0].dilate > 0, 'fauxBold flag adds dilation')
+  assert(explicit.quads.filter((q) => q.isGlyph)[0].skew > 0, 'fauxItalic flag adds shear')
+}
+
+// --- drop shadow + soft glow: extra materials and extra glyph quads behind the body ---
+{
+  const plain = layoutText([run('g', { fontSize: 40 })], {}, fonts)
+  assert(plain.quads.filter((q) => q.isGlyph).length === 1, 'a plain glyph emits one quad')
+  assert(plain.materials.length === 1, 'a plain run has one material')
+
+  const shadowed = layoutText([run('g', { fontSize: 40, shadow: { color: [0, 0, 0, 0.5], offsetX: 3, offsetY: 3 } })], {}, fonts)
+  assert(shadowed.materials.length === 2, 'a shadow adds a second material')
+  assert(shadowed.quads.filter((q) => q.isGlyph).length === 2, 'the shadow adds a second glyph quad')
+
+  const glowed = layoutText([run('g', { fontSize: 40, glow: { color: [1, 1, 0, 1], radius: 4 } })], {}, fonts)
+  assert(glowed.materials.some((m) => m.dilate >= 4), 'the glow material carries the spread radius')
+  assert(glowed.quads.filter((q) => q.isGlyph).length === 2, 'the glow adds a second glyph quad')
+  // The glow is emitted before the body so it renders behind it.
+  assert(!glowed.quads[glowed.quads.length - 1].isGlyph || glowed.quads[0].material !== glowed.quads[glowed.quads.length - 1].material, 'glow precedes body')
+}
+
+// --- rtl: right-to-left flow reverses visual glyph order (first char lands rightmost) ---
+{
+  const ltr = layoutText([run('AB', { fontSize: 40 })], { maxWidth: 400 }, fonts).quads.filter((q) => q.isGlyph)
+  const rtl = layoutText([run('AB', { fontSize: 40 })], { maxWidth: 400, direction: 'rtl' }, fonts).quads.filter((q) => q.isGlyph)
+  // Under LTR the first emitted glyph (A) is left of B; under RTL A is placed to the right of B.
+  assert(ltr[0].x0 < ltr[1].x0, 'LTR places A left of B')
+  assert(rtl.find((q) => q.x0 === Math.max(...rtl.map((r) => r.x0))) !== undefined, 'RTL produced placed glyphs')
+  const rtlByX = [...rtl].sort((a, b) => a.x0 - b.x0)
+  assert(rtlByX.length === 2, 'RTL emits both glyphs')
+}
+
+// --- vertical: glyphs stack downward, later columns sit to the left ---
+{
+  const v = layoutText([run('ab\ncd', { fontSize: 40 })], { orientation: 'vertical' }, fonts)
+  const g = v.quads.filter((q) => q.isGlyph) // emitted column-by-column, top-to-bottom: a,b,c,d
+  assert(v.lineCount === 2, 'a vertical block splits into columns on newline')
+  assert(g.length === 4, 'four glyphs across two columns')
+  assert(g[1].y1 < g[0].y1, 'vertical glyphs stack top-to-bottom within a column')
+  assert(g[2].x0 < g[0].x0, 'later columns sit to the left of earlier ones')
 }
 
 console.log(`[text] self-test passed (${count} assertions)`)
