@@ -1,21 +1,21 @@
 // Rect - a filled, optionally stroked rectangle. Centered at (x, y) in the Z=0 plane
 // (before any offset), sized width×height, transformed by the common Shape parameters
 // (position, scale, rotation, offset). It owns no GPU resources: it tessellates a fill
-// quad in the mesh lane (fill color or gradient, via the inherited Shape fill API) and
-// strokes its own outline (a 4-corner contour) through the shared general-purpose
+// quad in the mesh lane (fill color or gradient, via the inherited MeshShape fill API)
+// and strokes its own outline (a 4-corner contour) through the shared general-purpose
 // stroker.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokePolyline } from '../render/stroke'
 
-export interface RectOptions extends ShapeOptions {
+export interface RectOptions extends MeshShapeOptions {
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
   strokeWidth?: number
 }
 
-export class Rect extends Shape {
+export class Rect extends MeshShape {
   stroke: RGBA
   strokeWidth: number
 

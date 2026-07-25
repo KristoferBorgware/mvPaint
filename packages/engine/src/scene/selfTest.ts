@@ -11,9 +11,11 @@ import { Transform } from '../math/Transform'
 import { Vector3 } from '../math/Vector3'
 import { Circle } from '../shapes/Circle'
 import { Rect } from '../shapes/Rect'
+import { Text } from '../shapes/Text'
 import { Shape } from './Shape'
+import { MeshShape } from './MeshShape'
 import type { MeshSink } from '../render/meshFormat'
-import { hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
+import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -120,7 +122,7 @@ class TransformGroup extends Container {
   // duplicate point from a stroke join), harmless for the GPU rasterizer - must never
   // match every point: its three edge signs are all exactly 0, so a naive "no negative
   // and no positive edge sign" test would wrongly call it a universal hit.
-  class DegenerateShape extends Shape {
+  class DegenerateShape extends MeshShape {
     tessellate(sink: MeshSink): void {
       const a = sink.vertex(10, 130, this.fill, true)
       const b = sink.vertex(10, 130, this.fill, true)
@@ -155,6 +157,43 @@ class TransformGroup extends Container {
 
   front.pickable = false
   assert(pickNode(scene, 20, 0) === back, 'non-pickable node is skipped, falls through to the one below')
+  front.pickable = true
+}
+
+// --- zIndex: overrides insertion order for both stacking (collectZOrder) and picking ---
+{
+  const scene = new Scene()
+  const early = scene.root.addChild(new Rect({ name: 'early', x: 0, y: 0, width: 100, height: 100 }))
+  const late = scene.root.addChild(new Rect({ name: 'late', x: 0, y: 0, width: 100, height: 100 }))
+  assert((new Rect()).zIndex === 0, 'zIndex defaults to 0')
+
+  // Added later (would normally paint on top), but a lower zIndex sends it to the back.
+  late.zIndex = -1
+  assert(pickNode(scene, 0, 0) === early, 'lower zIndex loses the pick even though it was added first')
+
+  const ordered = collectZOrder(scene)
+  assert(ordered.indexOf(late) < ordered.indexOf(early), 'collectZOrder ranks the lower zIndex first (furthest back)')
+
+  // Equal zIndex falls back to scene/insertion order (stable sort).
+  late.zIndex = 0
+  assert(pickNode(scene, 0, 0) === late, 'equal zIndex falls back to insertion order - the later node wins')
+
+  // depthForRank is monotonic (higher rank = higher zIndex = smaller/closer depth) and
+  // strictly inside (0,1), so it never collides with the far/near clear values.
+  const n = 5
+  const depths = Array.from({ length: n }, (_, rank) => depthForRank(rank, n))
+  for (let i = 0; i < n; i++) assert(depths[i] > 0 && depths[i] < 1, 'depthForRank stays strictly inside (0,1)')
+  for (let i = 1; i < n; i++) assert(depths[i] < depths[i - 1], 'depthForRank decreases as rank (zIndex) increases')
+}
+
+// --- Text is a Shape now (not a lane-specific special case): it inherits zIndex,
+//     offset, visible/pickable from the same base as every mesh shape, which is what
+//     makes cross-lane zIndex ordering (a shape in front of text, or vice versa)
+//     possible without picking/depth needing to special-case "which lane" a node is in ---
+{
+  assert(Text.prototype instanceof Shape, 'Text extends Shape, carrying zIndex/offset/pickable like a mesh shape')
+  assert(new Text().zIndex === 0, 'Text inherits the zIndex default')
+  assert(new Text().pickable, 'Text inherits the pickable default')
 }
 
 // --- picking: textLocalBounds unions every quad's corners ---

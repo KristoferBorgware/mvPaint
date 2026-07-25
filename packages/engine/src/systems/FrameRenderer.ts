@@ -97,6 +97,9 @@ export class FrameRenderer {
     this.depthTexture?.destroy()
     this.depthTexture = this.gpu.device.createTexture({
       size: [width, height],
+      // Must match the color attachment's sample count - a render pass rejects a depth
+      // attachment whose sampleCount disagrees with the other attachments.
+      sampleCount: this.sampleCount,
       format: this.depthFormat,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })

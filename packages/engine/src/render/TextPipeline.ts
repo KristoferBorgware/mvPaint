@@ -1,9 +1,12 @@
 // The text-lane render pipeline: the text vertex layout (position + uv + color + packedId),
-// the same alpha blending / no culling / no depth / MSAA as the mesh lane, and a pipeline
-// layout that adds the atlas bind group (group 2) to the shared frame/object groups.
+// the same alpha blending / no culling / depth test / MSAA as the mesh lane (the same
+// depth buffer, so a shape can sit in front of text or vice versa - see
+// scene/picking.ts), and a pipeline layout that adds the atlas bind group (group 2) to
+// the shared frame/object groups.
 
 import { textShaderCode } from './text.wgsl'
 import { TEXT_VERTEX_LAYOUT } from './textFormat'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
 
 export function createTextPipeline(
   device: GPUDevice,
@@ -44,6 +47,11 @@ export function createTextPipeline(
     primitive: {
       topology: 'triangle-list',
       cullMode: 'none',
+    },
+    depthStencil: {
+      format: DEPTH_FORMAT,
+      depthWriteEnabled: true,
+      depthCompare: DEPTH_COMPARE,
     },
     multisample: {
       count: sampleCount,

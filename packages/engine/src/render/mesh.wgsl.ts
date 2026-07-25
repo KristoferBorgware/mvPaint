@@ -22,6 +22,7 @@ struct ObjectData {
   stopCount : u32,
   gradientStart : vec2<f32>,
   gradientStartRadius : f32,
+  depth : f32,
   gradientEnd : vec2<f32>,
   gradientEndRadius : f32,
   stopPositions : array<f32, MAX_STOPS>,
@@ -50,6 +51,12 @@ fn vs_main(input : VertexInput) -> VertexOutput {
   let model = objects[objectId].model;
   var out : VertexOutput;
   out.clip = frame.viewProjection * model * vec4<f32>(input.position, 0.0, 1.0);
+  // Every 2D shape sits at local/world z=0, so the projected z above carries no useful
+  // depth on its own - the object's stacking order (from its zIndex, see
+  // scene/picking.ts) is injected here instead, scaled by w so it survives the GPU's
+  // perspective divide intact (w is always 1 for this orthographic camera, but this
+  // stays correct if that ever changes).
+  out.clip.z = objects[objectId].depth * out.clip.w;
   out.color = input.color;
   out.localPos = input.position;
   out.packedId = input.packedId;

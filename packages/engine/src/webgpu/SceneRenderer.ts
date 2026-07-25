@@ -1,15 +1,18 @@
 // SceneRenderer - the 2D shape scene. It owns a Scene tree (root -> camera), the mesh lane
-// and text lane pipelines/batchers, and renders by collecting visible shapes/text in painter
-// order each frame. It does NOT own the GPU context, resize observer, frame loop, or any
-// scene content - those are wired by createSceneRenderer() below, with content supplied by
-// the caller through the `populate` option.
+// and text lane pipelines/batchers, and renders by collecting visible shapes/text each
+// frame, assigning each a depth from its zIndex rank (see scene/picking.ts) so the two
+// lanes' draw calls resolve their stacking order correctly via the depth buffer instead
+// of "whichever lane draws last always wins". It does NOT own the GPU context, resize
+// observer, frame loop, or any scene content - those are wired by createSceneRenderer()
+// below, with content supplied by the caller through the `populate` option.
 
 import { Shape } from '../scene/Shape'
+import { MeshShape } from '../scene/MeshShape'
 import { Text } from '../shapes/Text'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
-import { localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
 import { screenToWorld } from '../input/viewport'
 import {
   createFrameBindGroupLayout,
@@ -17,6 +20,7 @@ import {
   createObjectBindGroupLayout,
   createTextPipelineLayout,
 } from '../render/layouts'
+import { DEPTH_FORMAT } from '../render/depthFormat'
 import { FrameUniforms } from '../render/FrameUniforms'
 import { MeshBatcher } from '../render/MeshBatcher'
 import { createMeshPipeline } from '../render/MeshPipeline'
@@ -112,25 +116,7 @@ export class SceneRenderer {
     this.textGeometryDirty = true
   }
 
-  /** Collect visible shapes in painter (traversal) order; index becomes the object id. */
-  private collectShapes(): Shape[] {
-    const shapes: Shape[] = []
-    this.scene.root.traversePreOrder((node) => {
-      if (node instanceof Shape && node.visible) shapes.push(node)
-    })
-    return shapes
-  }
-
-  /** Collect visible Text nodes in painter (traversal) order for the text lane. */
-  private collectTexts(): Text[] {
-    const texts: Text[] = []
-    this.scene.root.traversePreOrder((node) => {
-      if (node instanceof Text && node.visible) texts.push(node)
-    })
-    return texts
-  }
-
-  /** Update frame uniforms, (re)build geometry if dirty, refresh transforms, one draw. */
+  /** Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both lanes. */
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
     const camera = this.scene.activeCamera
     if (!camera) return
@@ -145,23 +131,29 @@ export class SceneRenderer {
 
     this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
 
-    const shapes = this.collectShapes()
+    // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
+    // a Text can interleave correctly under the depth test regardless of which lane's
+    // draw call runs first (see scene/picking.ts).
+    const ordered = collectZOrder(this.scene)
+    const depths = new Map<Shape, number>()
+    ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
+    const meshShapes = ordered.filter((s): s is MeshShape => s instanceof MeshShape)
+    const texts = ordered.filter((s): s is Text => s instanceof Text)
+
     if (this.geometryDirty) {
-      this.batcher.rebuild(shapes)
+      this.batcher.rebuild(meshShapes)
       this.geometryDirty = false
     }
-    this.batcher.updateObjects(shapes)
+    this.batcher.updateObjects(meshShapes, depths)
 
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup)
 
-    // Text lane, drawn after the mesh lane so glyphs layer on top (painter order, no depth).
-    const texts = this.collectTexts()
     if (this.textGeometryDirty) {
       this.textBatcher.rebuild(texts, this.fontBook)
       this.textGeometryDirty = false
     }
-    this.textBatcher.updateObjects()
+    this.textBatcher.updateObjects(depths)
     pass.setPipeline(this.textPipeline)
     this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
   }
@@ -252,7 +244,7 @@ export async function createSceneRenderer(
       options.onFrame?.(dt)
       scene.draw(pass, width, height)
     },
-    { clearColor: WHITE, sampleCount: SAMPLE_COUNT }, // no depthFormat: 2D uses draw order
+    { clearColor: WHITE, sampleCount: SAMPLE_COUNT, depthFormat: DEPTH_FORMAT },
   )
   frameRenderer.start()
 

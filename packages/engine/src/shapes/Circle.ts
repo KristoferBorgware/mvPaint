@@ -2,21 +2,21 @@
 // (before any offset), transformed by the common Shape parameters (position, scale,
 // rotation, offset) - a non-uniform scaleX/scaleY turns it into an ellipse. Tessellated
 // in the mesh lane: a triangle fan for the fill (fill color or gradient, via the
-// inherited Shape fill API); the stroke is the same n-point rim contour run through the
-// shared general-purpose stroker (round join - the exact offset for a smooth curve,
+// inherited MeshShape fill API); the stroke is the same n-point rim contour run through
+// the shared general-purpose stroker (round join - the exact offset for a smooth curve,
 // with no faceting overshoot even at low segment counts, unlike miter). The segment
 // count is chosen adaptively from the radius so it stays smooth without wasting
 // triangles on tiny circles.
 //
 // width/height are derived from radius (width = height = radius*2) rather than stored
-// independently - overriding the inherited Shape accessors so `circle.width = 100` and
-// `circle.radius` stay consistent with each other.
+// independently - overriding the inherited MeshShape accessors so `circle.width = 100`
+// and `circle.radius` stay consistent with each other.
 //
 // Note: segment-count adaptivity here is by WORLD radius (tessellate() has no camera/
 // zoom context). True screen-aware density (re-tessellate when the on-screen size
 // changes) is a follow-up once the batcher can pass pixels-per-unit into tessellation.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokePolyline, type Point2 } from '../render/stroke'
 
@@ -32,7 +32,7 @@ export function circleSegments(radius: number, tolerance = 0.02, min = 12, max =
   return Math.min(max, Math.max(min, n))
 }
 
-export interface CircleOptions extends ShapeOptions {
+export interface CircleOptions extends MeshShapeOptions {
   radius?: number
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
@@ -41,7 +41,7 @@ export interface CircleOptions extends ShapeOptions {
   segments?: number
 }
 
-export class Circle extends Shape {
+export class Circle extends MeshShape {
   radius: number
   stroke: RGBA
   strokeWidth: number

@@ -16,7 +16,7 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { Shape } from '../scene/Shape'
+import { MeshShape } from '../scene/MeshShape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -54,7 +54,7 @@ function capturingSink(): { sink: MeshSink } & Captured {
 }
 
 // A capturing sink that records exactly what a shape emits (indices local to the shape).
-function capture(shape: Shape): Captured {
+function capture(shape: MeshShape): Captured {
   const { sink, verts, tris } = capturingSink()
   shape.tessellate(sink)
   return { verts, tris }

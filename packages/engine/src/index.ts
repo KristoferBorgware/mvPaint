@@ -21,6 +21,7 @@ export * from './scene/Container'
 export * from './scene/Node'
 export * from './scene/Scene'
 export * from './scene/Shape'
+export * from './scene/MeshShape'
 export * from './scene/picking'
 
 export * from './shapes/Circle'

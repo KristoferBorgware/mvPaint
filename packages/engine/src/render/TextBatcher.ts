@@ -6,12 +6,14 @@
 // Materials (static) are separated from the per-frame transform refresh, so moving or animating
 // a Text updates only the object buffer, never the geometry.
 
+import type { Shape } from '../scene/Shape'
 import type { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { TextMaterial } from '../text/layout'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
 import {
   TEXT_GLYPH_BIT,
+  TEXT_OBJECT_DEPTH_OFFSET,
   TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
   TEXT_OBJECT_FILL_TYPE_OFFSET,
@@ -149,8 +151,13 @@ export class TextBatcher {
     })
   }
 
-  /** Refresh every material's transform + fill/gradient/stroke into the storage buffer. */
-  updateObjects(): void {
+  /**
+   * Refresh every material's transform, fill/gradient/stroke, and depth into the storage
+   * buffer. `depths` maps each Text node to its zIndex-derived NDC depth (see
+   * scene/picking.ts's collectZOrder/depthForRank) - every material (run) of a node
+   * shares that one depth, same as the mesh lane.
+   */
+  updateObjects(depths: ReadonlyMap<Shape, number>): void {
     if (!this.objectBuffer || this.objectRecords.length === 0) return
     const buf = new ArrayBuffer(this.objectRecords.length * TEXT_OBJECT_STRIDE)
     const f32 = new Float32Array(buf)
@@ -160,6 +167,7 @@ export class TextBatcher {
       const base = (i * TEXT_OBJECT_STRIDE) / 4
 
       f32.set(node.worldMatrix().toGPU(), base)
+      f32[base + TEXT_OBJECT_DEPTH_OFFSET / 4] = depths.get(node) ?? 0.5
       u32[base + TEXT_OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[material.fillPriority]
 
       const stopCount = Math.min(material.stops.length, MAX_GRADIENT_STOPS)

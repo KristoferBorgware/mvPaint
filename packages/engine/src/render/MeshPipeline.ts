@@ -1,9 +1,11 @@
 // The mesh-lane render pipeline: one shared vertex layout, alpha blending, no culling,
-// no depth (2D draw order), and MSAA. Built from an explicit pipeline layout so its
-// group(0)/group(1) bind groups are shared with any future lane.
+// a depth test (so zIndex-based stacking order resolves correctly against the text lane
+// regardless of draw order - see scene/picking.ts), and MSAA. Built from an explicit
+// pipeline layout so its group(0)/group(1) bind groups are shared with any future lane.
 
 import { meshShaderCode } from './mesh.wgsl'
 import { MESH_VERTEX_LAYOUT } from './meshFormat'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
 
 export function createMeshPipeline(
   device: GPUDevice,
@@ -44,6 +46,11 @@ export function createMeshPipeline(
     primitive: {
       topology: 'triangle-list',
       cullMode: 'none',
+    },
+    depthStencil: {
+      format: DEPTH_FORMAT,
+      depthWriteEnabled: true,
+      depthCompare: DEPTH_COMPARE,
     },
     multisample: {
       count: sampleCount,

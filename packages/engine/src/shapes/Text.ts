@@ -1,14 +1,12 @@
-// Text - a drawable leaf node rendered through the MSDF text lane (not the mesh lane, so it
-// extends Node directly rather than Shape). It carries the scene transform (position, rotation,
-// scale) plus its styled runs and block-layout options, and caches the shaped result (glyph +
-// decoration quads and per-run materials) until its content changes. Its transform is applied
-// in the vertex shader like every other node, so moving or scaling a Text never re-shapes it;
-// only editing the runs or layout does.
+// Text - a drawable Shape rendered through the MSDF text lane rather than the mesh lane
+// (it has no tessellate() / fill geometry; TextBatcher shapes it directly from its
+// runs). It inherits position/scale/rotation/offset/visible/pickable/zIndex from Shape,
+// and adds its styled runs and block-layout options, caching the shaped result (glyph +
+// decoration quads and per-run materials) until its content changes. Its transform is
+// applied in the vertex shader like every other node, so moving or scaling a Text never
+// re-shapes it; only editing the runs or layout does.
 
-import { Matrix4x4 } from '../math/Matrix4x4'
-import { Quaternion } from '../math/Quaternion'
-import { Vector3 } from '../math/Vector3'
-import { Node } from '../scene/Node'
+import { Shape, type ShapeOptions } from '../scene/Shape'
 import type { FontBook } from '../text/FontAtlas'
 import {
   layoutText,
@@ -20,14 +18,7 @@ import {
   type TextRunStyle,
 } from '../text/layout'
 
-export interface TextOptions {
-  name?: string
-  x?: number
-  y?: number
-  /** Radians, about +Z. */
-  rotation?: number
-  scaleX?: number
-  scaleY?: number
+export interface TextOptions extends ShapeOptions {
   /** Styled segments. Provide this, or `text` (+ optional `style`) for a single run. */
   runs?: TextRun[]
   text?: string
@@ -43,19 +34,7 @@ export interface TextOptions {
   orientation?: TextOrientation
 }
 
-export class Text extends Node {
-  /** Skipped by the renderer when false. */
-  visible = true
-  /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
-  pickable = true
-
-  x = 0
-  y = 0
-  /** Radians, about +Z. */
-  rotation = 0
-  scaleX = 1
-  scaleY = 1
-
+export class Text extends Shape {
   align: TextAlign
   maxWidth: number | undefined
   lineHeight: number
@@ -66,12 +45,7 @@ export class Text extends Node {
   private shapedCache: ShapedText | null = null
 
   constructor(options: TextOptions = {}) {
-    super(options.name)
-    this.x = options.x ?? 0
-    this.y = options.y ?? 0
-    this.rotation = options.rotation ?? 0
-    this.scaleX = options.scaleX ?? 1
-    this.scaleY = options.scaleY ?? 1
+    super(options)
     this.align = options.align ?? 'left'
     this.maxWidth = options.maxWidth
     this.lineHeight = options.lineHeight ?? 1
@@ -117,16 +91,5 @@ export class Text extends Node {
       )
     }
     return this.shapedCache
-  }
-
-  override localMatrix(): Matrix4x4 {
-    let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
-    if (this.rotation !== 0) {
-      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
-    }
-    if (this.scaleX !== 1 || this.scaleY !== 1) {
-      m = m.mul(Matrix4x4.scaling(new Vector3(this.scaleX, this.scaleY, 1)))
-    }
-    return m
   }
 }

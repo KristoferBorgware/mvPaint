@@ -32,7 +32,7 @@ export const TEXT_VERTEX_LAYOUT: GPUVertexBufferLayout = {
 //   68  stopCount: u32
 //   72  gradientStart: vec2<f32>                           (8)
 //   80  gradientStartRadius: f32
-//   84  (padding)
+//   84  depth: f32 (NDC z in (0,1) - same zIndex-derived value as the mesh format; see meshFormat.ts)
 //   88  gradientEnd: vec2<f32>                             (8)
 //   96  gradientEndRadius: f32
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>      (32)
@@ -48,6 +48,7 @@ export const TEXT_OBJECT_FILL_TYPE_OFFSET = 64
 export const TEXT_OBJECT_STOP_COUNT_OFFSET = 68
 export const TEXT_OBJECT_GRADIENT_START_OFFSET = 72
 export const TEXT_OBJECT_GRADIENT_START_RADIUS_OFFSET = 80
+export const TEXT_OBJECT_DEPTH_OFFSET = 84
 export const TEXT_OBJECT_GRADIENT_END_OFFSET = 88
 export const TEXT_OBJECT_GRADIENT_END_RADIUS_OFFSET = 96
 export const TEXT_OBJECT_STOP_POSITIONS_OFFSET = 100

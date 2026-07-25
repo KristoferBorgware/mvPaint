@@ -23,6 +23,7 @@ struct ObjectData {
   stopCount : u32,
   gradientStart : vec2<f32>,
   gradientStartRadius : f32,
+  depth : f32,
   gradientEnd : vec2<f32>,
   gradientEndRadius : f32,
   stopPositions : array<f32, MAX_STOPS>,
@@ -60,6 +61,10 @@ fn vs_main(input : VertexInput) -> VertexOutput {
   let model = objects[objectId].model;
   var out : VertexOutput;
   out.clip = frame.viewProjection * model * vec4<f32>(input.position, 0.0, 1.0);
+  // Text sits at local/world z=0 like every mesh-lane shape - its stacking order (from
+  // its zIndex, see scene/picking.ts) is injected here the same way, so a shape can sit
+  // in front of text (or vice versa) instead of the text lane always winning.
+  out.clip.z = objects[objectId].depth * out.clip.w;
   out.uv = input.uv;
   out.color = input.color;
   out.localPos = input.position;

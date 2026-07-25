@@ -1,21 +1,27 @@
-// Hit-testing: finding which scene node sits under a world-space point. Shapes are
-// tested exactly, against the same triangles the mesh lane renders (fill + stroke) -
-// tessellate() is fed into a recording MeshSink instead of the GPU batcher, then the
-// point is tested against every triangle in the shape's own local space. Text is tested
-// against its shaped quads' bounding box (glyph-accurate hit-testing isn't worth the
-// cost here). Both also expose their local-space bounds, for building a selection
-// highlight that matches a picked node's own geometry.
+// Z-order and hit-testing: what stacking order the scene's shapes/text render in, and
+// which one sits under a world-space point. Both are derived from the SAME sorted list
+// (collectZOrder) so they can never disagree - the renderer assigns each object's depth
+// from its rank in that list, and pickNode walks it front-to-back.
+//
+// Shapes are hit-tested exactly, against the same triangles the mesh lane renders (fill
+// + stroke) - tessellate() is fed into a recording MeshSink instead of the GPU batcher,
+// then the point is tested against every triangle in the shape's own local space. Text
+// is tested against its shaped quads' bounding box (glyph-accurate hit-testing isn't
+// worth the cost here). Both also expose their local-space bounds, for building a
+// selection highlight that matches a picked node's own geometry.
 
 import { AABB } from '../math/AABB'
 import { Vector3 } from '../math/Vector3'
 import type { Node } from './Node'
 import { Scene } from './Scene'
 import { Shape } from './Shape'
+import { MeshShape } from './MeshShape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 
-export type PickableNode = Shape | Text
+/** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now (MeshShape or Text). */
+export type PickableNode = Shape
 
 /** The corners textLocalBounds needs from each quad - satisfied by ShapedText's TextQuad. */
 export interface QuadBounds {
@@ -97,14 +103,14 @@ function worldToLocal(node: Node, worldX: number, worldY: number): Vector3 {
 }
 
 /** A shape's fill+stroke triangles, tessellated fresh, as an axis-aligned box in its own local space. */
-export function shapeLocalBounds(shape: Shape): AABB {
+export function shapeLocalBounds(shape: MeshShape): AABB {
   const sink = new RecordingMeshSink()
   shape.tessellate(sink)
   return sink.getBounds()
 }
 
 /** True if the world point falls inside any of the shape's fill/stroke triangles. */
-export function hitTestShape(shape: Shape, worldX: number, worldY: number): boolean {
+export function hitTestShape(shape: MeshShape, worldX: number, worldY: number): boolean {
   const local = worldToLocal(shape, worldX, worldY)
   const sink = new RecordingMeshSink()
   shape.tessellate(sink)
@@ -129,35 +135,55 @@ export function hitTestText(text: Text, fontBook: FontBook, worldX: number, worl
 }
 
 /**
- * The topmost pickable node under a world point, or null. Text is tested before shapes
- * because the renderer draws the text lane after (on top of) the mesh lane; within each
- * lane, later-added (later-drawn) nodes are tested first. Invisible and non-pickable
- * nodes (see `pickable`) are skipped. `fontBook` may be omitted when the scene has no
- * Text nodes worth testing (e.g. before the atlases have loaded) - text is then skipped.
+ * Every Shape (mesh shape or Text) matching `predicate`, stable-sorted ascending by
+ * zIndex (Array.prototype.sort is stable per spec, so ties keep scene-traversal order).
+ * The renderer and pickNode() both build on this so "what's on top" and "what's under
+ * the depth test" can never disagree.
+ */
+function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean): Shape[] {
+  const all: Shape[] = []
+  scene.root.traversePreOrder((node) => {
+    if (node instanceof Shape && predicate(node)) all.push(node)
+  })
+  return all.sort((a, b) => a.zIndex - b.zIndex)
+}
+
+/**
+ * Every visible Shape (mesh shape or Text) in the scene, ascending by zIndex (ties keep
+ * scene order) - rank 0 is furthest back. Includes non-pickable shapes (e.g. a
+ * selection-highlight overlay still needs a correct depth to render at).
+ */
+export function collectZOrder(scene: Scene): Shape[] {
+  return collectSortedShapes(scene, (shape) => shape.visible)
+}
+
+/** Maps a zIndex rank (0 = furthest back) to an NDC depth strictly inside (0,1) - smaller wins under 'less-equal'. */
+export function depthForRank(rank: number, count: number): number {
+  return (count - rank) / (count + 1)
+}
+
+/**
+ * The topmost pickable node under a world point, or null. Walks the SAME zIndex-sorted
+ * order the renderer derives depth from (see collectZOrder), front-to-back (highest
+ * zIndex/rank first), so picking always matches what's visually on top. Invisible and
+ * non-pickable nodes (see `pickable`) are skipped. `fontBook` may be omitted when the
+ * scene has no Text nodes worth testing (e.g. before the atlases have loaded) - text
+ * candidates are then skipped rather than matched.
  */
 export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?: FontBook): PickableNode | null {
-  if (fontBook) {
-    const texts: Text[] = []
-    scene.root.traversePreOrder((node) => {
-      if (node instanceof Text && node.visible && node.pickable) texts.push(node)
-    })
-    for (let i = texts.length - 1; i >= 0; i--) {
-      if (hitTestText(texts[i], fontBook, worldX, worldY)) return texts[i]
+  const ordered = collectSortedShapes(scene, (shape) => shape.visible && shape.pickable)
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const node = ordered[i]
+    if (node instanceof Text) {
+      if (fontBook && hitTestText(node, fontBook, worldX, worldY)) return node
+    } else if (node instanceof MeshShape) {
+      if (hitTestShape(node, worldX, worldY)) return node
     }
   }
-
-  const shapes: Shape[] = []
-  scene.root.traversePreOrder((node) => {
-    if (node instanceof Shape && node.visible && node.pickable) shapes.push(node)
-  })
-  for (let i = shapes.length - 1; i >= 0; i--) {
-    if (hitTestShape(shapes[i], worldX, worldY)) return shapes[i]
-  }
-
   return null
 }
 
 /** A pickable node's own local-space bounds (shape triangles, or shaped text quads). */
 export function localBoundsOf(node: PickableNode, fontBook: FontBook): AABB {
-  return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node)
+  return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node as MeshShape)
 }

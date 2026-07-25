@@ -6,6 +6,7 @@
 // buffers are recreated on rebuild (rebuilds are rare); per-slice incremental updates
 // and capacity pooling are a later optimization.
 
+import type { MeshShape } from '../scene/MeshShape'
 import type { Shape } from '../scene/Shape'
 import {
   FILL_TYPE_CODE,
@@ -13,6 +14,7 @@ import {
   MESH_FILL_BIT,
   MESH_VERTEX_FLOATS,
   MESH_VERTEX_STRIDE,
+  OBJECT_DEPTH_OFFSET,
   OBJECT_FILL_TYPE_OFFSET,
   OBJECT_GRADIENT_END_OFFSET,
   OBJECT_GRADIENT_END_RADIUS_OFFSET,
@@ -43,7 +45,7 @@ export class MeshBatcher {
   }
 
   /** Re-tessellate all shapes (objectId = index) into the shared buffers and upload. */
-  rebuild(shapes: readonly Shape[]): void {
+  rebuild(shapes: readonly MeshShape[]): void {
     const posColor: number[] = [] // 6 per vertex: x,y,r,g,b,a
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isFill
     const indices: number[] = []
@@ -117,13 +119,15 @@ export class MeshBatcher {
   }
 
   /**
-   * Refresh every object's transform and fill/gradient material into the storage
-   * buffer (cheap, per frame). Each object's record is OBJECT_STRIDE bytes; f32/u32
-   * views share one ArrayBuffer so integer fields (fillType, stopCount) can be written
-   * alongside the float fields (matrix, gradient points/radii, stops) at their exact
-   * byte offsets.
+   * Refresh every object's transform, fill/gradient material, and depth into the
+   * storage buffer (cheap, per frame). Each object's record is OBJECT_STRIDE bytes;
+   * f32/u32 views share one ArrayBuffer so integer fields (fillType, stopCount) can be
+   * written alongside the float fields (matrix, gradient points/radii, stops, depth) at
+   * their exact byte offsets. `depths` maps each shape to its zIndex-derived NDC depth
+   * (see scene/picking.ts's collectZOrder/depthForRank) - shared across both lanes so a
+   * shape and a Text can interleave correctly regardless of draw order.
    */
-  updateObjects(shapes: readonly Shape[]): void {
+  updateObjects(shapes: readonly MeshShape[], depths: ReadonlyMap<Shape, number>): void {
     if (!this.objectBuffer || this.objectCount === 0) return
     const n = Math.min(this.objectCount, shapes.length)
     const buf = new ArrayBuffer(this.objectCount * OBJECT_STRIDE)
@@ -135,6 +139,7 @@ export class MeshBatcher {
       const floatBase = (i * OBJECT_STRIDE) / 4
 
       f32.set(shape.worldMatrix().toGPU(), floatBase)
+      f32[floatBase + OBJECT_DEPTH_OFFSET / 4] = depths.get(shape) ?? 0.5
 
       u32[floatBase + OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[shape.fillPriority]
 

@@ -5,7 +5,7 @@
 // ancestor transform chain - which is what makes it line up under rotation/scale/nesting
 // without any extra transform math beyond copying the node's own local fields.
 
-import { Container, Rect, Shape, type PickableNode, type SceneRendererHandle } from '@mvpaint/engine'
+import { Container, Rect, type PickableNode, type SceneRendererHandle } from '@mvpaint/engine'
 
 const HIGHLIGHT_COLOR = [0.16, 0.62, 1, 1] as const
 const HIGHLIGHT_PADDING = 6 // world px, added around the node's own bounds
@@ -28,10 +28,11 @@ export class SelectionHighlight {
       if (bounds.valid()) {
         const cx = (bounds.min.x + bounds.max.x) / 2
         const cy = (bounds.min.y + bounds.max.y) / 2
-        // A Shape's own pivot offset applies before the highlight's recentering offset
-        // below is computed, so it has to be folded in too; Text has no offset field.
-        const pivotX = node instanceof Shape ? node.offsetX : 0
-        const pivotY = node instanceof Shape ? node.offsetY : 0
+        // The picked node's own pivot offset applies before the highlight's recentering
+        // offset below is computed, so it has to be folded in too - every PickableNode
+        // (Text included, now that it's a Shape) carries offsetX/offsetY.
+        const pivotX = node.offsetX
+        const pivotY = node.offsetY
 
         const rect = new Rect({
           name: '__selection-highlight',

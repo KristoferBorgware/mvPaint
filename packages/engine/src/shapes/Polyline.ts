@@ -10,11 +10,11 @@
 // and is out of scope here; Polyline is stroke-only. width/height are unused (its size
 // comes from its own point list, not a settable size parameter).
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokePolyline, type LineCap, type LineJoin, type Point2 } from '../render/stroke'
 
-export interface PolylineOptions extends ShapeOptions {
+export interface PolylineOptions extends MeshShapeOptions {
   points: Point2[]
   /** Loop back to the start (a closed contour) vs. an open path with caps. Default false. */
   closed?: boolean
@@ -26,7 +26,7 @@ export interface PolylineOptions extends ShapeOptions {
   miterLimit?: number
 }
 
-export class Polyline extends Shape {
+export class Polyline extends MeshShape {
   points: Point2[]
   closed: boolean
   stroke: RGBA

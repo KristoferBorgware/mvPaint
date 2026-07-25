@@ -55,18 +55,26 @@ export const MESH_VERTEX_LAYOUT: GPUVertexBufferLayout = {
 //   68  stopCount: u32
 //   72  gradientStart: vec2<f32>               (8)
 //   80  gradientStartRadius: f32
-//   84  (4 bytes padding, vec2 alignment)
+//   84  depth: f32 (NDC z in (0,1); overrides the vertex shader's projected z - see below)
 //   88  gradientEnd: vec2<f32>                 (8)
 //   96  gradientEndRadius: f32
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>       (32)
 //   132 (12 bytes padding, vec4 alignment)
 //   144 stopColors: array<vec4<f32>, MAX_GRADIENT_STOPS>    (128)
 //   272 end
+//
+// `depth` sits in what would otherwise be padding (4 bytes, needed anyway so gradientEnd
+// lands on its 8-byte vec2 alignment) - it doesn't grow the record. It is NOT derived
+// from the shape's own local/world Z (every 2D shape sits at z=0); it's assigned by the
+// renderer each frame from the shape's zIndex rank across the whole scene (see
+// scene/picking.ts's collectZOrder/depthForRank), so shapes and text can interleave
+// correctly under the depth test regardless of which lane's draw call runs first.
 export const OBJECT_FLOATS = 16 // floats spanning just the model matrix
 export const OBJECT_FILL_TYPE_OFFSET = 64
 export const OBJECT_STOP_COUNT_OFFSET = 68
 export const OBJECT_GRADIENT_START_OFFSET = 72
 export const OBJECT_GRADIENT_START_RADIUS_OFFSET = 80
+export const OBJECT_DEPTH_OFFSET = 84
 export const OBJECT_GRADIENT_END_OFFSET = 88
 export const OBJECT_GRADIENT_END_RADIUS_OFFSET = 96
 export const OBJECT_STOP_POSITIONS_OFFSET = 100

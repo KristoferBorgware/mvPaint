@@ -1,16 +1,16 @@
 // Path - a filled and/or stroked shape from arbitrary contours (typically flattened SVG
 // path data). Fill is triangulated with holes (earcut) and stroke is drawn by the shared
-// contour stroker; both reuse the mesh lane and the inherited Shape fill/gradient API, so
-// a Path fills with a solid color or a gradient exactly like Rect/Circle.
+// contour stroker; both reuse the mesh lane and the inherited MeshShape fill/gradient
+// API, so a Path fills with a solid color or a gradient exactly like Rect/Circle.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 import { strokeContours, type Contour, type LineCap, type LineJoin } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
 import { classifyContours, type ContourGroup } from '../svg/contours'
 import { triangulateGroup } from '../svg/triangulate'
 
-export interface PathOptions extends ShapeOptions {
+export interface PathOptions extends MeshShapeOptions {
   /** SVG path data. Provide this OR `contours`. */
   d?: string
   /** Pre-flattened contours (e.g. from the SVG loader). Provide this OR `d`. */
@@ -27,7 +27,7 @@ export interface PathOptions extends ShapeOptions {
   miterLimit?: number
 }
 
-export class Path extends Shape {
+export class Path extends MeshShape {
   readonly contours: Contour[]
   private readonly groups: ContourGroup[]
   /** When false, fill triangles are skipped (e.g. SVG fill="none"). */
