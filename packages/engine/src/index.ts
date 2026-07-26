@@ -44,6 +44,7 @@ export * from './systems/FrameRenderer'
 
 export * from './input/viewport'
 export * from './input/cameraControls'
+export * from './input/nodeDrag'
 export * from './input/SceneInputController'
 
 export * from './webgpu/SceneRenderer'

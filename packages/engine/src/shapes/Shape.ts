@@ -66,6 +66,8 @@ export interface ShapeOptions {
    * valued by convention; ties fall back to scene-graph order. Default 0.
    */
   zIndex?: number
+  /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
+  draggable?: boolean
   fill?: RGBA
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. */
@@ -81,6 +83,12 @@ export abstract class Shape extends Node {
   visible = true
   /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
   pickable = true
+  /**
+   * Whether a pointer drag over this node repositions it (see input/SceneInputController).
+   * A drag only ever reaches a node that pickNode() returns, so `pickable = false` already
+   * rules one out; this turns dragging off for a node that should still be selectable.
+   */
+  draggable = true
 
   x = 0
   y = 0
@@ -148,6 +156,7 @@ export abstract class Shape extends Node {
     this.offsetX = options.offsetX ?? 0
     this.offsetY = options.offsetY ?? 0
     this.zIndex = options.zIndex ?? 0
+    this.draggable = options.draggable ?? true
     this.fill = options.fill ?? [0, 0, 0, 1]
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0

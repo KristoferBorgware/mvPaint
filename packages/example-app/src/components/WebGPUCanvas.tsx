@@ -110,6 +110,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         if (handleRef.current) {
           cullBoundsOverlay.update(handleRef.current, handleRef.current.getCullMargin())
         }
+        // Keeps the selection outline on its node as that node moves - dragged by the
+        // pointer, or spun by the animation above.
+        highlight.sync()
         stats.update()
       },
     })
@@ -123,6 +126,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         handle.setCullMargin(cullMargin)
         inputController = new SceneInputController(canvas, handle, {
           onPick: (node) => {
+            highlight.update(handle, node)
+            onSelectRef.current?.(node)
+          },
+          // Grabbing a node selects it, the way direct-manipulation editors do - so the
+          // outline is already on it (and following it, via sync() above) as it moves.
+          onDragStart: (node) => {
             highlight.update(handle, node)
             onSelectRef.current?.(node)
           },
