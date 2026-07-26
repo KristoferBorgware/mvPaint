@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import Stats from 'stats.js'
 import {
   createSceneRenderer,
   SceneInputController,
@@ -36,6 +37,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
   const highlightRef = useRef<SelectionHighlight | null>(null)
   const speedRef = useRef(speed)
@@ -77,6 +79,15 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     highlightRef.current = highlight
     const cullBoundsOverlay = new CullBoundsOverlay()
 
+    // stats.js - the small FPS/MS/memory overlay three.js examples use. Click it to
+    // cycle panels. It renders itself into a fixed-position DOM node it owns, updated
+    // once per rendered frame (not React state - a per-frame re-render would defeat
+    // the purpose of an FPS counter). Mounted into our OWN wrapper div, not the
+    // parent's, so this component never touches DOM nodes React itself manages there.
+    const stats = new Stats()
+    stats.showPanel(0)
+    containerRef.current?.appendChild(stats.dom)
+
     createSceneRenderer(canvas, {
       onDeviceError: (message) => onError?.(message),
       populate: (scene) => {
@@ -99,6 +110,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         if (handleRef.current) {
           cullBoundsOverlay.update(handleRef.current, handleRef.current.getCullMargin())
         }
+        stats.update()
       },
     })
       .then((handle) => {
@@ -127,6 +139,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       handleRef.current?.destroy()
       handleRef.current = null
       highlightRef.current = null
+      stats.dom.remove()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -147,9 +160,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   }, [cullMargin])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ display: 'block', width: '100%', height: '100%' }}
-    />
+    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+      <canvas
+        ref={canvasRef}
+        style={{ display: 'block', width: '100%', height: '100%' }}
+      />
+    </div>
   )
 })
