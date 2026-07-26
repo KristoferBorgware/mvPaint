@@ -405,6 +405,71 @@ function TWO_PI_PLUS(a: number): number {
   assert(near(dragged.x, 100) && near(dragged.y, 50), 'the dragged corner lands exactly under the pointer')
 }
 
+// --- REGRESSION: a non-uniform scale on a multi-node selection whose members are
+//     rotated differently used to run away within a few pointer moves. The axis-aligned
+//     box around a turned member shears it, and the gesture's per-move restore was
+//     putting back x/y/rotation/scale but NOT the skew - so each move compounded onto the
+//     last one's shear instead of replacing it. The invariant: replaying a drag through
+//     intermediate pointer positions must land exactly where going straight there would ---
+{
+  const makeSelection = () => [
+    new Rect({ x: -100, y: 0, width: 120, height: 40 }),
+    new Rect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 }),
+  ]
+
+  // Exactly what the controller does on each pointermove: restore, then apply one delta.
+  const dragTo = (nodes: Shape[], box: OrientedBox, starts: ReturnType<Shape['captureTransform']>[], pointerX: number) => {
+    nodes.forEach((node, i) => node.restoreTransform(starts[i]))
+    const factors = resizeFactors(box, 'middle-right', { x: pointerX, y: box.cy })
+    const delta = scaleAbout(factors.fixed, factors.rotation, factors.scaleX, factors.scaleY)
+    for (const node of nodes) applyWorldTransform(node, delta)
+  }
+
+  const stepped = makeSelection()
+  const steppedBox = boxForNodes(stepped, localBoundsOf)!
+  const steppedStarts = stepped.map((n) => n.captureTransform())
+  const target = steppedBox.cx + steppedBox.halfW + 120
+  for (const offset of [15, 40, 75, 120]) {
+    dragTo(stepped, steppedBox, steppedStarts, steppedBox.cx + steppedBox.halfW + offset)
+  }
+
+  const direct = makeSelection()
+  const directBox = boxForNodes(direct, localBoundsOf)!
+  const directStarts = direct.map((n) => n.captureTransform())
+  dragTo(direct, directBox, directStarts, target)
+
+  for (let i = 0; i < stepped.length; i++) {
+    const viaSteps = corners(stepped[i])
+    const straight = corners(direct[i])
+    for (let c = 0; c < viaSteps.length; c++) {
+      assert(
+        near(viaSteps[c].x, straight[c].x, 1e-4) && near(viaSteps[c].y, straight[c].y, 1e-4),
+        'a stepped non-uniform drag on a mixed-rotation selection lands exactly where a direct one does',
+      )
+    }
+  }
+
+  // And the shear itself stays in the sane range the single direct move produces, rather
+  // than growing without bound the way the partial restore made it.
+  assert(near(stepped[1].skewX, direct[1].skewX, 1e-4), 'the rotated member ends with exactly the intended shear')
+  assert(Math.abs(stepped[1].skewX) < 1, 'the shear stays bounded instead of running away')
+  assert(near(stepped[0].skewX, 0, 1e-9), 'the unrotated member picks up no shear at all')
+
+  // captureTransform/restoreTransform must cover every field localMatrix() reads - the
+  // omission of one is what caused this in the first place.
+  const probe = new Rect({ x: 3, y: 4, rotation: 0.3, scaleX: 2, scaleY: 0.5, skewX: 0.4, skewY: -0.2, offsetX: 7, offsetY: -1 })
+  const captured = probe.captureTransform()
+  const beforeMatrix = [...probe.localMatrix().m]
+  probe.x = 0; probe.y = 0; probe.rotation = 0; probe.scaleX = 1; probe.scaleY = 1
+  probe.skewX = 0; probe.skewY = 0; probe.offsetX = 0; probe.offsetY = 0
+  probe.restoreTransform(captured)
+  const afterMatrix = probe.localMatrix().m
+  assert(
+    beforeMatrix.every((v, i) => near(v, afterMatrix[i], 1e-9)),
+    'restoring a captured transform reproduces the local matrix exactly',
+  )
+}
+
 // --- Transformer: the frame re-fits itself as the selection changes shape, and does it
 //     entirely through transforms so nothing ever needs a geometry rebuild ---
 {

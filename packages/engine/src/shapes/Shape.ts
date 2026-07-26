@@ -48,6 +48,19 @@ import type { FillPriority, GradientStop, MeshSink, Point2, RGBA } from '../rend
 import type { LineCap, LineJoin } from '../render/stroke'
 import { Node } from './Node'
 
+/** A complete snapshot of everything localMatrix() depends on. See Shape.captureTransform. */
+export interface ShapeTransform {
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+  skewX: number
+  skewY: number
+  offsetX: number
+  offsetY: number
+}
+
 export interface ShapeOptions {
   name?: string
   x?: number
@@ -211,10 +224,44 @@ export abstract class Shape extends Node {
   }
 
   /**
+   * Every field localMatrix() reads, captured together so a gesture can restore the node
+   * exactly as it was. Enumerating them by hand at each call site is what makes adding a
+   * new transform field (skew, most recently) silently break gestures: a partial restore
+   * leaves the previous move's value behind, and the next delta compounds onto it instead
+   * of replacing it. Keeping the list in one place is the point.
+   */
+  captureTransform(): ShapeTransform {
+    return {
+      x: this.x,
+      y: this.y,
+      rotation: this.rotation,
+      scaleX: this.scaleX,
+      scaleY: this.scaleY,
+      skewX: this.skewX,
+      skewY: this.skewY,
+      offsetX: this.offsetX,
+      offsetY: this.offsetY,
+    }
+  }
+
+  /** Puts the node back exactly as captureTransform() found it. */
+  restoreTransform(t: ShapeTransform): void {
+    this.x = t.x
+    this.y = t.y
+    this.rotation = t.rotation
+    this.scaleX = t.scaleX
+    this.scaleY = t.scaleY
+    this.skewX = t.skewX
+    this.skewY = t.skewY
+    this.offsetX = t.offsetX
+    this.offsetY = t.offsetY
+  }
+
+  /**
    * Invalidates the cached tessellation, so the next tessellate() call regenerates it via
    * buildGeometry() instead of replaying the cache. Call after changing anything that
    * affects buildGeometry()'s output (see the file header for exactly what that covers).
-   * Never needed for a pure transform change (x/y/rotation/scale/offset/zIndex).
+   * Never needed for a pure transform change (x/y/rotation/scale/skew/offset/zIndex).
    */
   markGeometryDirty(): void {
     this.geometryCache = null

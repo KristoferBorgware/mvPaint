@@ -21,7 +21,7 @@
 
 import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
-import type { Shape } from '../shapes/Shape'
+import type { Shape, ShapeTransform } from '../shapes/Shape'
 import type { Transformer } from '../shapes/Transformer'
 import type { Vector2 } from '../math/Vector2'
 import {
@@ -80,11 +80,7 @@ interface TrackedPointer {
 /** A node's full transform, captured so a gesture can always re-resolve from its start. */
 interface NodeSnapshot {
   node: Shape
-  x: number
-  y: number
-  rotation: number
-  scaleX: number
-  scaleY: number
+  transform: ShapeTransform
 }
 
 /** A one-pointer drag moving the selection. Each node keeps its own start position. */
@@ -302,14 +298,7 @@ export class SceneInputController {
       anchor,
       box,
       startWorld: world,
-      snapshots: transformer.selection.map((node) => ({
-        node,
-        x: node.x,
-        y: node.y,
-        rotation: node.rotation,
-        scaleX: node.scaleX,
-        scaleY: node.scaleY,
-      })),
+      snapshots: transformer.selection.map((node) => ({ node, transform: node.captureTransform() })),
     }
     this.canvas.style.cursor = anchor === 'rotate' ? 'grabbing' : 'nwse-resize'
   }
@@ -319,13 +308,13 @@ export class SceneInputController {
     if (!session) return
 
     // Always rebuild from the transforms captured at press time, so the gesture is a
-    // function of pointer position alone and repeated moves cannot compound.
+    // function of pointer position alone and repeated moves cannot compound. This has to
+    // put back EVERY transform field: a non-uniform scale on a selection whose members
+    // are rotated differently (an axis-aligned multi-node box around a turned shape)
+    // shears those members, and leaving that shear in place would feed it back into the
+    // next move and run away within a few pointer events.
     for (const snap of session.snapshots) {
-      snap.node.x = snap.x
-      snap.node.y = snap.y
-      snap.node.rotation = snap.rotation
-      snap.node.scaleX = snap.scaleX
-      snap.node.scaleY = snap.scaleY
+      snap.node.restoreTransform(snap.transform)
     }
 
     let delta

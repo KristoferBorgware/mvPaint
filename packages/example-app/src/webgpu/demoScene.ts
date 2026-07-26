@@ -384,6 +384,20 @@ function addTextExamples(scene: Scene): void {
     }),
   )
 
+  // A rotated text, so a multi-node selection can mix rotations. That is the case worth
+  // having on hand: an axis-aligned box around differently-turned members shears them
+  // when it is scaled non-uniformly, which is the hardest thing the transformer does.
+  root.addChild(
+    new Text({
+      name: 'text-rotated',
+      x: 470,
+      y: -140,
+      rotation: Math.PI / 4,
+      text: 'Rotated 45',
+      style: { fontStyle: 'bold', fontSize: 28, color: CRIMSON },
+    }),
+  )
+
   // Vertical orientation: glyphs stack top-to-bottom in right-to-left columns.
   root.addChild(
     new Text({
