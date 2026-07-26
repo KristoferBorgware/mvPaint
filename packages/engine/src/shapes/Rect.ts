@@ -18,7 +18,7 @@ export class Rect extends Shape {
     super({ ...options, width: options.width ?? 1, height: options.height ?? 1 })
   }
 
-  override tessellate(sink: MeshSink): void {
+  protected override buildGeometry(sink: MeshSink): void {
     const hw = this.width / 2
     const hh = this.height / 2
 

@@ -19,6 +19,7 @@ import {
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { Shape } from '../shapes/Shape'
+import { hitTestShape } from '../scene/picking'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -263,6 +264,59 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
 
   circle.lineJoin = 'bevel'
   assert(circle.lineJoin === 'bevel', 'lineJoin remains a plain mutable field, overridable after construction')
+}
+
+// ============================================================================
+// tessellate() caching (src/shapes/Shape.ts) - buildGeometry() only reruns on a
+// markGeometryDirty() cache miss, not on every tessellate() call.
+// ============================================================================
+
+// --- repeated tessellate() calls reuse the cache; markGeometryDirty() forces a rebuild
+//     that reflects the shape's current (mutated) state ---
+{
+  class CountingShape extends Shape {
+    buildCalls = 0
+    size = 10
+    protected override buildGeometry(sink: MeshSink): void {
+      this.buildCalls++
+      const h = this.size / 2
+      const a = sink.vertex(-h, -h, this.fill, true)
+      const b = sink.vertex(h, -h, this.fill, true)
+      const c = sink.vertex(h, h, this.fill, true)
+      sink.triangle(a, b, c)
+    }
+  }
+
+  const shape = new CountingShape()
+  const first = capture(shape)
+  assert(shape.buildCalls === 1, 'first tessellate() call runs buildGeometry()')
+  assert(near(first.verts[1].x, 5), 'cached geometry reflects size at first tessellation (10/2)')
+
+  const second = capture(shape)
+  assert(shape.buildCalls === 1, 'a second tessellate() call with no markGeometryDirty() reuses the cache')
+  assert(second.verts.length === first.verts.length, 'replayed geometry has the same vertex count')
+
+  shape.size = 40
+  const stale = capture(shape)
+  assert(shape.buildCalls === 1, 'mutating a geometry-affecting field alone does not invalidate the cache')
+  assert(near(stale.verts[1].x, 5), 'so tessellate() still replays the OLD geometry until told otherwise')
+
+  shape.markGeometryDirty()
+  const fresh = capture(shape)
+  assert(shape.buildCalls === 2, 'markGeometryDirty() forces the next tessellate() to call buildGeometry() again')
+  assert(near(fresh.verts[1].x, 20), 'the rebuilt geometry reflects the new size (40/2)')
+
+  // Picking (scene/picking.ts) tessellates independently for hit-testing - it shares the
+  // same cache, so repeated picks against an unchanged shape don't re-run buildGeometry().
+  assert(hitTestShape(shape, 0, 0), 'sanity: the shape is hit-testable through the cache')
+  assert(shape.buildCalls === 2, 'hitTestShape() reused the cache rather than rebuilding again')
+
+  // A pure transform change never needs markGeometryDirty(): it's applied via the
+  // object's world matrix, never baked into the cached local-space geometry.
+  shape.x = 500
+  shape.rotation = 1
+  capture(shape)
+  assert(shape.buildCalls === 2, 'transform-only changes never invalidate the geometry cache')
 }
 
 // ============================================================================

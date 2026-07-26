@@ -73,7 +73,7 @@ export class Circle extends Shape {
     this.radius = value / 2
   }
 
-  override tessellate(sink: MeshSink): void {
+  protected override buildGeometry(sink: MeshSink): void {
     const n = this.segments ?? circleSegments(this.radius)
     const r = this.radius
 

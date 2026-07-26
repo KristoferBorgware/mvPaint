@@ -8,11 +8,27 @@
 // specific to them (Rect: nothing beyond a default size; Circle: radius; Polyline:
 // points; Path: contours; Text: runs and block layout).
 //
-// tessellate() defaults to emitting nothing - that's what makes it safe for Text (which
-// renders through the separate MSDF text lane, not the mesh lane) to inherit it
-// unchanged; every mesh-drawn shape overrides it with real geometry. A shape whose
-// tessellate() never emits fill vertices (stroke-only, like Polyline), or whose stroke
-// width is 0, simply leaves the unused half of the fill/stroke API alone.
+// tessellate() caches its output (a list of local-space vertices + triangles) and
+// replays it into whatever sink is asking - the mesh batcher's rebuild, or a picking
+// hit-test - rather than re-running geometry generation every call. That matters most
+// for the expensive cases: a Path's earcut fill triangulation and contour stroking, or a
+// Polyline's stroke with many points, previously reran on EVERY rebuild - including one
+// triggered by an unrelated shape elsewhere in the scene - because the mesh batcher
+// rebuilds its whole shared buffer from every shape whenever anything changes. The cache
+// only goes stale when markGeometryDirty() is called; subclasses implement buildGeometry()
+// instead of tessellate() directly, since that's the method that only runs on a cache
+// miss. buildGeometry() defaults to emitting nothing - that's what makes it safe for Text
+// (which renders through the separate MSDF text lane, not the mesh lane) to inherit it
+// unchanged.
+//
+// Nothing here needs markGeometryDirty() after a transform change (x/y/rotation/scale/
+// offset/zIndex): those are applied per-frame via the object's world matrix, never baked
+// into the cached local-space geometry. It IS needed after changing anything that affects
+// buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/lineJoin/
+// lineCap/miterLimit on any stroked shape, or Path.filled - and also after changing fill/
+// stroke COLOR on a solid (non-gradient) fill: unlike gradient parameters (read from the
+// per-object GPU buffer every frame), a solid color is baked into the vertex data at
+// tessellation time, the same as any other geometry.
 //
 // localMatrix() composes translate(x, y) * rotate(rotation) * scale(scaleX, scaleY) *
 // translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied first, to
@@ -108,6 +124,8 @@ export abstract class Shape extends Node {
   lineCap: LineCap = 'butt'
   miterLimit = 10
 
+  private geometryCache: CachedGeometry | null = null
+
   constructor(options: ShapeOptions = {}) {
     super(options.name)
     this.x = options.x ?? 0
@@ -143,11 +161,58 @@ export abstract class Shape extends Node {
   }
 
   /**
+   * Invalidates the cached tessellation, so the next tessellate() call regenerates it via
+   * buildGeometry() instead of replaying the cache. Call after changing anything that
+   * affects buildGeometry()'s output (see the file header for exactly what that covers).
+   * Never needed for a pure transform change (x/y/rotation/scale/offset/zIndex).
+   */
+  markGeometryDirty(): void {
+    this.geometryCache = null
+  }
+
+  /**
    * Emit this shape's geometry (in local space) into the sink: vertices with per-vertex
    * color and triangles referencing them. The renderer applies the per-object world
-   * matrix in the vertex shader, so positions here are pre-transform. The default emits
-   * nothing - Text (rendered through the separate text lane) relies on exactly that;
-   * every mesh-drawn shape overrides this.
+   * matrix in the vertex shader, so positions here are pre-transform. Regenerates via
+   * buildGeometry() only on a cache miss (first call, or after markGeometryDirty()) -
+   * otherwise replays the cached vertices/triangles, which is just array pushes, not
+   * geometry math. Subclasses override buildGeometry(), not this.
    */
-  tessellate(_sink: MeshSink): void {}
+  tessellate(sink: MeshSink): void {
+    if (!this.geometryCache) {
+      const vertices: CachedVertex[] = []
+      const triangles: CachedTriangle[] = []
+      this.buildGeometry({
+        vertex: (x, y, color, isFill) => vertices.push({ x, y, color, isFill }) - 1,
+        triangle: (a, b, c) => {
+          triangles.push([a, b, c])
+        },
+      })
+      this.geometryCache = { vertices, triangles }
+    }
+
+    const remapped = this.geometryCache.vertices.map((v) => sink.vertex(v.x, v.y, v.color, v.isFill))
+    for (const [a, b, c] of this.geometryCache.triangles) {
+      sink.triangle(remapped[a], remapped[b], remapped[c])
+    }
+  }
+
+  /**
+   * Override to emit this shape's geometry (local space) - called only on a cache miss
+   * (see tessellate()). The default emits nothing: Text (rendered through the separate
+   * text lane) relies on exactly that; every mesh-drawn shape overrides this instead.
+   */
+  protected buildGeometry(_sink: MeshSink): void {}
+}
+
+interface CachedVertex {
+  x: number
+  y: number
+  color: RGBA
+  isFill: boolean
+}
+type CachedTriangle = readonly [number, number, number]
+interface CachedGeometry {
+  vertices: CachedVertex[]
+  triangles: CachedTriangle[]
 }

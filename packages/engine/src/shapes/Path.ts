@@ -32,13 +32,14 @@ export class Path extends Shape {
     this.contours =
       options.contours ??
       (options.d ? flattenPathData(options.d, { tolerance: options.tolerance }) : [])
-    // Fill regions are triangulated once at construction (geometry is static; the shape
-    // is moved/animated via its transform, not by re-tessellating).
+    // Grouping outer contours with their holes happens once here; the actual earcut
+    // triangulation happens in buildGeometry(), which Shape's tessellate() only calls on
+    // a cache miss - so it still runs once per shape, just lazily rather than eagerly.
     this.groups = classifyContours(this.contours)
     this.filled = options.filled ?? true
   }
 
-  override tessellate(sink: MeshSink): void {
+  protected override buildGeometry(sink: MeshSink): void {
     // Fill: one triangulated solid+holes group at a time.
     if (this.filled) {
       for (const group of this.groups) {
