@@ -10,12 +10,14 @@ import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
 import { Rect } from './Rect'
 import type { Shape } from './Shape'
+import { Transformer } from './Transformer'
 import {
   ANCHOR_DIRECTION,
   anchorPosition,
   applyWorldTransform,
   boxForNodes,
   boxFromPoints,
+  decompose2D,
   oppositeAnchor,
   resizeFactors,
   rotateAbout,
@@ -272,6 +274,88 @@ function TWO_PI_PLUS(a: number): number {
   }
 }
 
+// --- skew makes the decomposition EXACT: non-uniformly scaling a ROTATED node used to
+//     produce a sheared matrix with nowhere to store the shear, so it could only be
+//     approximated. With skewX/skewY on Shape, rotate+skew+scale spans every invertible
+//     2x2 and the result is reproduced to the last decimal ---
+{
+  const node = new Rect({ x: 30, y: -20, width: 80, height: 40, rotation: 0.7 })
+  const before = corners(node)
+  // Squash x, stretch y, about a point the node does not sit on - the case that shears.
+  const pivot = { x: -15, y: 25 }
+  const delta = scaleAbout(pivot, 0, 0.4, 2.5)
+  applyWorldTransform(node, delta)
+  const after = corners(node)
+
+  for (let i = 0; i < before.length; i++) {
+    const expectedX = pivot.x + (before[i].x - pivot.x) * 0.4
+    const expectedY = pivot.y + (before[i].y - pivot.y) * 2.5
+    assert(
+      near(after[i].x, expectedX, 1e-3) && near(after[i].y, expectedY, 1e-3),
+      'non-uniformly scaling a rotated node lands exactly on the intended corners',
+    )
+  }
+  assert(node.skewX !== 0, 'the shear that scaling a rotated node produces is stored, not discarded')
+
+  // The same, in a rotated FRAME rather than along the world axes, on a node that is
+  // already skewed - the general case; still exact.
+  const gnarly = new Rect({ x: 5, y: 5, width: 30, height: 70, rotation: -0.4, skewX: 0.3, skewY: -0.15 })
+  const g0 = corners(gnarly)
+  const gPivot = { x: 12, y: -8 }
+  applyWorldTransform(gnarly, scaleAbout(gPivot, 0.9, 1.8, 0.5))
+  const g1 = corners(gnarly)
+  // Reproduce the delta independently and compare.
+  const expected = g0.map((p) => {
+    const m = scaleAbout(gPivot, 0.9, 1.8, 0.5)
+    const v = m.transformPoint(new Vector3(p.x, p.y, 0))
+    return { x: v.x, y: v.y }
+  })
+  for (let i = 0; i < g0.length; i++) {
+    assert(
+      near(g1[i].x, expected[i].x, 1e-3) && near(g1[i].y, expected[i].y, 1e-3),
+      'an arbitrary affine delta on an already-skewed, rotated node is exact',
+    )
+  }
+}
+
+// --- decompose2D round-trips through Shape's own transform composition ---
+{
+  for (const source of [
+    new Rect({ rotation: 0.9, scaleX: 2, scaleY: 0.5 }),
+    new Rect({ rotation: -1.2, scaleX: -1.5, scaleY: 3, skewX: 0.6 }),
+    new Rect({ skewX: -0.4, skewY: 0.25, scaleX: 1.3, scaleY: 1.3 }),
+  ]) {
+    const m = source.localMatrix().m
+    const parts = decompose2D(m[0], m[1], m[4], m[5])
+    const rebuilt = new Rect({
+      rotation: parts.rotation,
+      scaleX: parts.scaleX,
+      scaleY: parts.scaleY,
+      skewX: parts.skewX,
+      skewY: parts.skewY,
+    })
+    const r = rebuilt.localMatrix().m
+    assert(
+      near(r[0], m[0], 1e-4) && near(r[1], m[1], 1e-4) && near(r[4], m[4], 1e-4) && near(r[5], m[5], 1e-4),
+      'decomposing a transform and rebuilding it reproduces the same matrix',
+    )
+  }
+}
+
+// --- skew composes where Konva puts it: between rotation and scale ---
+{
+  // A pure skewX shifts x in proportion to y, leaving y alone.
+  const sheared = new Rect({ skewX: 0.5 })
+  const p = sheared.localMatrix().transformPoint(new Vector3(0, 10, 0))
+  assert(near(p.x, 5) && near(p.y, 10), 'skewX slides x by skewX per unit of y')
+
+  const shearedY = new Rect({ skewY: -0.25 })
+  const q = shearedY.localMatrix().transformPoint(new Vector3(8, 0, 0))
+  assert(near(q.x, 8) && near(q.y, -2), 'skewY slides y by skewY per unit of x')
+
+  assert(new Rect().skewX === 0 && new Rect().skewY === 0, 'skew defaults to none')
+}
+
 // --- a node's own pivot (offset) survives a transform ---
 {
   const pivoted = new Rect({ x: 50, y: 50, width: 10, height: 10, offsetX: 4, offsetY: -2 })
@@ -319,6 +403,71 @@ function TWO_PI_PLUS(a: number): number {
   assert(near(after.halfW, 75) && near(after.halfH, 37.5), 'the box grows by the scale factor')
   const dragged = anchorPosition(after, 'top-right')
   assert(near(dragged.x, 100) && near(dragged.y, 50), 'the dragged corner lands exactly under the pointer')
+}
+
+// --- Transformer: the frame re-fits itself as the selection changes shape, and does it
+//     entirely through transforms so nothing ever needs a geometry rebuild ---
+{
+  const node = new Rect({ x: 0, y: 0, width: 100, height: 50 })
+  const t = new Transformer()
+  t.attach([node])
+
+  const fit = () => t.update(boxForNodes(t.selection, localBoundsOf), 1)
+  const edge = (name: string) => {
+    let found: Rect | null = null
+    t.traversePreOrder((n) => {
+      if ((n as Rect).name === `__transformer-${name}`) found = n as Rect
+    })
+    return found!
+  }
+
+  fit()
+  const top = edge('top')
+  const widthBefore = top.scaleX
+  assert(widthBefore > 100, 'the frame spans the selection plus its padding')
+  assert(top.visible, 'the frame shows once something is selected')
+
+  // THE BUG THIS COVERS: scaling the node used to leave the frame at its old size,
+  // because a Rect's width/height are baked geometry and only the renderer can trigger
+  // the rebuild that would re-upload them. The frame is now sized by scale instead, so
+  // re-fitting it is a pure transform change that takes effect immediately.
+  applyWorldTransform(node, scaleAbout({ x: 0, y: 0 }, 0, 2, 2))
+  fit()
+  const grown = boxForNodes(t.selection, localBoundsOf)!
+  // The padding is a fixed number of screen pixels, so it is added after the scaling
+  // rather than doubling with it.
+  const expectedWidth = (grown.halfW + t.padding) * 2 + t.borderWidth
+  assert(near(edge('top').scaleX, expectedWidth, 1e-3), 'the frame re-fits itself to the resized selection')
+  assert(edge('top').scaleX > widthBefore * 1.8, 'and really did grow, rather than staying at its old size')
+
+  // Rotating the selection turns the frame with it.
+  applyWorldTransform(node, rotateAbout({ x: 0, y: 0 }, Math.PI / 6))
+  fit()
+  assert(near(edge('top').rotation, Math.PI / 6, 1e-3), 'the frame turns with the selection')
+
+  // Every part is a unit quad driven purely by transform - never resized or stroked, so
+  // the frame costs no geometry rebuilds however much the selection moves.
+  let parts = 0
+  t.traversePreOrder((n) => {
+    const r = n as Rect
+    if (r === (t as unknown as Rect) || typeof r.strokeWidth !== 'number') return
+    parts++
+    assert(r.width === 1 && r.height === 1, 'every transformer part stays a unit quad')
+    assert(r.strokeWidth === 0, 'transformer parts are fill-only, so nothing re-tessellates')
+    assert(r.overlay, 'transformer parts draw in the always-on-top overlay pass')
+    assert(!r.pickable && !r.draggable, 'transformer parts are never picked or dragged as content')
+  })
+  assert(parts === 4 + 9 * 2, 'four border edges plus two quads for each of the nine handles')
+
+  // Handles are found by proximity in world space, and corners beat the edges they touch.
+  const box = boxForNodes(t.selection, localBoundsOf)!
+  assert(t.anchorAt(anchorPosition(box, 'top-right').x, anchorPosition(box, 'top-right').y) === 'top-right', 'a corner handle is picked at its own position')
+  assert(t.anchorAt(box.cx, box.cy) === null, 'the middle of the frame is not a handle')
+
+  // Detaching hides the whole frame.
+  t.detach()
+  assert(!edge('top').visible, 'clearing the selection hides the frame')
+  assert(t.currentBox === null, 'and drops its box')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

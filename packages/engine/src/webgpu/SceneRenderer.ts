@@ -57,6 +57,8 @@ export class SceneRenderer {
   readonly camera: OrthographicCamera
 
   private readonly pipeline: GPURenderPipeline
+  /** Same mesh pipeline with the depth test/write off - see createMeshPipeline's `overlay`. */
+  private readonly overlayPipeline: GPURenderPipeline
   private readonly frameUniforms: FrameUniforms
   private readonly batcher: MeshBatcher
   private readonly canvas: HTMLCanvasElement
@@ -88,6 +90,7 @@ export class SceneRenderer {
     const objectLayout = createObjectBindGroupLayout(device)
     const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
     this.pipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout)
+    this.overlayPipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout, { overlay: true })
     this.frameUniforms = new FrameUniforms(device, frameLayout)
     this.batcher = new MeshBatcher(device, objectLayout)
 
@@ -199,8 +202,16 @@ export class SceneRenderer {
     const viewBounds =
       camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
     this.lastCullBounds = viewBounds
-    const visibleMeshShapes = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
+    const onScreen = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
     const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
+
+    // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
+    // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
+    // the overlay with depth off, so editor furniture sits on top without occluding.
+    const normal = onScreen.filter((s) => !s.overlay)
+    const overlays = onScreen.filter((s) => s.overlay)
+    const visibleMeshShapes = [...normal, ...overlays]
+    const overlayStart = normal.length
 
     // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
     // objects belong in them changes - content added/removed, or the visible set itself
@@ -215,7 +226,7 @@ export class SceneRenderer {
     this.batcher.updateObjects(visibleMeshShapes, depths)
 
     pass.setPipeline(this.pipeline)
-    this.batcher.draw(pass, this.frameUniforms.bindGroup)
+    this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
 
     if (this.textGeometryDirty || !sameMembers(visibleTexts, this.visibleTexts)) {
       this.textBatcher.rebuild(visibleTexts, this.fontBook)
@@ -225,6 +236,16 @@ export class SceneRenderer {
     this.textBatcher.updateObjects(depths)
     pass.setPipeline(this.textPipeline)
     this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
+
+    // Last, and without touching depth: the overlay draws over both lanes.
+    if (overlays.length > 0) {
+      pass.setPipeline(this.overlayPipeline)
+      this.batcher.draw(
+        pass,
+        this.frameUniforms.bindGroup,
+        this.batcher.indexRangeFor(overlayStart, visibleMeshShapes.length),
+      )
+    }
   }
 
   destroy(): void {

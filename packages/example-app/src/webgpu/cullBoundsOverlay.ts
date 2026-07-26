@@ -45,6 +45,7 @@ export class CullBoundsOverlay {
         strokeWidth: OUTLINE_STROKE_WIDTH,
       })
       this.rect.pickable = false
+      this.rect.overlay = true
       handle.scene.root.addChild(this.rect)
     }
 

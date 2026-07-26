@@ -8,10 +8,10 @@
 // the delta converted into its own parent's frame, rather than the transformer needing to
 // know anything about the hierarchy).
 //
-// Known limitation, shared with Konva: non-uniformly scaling a ROTATED node produces a
-// sheared matrix, and a node's transform (translate/rotate/scale about a pivot) has no
-// shear term to store it in - so the decomposition below approximates. Uniform scaling,
-// and non-uniform scaling of an unrotated node, are both exact.
+// Non-uniformly scaling a ROTATED node produces a sheared matrix, which a
+// translate/rotate/scale transform cannot hold. Shape therefore carries skewX/skewY too
+// (Konva's shear, applied between rotation and scale), so rotate+skew+scale spans every
+// invertible 2x2 and the decomposition below is EXACT rather than a best fit.
 
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
@@ -329,15 +329,66 @@ export function rotateAbout(center: Point2, angle: number): Matrix4x4 {
     .mul(Matrix4x4.translation(new Vector3(-center.x, -center.y, 0)))
 }
 
+/** What a 2x2 linear part decomposes into, in Shape's own transform vocabulary. */
+export interface DecomposedTransform {
+  rotation: number
+  scaleX: number
+  scaleY: number
+  skewX: number
+  skewY: number
+}
+
 /**
- * Pushes a WORLD-space delta onto a node, by rewriting its own x/y/rotation/scale.
+ * Splits a 2x2 linear transform into rotation, skew and scale, matching the order
+ * localMatrix() composes them in (R · skew · S). This is Konva's QR-style decomposition:
+ * the rotation and scaleX come from the x axis' direction and length, the determinant
+ * fixes scaleY, and whatever obliqueness is left over lands in skewX.
+ *
+ * Five stored fields describe a four-degree-of-freedom matrix, so one has to be pinned to
+ * make the answer unique - skewY is pinned to 0, exactly as Konva does. Every invertible
+ * 2x2 is still reachable, which is the point: it makes the decomposition EXACT, so
+ * non-uniformly scaling a rotated shape is represented faithfully instead of approximated.
+ *
+ * `a`/`b` are the x axis (column 0), `c`/`d` the y axis (column 1).
+ */
+export function decompose2D(a: number, b: number, c: number, d: number): DecomposedTransform {
+  const determinant = a * d - b * c
+  const xAxisLength = Math.hypot(a, b)
+
+  if (xAxisLength > 1e-12) {
+    return {
+      rotation: Math.atan2(b, a),
+      scaleX: xAxisLength,
+      scaleY: determinant / xAxisLength,
+      skewX: (a * c + b * d) / determinant,
+      skewY: 0,
+    }
+  }
+
+  // The x axis collapsed (a fully squashed transform), so measure from the y axis instead.
+  const yAxisLength = Math.hypot(c, d)
+  if (yAxisLength > 1e-12) {
+    return {
+      rotation: Math.PI / 2 - Math.atan2(d, c),
+      scaleX: determinant / yAxisLength,
+      scaleY: yAxisLength,
+      skewX: 0,
+      skewY: (a * c + b * d) / determinant,
+    }
+  }
+
+  return { rotation: 0, scaleX: 0, scaleY: 0, skewX: 0, skewY: 0 }
+}
+
+/**
+ * Pushes a WORLD-space delta onto a node, by rewriting its own transform fields.
  *
  * The node's new world matrix is `delta * world`, so its new LOCAL matrix is
  * `parentWorld⁻¹ * delta * parentWorld * local` - which is what lets one delta drive a
  * whole multi-node selection, whatever each node's parent does. That product is then
- * decomposed back into the fields a Shape actually stores; `offsetX/offsetY` is held
- * fixed and folded into the position, since the pivot belongs to the node, not the
- * gesture. See the file header on shear.
+ * decomposed back into the fields a Shape stores (see decompose2D). `offsetX/offsetY` is
+ * held fixed and folded into the position, since the pivot belongs to the node, not the
+ * gesture.
  */
 export function applyWorldTransform(node: Shape, delta: Matrix4x4): void {
   const parentWorld = node.parent ? node.parent.worldMatrix() : Matrix4x4.identity()
@@ -345,19 +396,15 @@ export function applyWorldTransform(node: Shape, delta: Matrix4x4): void {
   const m = newLocal.m
 
   // Column-major: column 0 is the x axis, column 1 the y axis, column 3 the translation.
-  const xAxisX = m[0]
-  const xAxisY = m[1]
-  const yAxisX = m[4]
-  const yAxisY = m[5]
+  const parts = decompose2D(m[0], m[1], m[4], m[5])
+  node.rotation = parts.rotation
+  node.scaleX = parts.scaleX
+  node.scaleY = parts.scaleY
+  node.skewX = parts.skewX
+  node.skewY = parts.skewY
 
-  const determinant = xAxisX * yAxisY - yAxisX * xAxisY
-  node.rotation = Math.atan2(xAxisY, xAxisX)
-  node.scaleX = Math.hypot(xAxisX, xAxisY)
-  // A negative determinant means the delta mirrored the node; carry that on one axis.
-  node.scaleY = Math.hypot(yAxisX, yAxisY) * (determinant < 0 ? -1 : 1)
-
-  // localMatrix() is T(x,y)·R·S·T(-offset), so its translation column reads
-  // (x,y) - R·S·offset - hence the pivot has to be added back here.
-  node.x = m[12] + xAxisX * node.offsetX + yAxisX * node.offsetY
-  node.y = m[13] + xAxisY * node.offsetX + yAxisY * node.offsetY
+  // localMatrix() is T(x,y)·R·skew·S·T(-offset), so its translation column reads
+  // (x,y) - A·offset for the combined linear part A - hence the pivot is added back here.
+  node.x = m[12] + m[0] * node.offsetX + m[4] * node.offsetY
+  node.y = m[13] + m[1] * node.offsetX + m[5] * node.offsetY
 }

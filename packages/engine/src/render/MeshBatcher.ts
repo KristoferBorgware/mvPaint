@@ -39,33 +39,46 @@ export class MeshBatcher {
 
   private indexCount = 0
   private objectCount = 0
+  /** Cumulative index count after each shape in the last rebuild, for sub-range draws. */
+  private indexEnds: number[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
     this.objectLayout = objectLayout
   }
 
-  /** Re-tessellate all shapes (objectId = index) into the shared buffers and upload. */
+  /**
+   * Re-tessellate all shapes (objectId = index) into the shared buffers and upload.
+   *
+   * Shapes keep the order given, and `indexRangeFor` can then hand back the slice of the
+   * index buffer belonging to any prefix/suffix of that order - which is how the renderer
+   * draws ordinary shapes and always-on-top overlays from ONE buffer with two draw calls
+   * (see webgpu/SceneRenderer), rather than maintaining a second batcher for the overlay.
+   */
   rebuild(shapes: readonly Shape[]): void {
     const positions: number[] = [] // 2 per vertex: x,y
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isFill
     const indices: number[] = []
     let vertexCount = 0
 
+    this.indexEnds = []
     shapes.forEach((shape, objectId) => {
-      if (!shape.visible) return
       const start = vertexCount
-      const sink: MeshSink = {
-        vertex: (x, y, isFill) => {
-          positions.push(x, y)
-          packedIds.push(isFill ? objectId | MESH_FILL_BIT : objectId)
-          return vertexCount++ - start
-        },
-        triangle: (a, b, c) => {
-          indices.push(start + a, start + b, start + c)
-        },
+      if (shape.visible) {
+        const sink: MeshSink = {
+          vertex: (x, y, isFill) => {
+            positions.push(x, y)
+            packedIds.push(isFill ? objectId | MESH_FILL_BIT : objectId)
+            return vertexCount++ - start
+          },
+          triangle: (a, b, c) => {
+            indices.push(start + a, start + b, start + c)
+          },
+        }
+        shape.tessellate(sink)
       }
-      shape.tessellate(sink)
+      // Where each shape's indices end, so a contiguous run of shapes can be drawn alone.
+      this.indexEnds.push(indices.length)
     })
 
     // Pack the interleaved vertex buffer (floats for position, u32 bits for packedId).
@@ -182,15 +195,29 @@ export class MeshBatcher {
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)
   }
 
-  draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup): void {
+  /**
+   * The index-buffer slice covering shapes [fromShape, toShape) of the last rebuild -
+   * `{ first, count }`, with count 0 when that run emitted nothing.
+   */
+  indexRangeFor(fromShape: number, toShape: number): { first: number; count: number } {
+    const first = fromShape <= 0 ? 0 : (this.indexEnds[fromShape - 1] ?? this.indexCount)
+    const end = toShape <= 0 ? 0 : (this.indexEnds[Math.min(toShape, this.indexEnds.length) - 1] ?? this.indexCount)
+    return { first, count: Math.max(0, end - first) }
+  }
+
+  /** Draws part of the batch (or all of it, when `range` is omitted). */
+  draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, range?: { first: number; count: number }): void {
     if (!this.vertexBuffer || !this.indexBuffer || !this.objectBindGroup || this.indexCount === 0) {
       return
     }
+    const first = range?.first ?? 0
+    const count = range?.count ?? this.indexCount
+    if (count <= 0) return
     pass.setBindGroup(0, frameBindGroup)
     pass.setBindGroup(1, this.objectBindGroup)
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setIndexBuffer(this.indexBuffer, 'uint32')
-    pass.drawIndexed(this.indexCount)
+    pass.drawIndexed(count, 1, first)
   }
 
   destroy(): void {

@@ -60,12 +60,20 @@ export interface ShapeOptions {
   rotation?: number
   offsetX?: number
   offsetY?: number
+  /** Shear: x shifts by skewX per unit y. See Shape.skewX. */
+  skewX?: number
+  /** Shear: y shifts by skewY per unit x. See Shape.skewY. */
+  skewY?: number
   /**
    * Stacking-order hint: shapes with a higher zIndex render in front, resolved by the
    * renderer's depth buffer (so mesh shapes and text can freely interleave). Integer-
    * valued by convention; ties fall back to scene-graph order. Default 0.
    */
   zIndex?: number
+  /**
+   * Draw in the always-on-top overlay pass (see webgpu/SceneRenderer). Default false.
+   */
+  overlay?: boolean
   /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
   draggable?: boolean
   fill?: RGBA
@@ -98,7 +106,24 @@ export abstract class Shape extends Node {
   rotation = 0
   offsetX = 0
   offsetY = 0
+  /**
+   * Shear, matching Canvas/Konva semantics: skewX slides x by `skewX` per unit of y, and
+   * skewY slides y by `skewY` per unit of x - so the matrix contributed is
+   * [[1, skewX], [skewY, 1]]. Applied between rotation and scale (see localMatrix), which
+   * is what lets an arbitrary affine transform be represented exactly: rotate+skew+scale
+   * spans every invertible 2x2, so a transformer can non-uniformly scale a ROTATED shape
+   * without the result having to be approximated.
+   */
+  skewX = 0
+  skewY = 0
   zIndex = 0
+  /**
+   * When true the shape is drawn in the overlay pass, after everything else and without
+   * writing depth - for editor furniture (selection frames, handles, rubber bands) that
+   * must sit on top of the scene without occluding it. A translucent overlay that DID
+   * write depth would punch a hole through whatever draws later, notably the text lane.
+   */
+  overlay = false
 
   protected _width = 0
   protected _height = 0
@@ -155,7 +180,10 @@ export abstract class Shape extends Node {
     this.rotation = options.rotation ?? 0
     this.offsetX = options.offsetX ?? 0
     this.offsetY = options.offsetY ?? 0
+    this.skewX = options.skewX ?? 0
+    this.skewY = options.skewY ?? 0
     this.zIndex = options.zIndex ?? 0
+    this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
     this.fill = options.fill ?? [0, 0, 0, 1]
     this.stroke = options.stroke ?? [0, 0, 0, 1]
@@ -169,6 +197,9 @@ export abstract class Shape extends Node {
     let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
     if (this.rotation !== 0) {
       m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
+    }
+    if (this.skewX !== 0 || this.skewY !== 0) {
+      m = m.mul(skewMatrix(this.skewX, this.skewY))
     }
     if (this.scaleX !== 1 || this.scaleY !== 1) {
       m = m.mul(Matrix4x4.scaling(new Vector3(this.scaleX, this.scaleY, 1)))
@@ -268,6 +299,17 @@ export abstract class Shape extends Node {
    * text lane) relies on exactly that; every mesh-drawn shape overrides this instead.
    */
   protected buildGeometry(_sink: MeshSink): void {}
+}
+
+/**
+ * The shear [[1, skewX], [skewY, 1]]: x slides by skewX per unit y, y by skewY per unit
+ * x. Column-major storage, so column 0 is (1, skewY) and column 1 is (skewX, 1).
+ */
+function skewMatrix(skewX: number, skewY: number): Matrix4x4 {
+  const m = Matrix4x4.identity()
+  m.m[1] = skewY
+  m.m[4] = skewX
+  return m
 }
 
 interface CachedVertex {

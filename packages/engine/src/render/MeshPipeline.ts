@@ -7,11 +7,23 @@ import { meshShaderCode } from './mesh.wgsl'
 import { MESH_VERTEX_LAYOUT } from './meshFormat'
 import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
 
+export interface MeshPipelineOptions {
+  /**
+   * Build the always-on-top overlay variant: depth is neither tested nor written, so
+   * editor furniture (selection frames, handles, rubber bands) draws over everything
+   * while leaving the depth buffer untouched. Without this a translucent overlay would
+   * write depth and reject whatever draws after it - notably the whole text lane behind
+   * it - since alpha blending and the depth test know nothing about each other.
+   */
+  overlay?: boolean
+}
+
 export function createMeshPipeline(
   device: GPUDevice,
   format: GPUTextureFormat,
   sampleCount: number,
   layout: GPUPipelineLayout,
+  options: MeshPipelineOptions = {},
 ): GPURenderPipeline {
   const module = device.createShaderModule({ code: meshShaderCode })
 
@@ -49,8 +61,8 @@ export function createMeshPipeline(
     },
     depthStencil: {
       format: DEPTH_FORMAT,
-      depthWriteEnabled: true,
-      depthCompare: DEPTH_COMPARE,
+      depthWriteEnabled: !options.overlay,
+      depthCompare: options.overlay ? 'always' : DEPTH_COMPARE,
     },
     multisample: {
       count: sampleCount,

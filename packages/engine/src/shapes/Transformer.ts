@@ -8,6 +8,15 @@
 // whose members live under different (possibly transformed) parents. The gestures
 // themselves live in transformerMath.ts; this file is the scene bookkeeping around them.
 //
+// Every part is a UNIT quad that is only ever moved, turned and scaled - never resized by
+// its width/height, and never stroked. That matters: width/height/strokeWidth are baked
+// into geometry, so changing them needs a buffer rebuild that only the renderer can
+// trigger, and the transformer has no handle on the renderer. Driving everything through
+// the transform instead means the frame tracks a selection that is being dragged, scaled
+// or spun with no rebuild at all - which is also why the border is four edge quads and
+// each anchor is two stacked quads (an outer one showing through as its border) rather
+// than stroked rectangles.
+//
 // Anchors are held at a constant SCREEN size: their world size is divided by the camera
 // zoom, so a handle stays comfortably clickable whether the view is zoomed way in or out.
 
@@ -31,6 +40,10 @@ export interface TransformerOptions {
   rotateAnchorOffset?: number
   /** Extra room between the selection's bounds and the frame, in screen pixels. Default 4. */
   padding?: number
+  /** Border thickness in screen pixels. Default 1.5. */
+  borderWidth?: number
+  /** Anchor border thickness in screen pixels. Default 1.5. */
+  anchorBorderWidth?: number
   /** Which resize anchors to show. Default: all eight. */
   enabledAnchors?: readonly ResizeAnchor[]
   /** Show the rotate handle. Default true. */
@@ -49,18 +62,25 @@ export interface TransformerOptions {
 const DEFAULT_BORDER: RGBA = [0.16, 0.62, 1, 1]
 const DEFAULT_ANCHOR_FILL: RGBA = [1, 1, 1, 1]
 const DEFAULT_ANCHOR_STROKE: RGBA = [0.16, 0.62, 1, 1]
-const BORDER_STROKE_PX = 1.5
-const ANCHOR_STROKE_PX = 1.5
 /** Anchors are picked within this many screen px of their center - forgiving on touch. */
 const ANCHOR_HIT_SLOP_PX = 6
-
-/** Sits above ordinary content so the frame and its handles are never buried. */
+/** Sits above ordinary content; the overlay pass keeps it above the text lane too. */
 const TRANSFORMER_Z_INDEX = 1_000_000
+
+type EdgeName = 'top' | 'bottom' | 'left' | 'right'
+const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
+
+interface AnchorVisual {
+  outer: Rect
+  inner: Rect
+}
 
 export class Transformer extends Container {
   readonly anchorSize: number
   readonly rotateAnchorOffset: number
   readonly padding: number
+  readonly borderWidth: number
+  readonly anchorBorderWidth: number
   readonly enabledAnchors: readonly ResizeAnchor[]
   readonly rotateEnabled: boolean
   keepRatio: boolean
@@ -69,14 +89,17 @@ export class Transformer extends Container {
   private box: OrientedBox | null = null
   private zoom = 1
 
-  private readonly border: Rect
-  private readonly anchors = new Map<TransformerAnchor, Rect>()
+  private readonly edges = new Map<EdgeName, Rect>()
+  private readonly anchors = new Map<TransformerAnchor, AnchorVisual>()
+  private readonly parts: Rect[] = []
 
   constructor(options: TransformerOptions = {}) {
     super('__transformer')
     this.anchorSize = options.anchorSize ?? 10
     this.rotateAnchorOffset = options.rotateAnchorOffset ?? 24
     this.padding = options.padding ?? 4
+    this.borderWidth = options.borderWidth ?? 1.5
+    this.anchorBorderWidth = options.anchorBorderWidth ?? 1.5
     this.enabledAnchors = options.enabledAnchors ?? RESIZE_ANCHORS
     this.rotateEnabled = options.rotateEnabled ?? true
     this.keepRatio = options.keepRatio ?? true
@@ -85,43 +108,37 @@ export class Transformer extends Container {
     const anchorFill = options.anchorFill ?? DEFAULT_ANCHOR_FILL
     const anchorStroke = options.anchorStroke ?? DEFAULT_ANCHOR_STROKE
 
-    // One unfilled rect for the frame. Its size tracks the selection, so it is the one
-    // piece here that re-tessellates during a drag (width/height are baked geometry,
-    // unlike a transform) - acceptable for an overlay that only changes while a gesture
-    // is actually in flight.
-    this.border = new Rect({
-      name: '__transformer-border',
-      fill: [0, 0, 0, 0],
-      stroke: [...borderColor],
-      strokeWidth: BORDER_STROKE_PX,
-      zIndex: TRANSFORMER_Z_INDEX,
-    })
-    this.border.pickable = false
-    this.border.draggable = false
-    this.addChild(this.border)
+    for (const edge of EDGES) {
+      const rect = this.makePart(`__transformer-${edge}`, borderColor, TRANSFORMER_Z_INDEX)
+      this.edges.set(edge, rect)
+    }
 
     const names: TransformerAnchor[] = [...this.enabledAnchors]
     if (this.rotateEnabled) names.push('rotate')
     for (const name of names) {
-      const anchor = new Rect({
-        name: `__transformer-${name}`,
-        width: 1,
-        height: 1,
-        fill: [...anchorFill],
-        stroke: [...anchorStroke],
-        strokeWidth: ANCHOR_STROKE_PX,
-        zIndex: TRANSFORMER_Z_INDEX + 1,
+      this.anchors.set(name, {
+        outer: this.makePart(`__transformer-${name}-border`, anchorStroke, TRANSFORMER_Z_INDEX + 1),
+        inner: this.makePart(`__transformer-${name}`, anchorFill, TRANSFORMER_Z_INDEX + 2),
       })
-      // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
-      // otherwise they would shadow the very shapes they are meant to manipulate.
-      anchor.pickable = false
-      anchor.draggable = false
-      anchor.visible = false
-      this.anchors.set(name, anchor)
-      this.addChild(anchor)
     }
 
     this.setVisible(false)
+  }
+
+  /** A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds. */
+  private makePart(name: string, fill: RGBA, zIndex: number): Rect {
+    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex })
+    // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
+    // otherwise they would shadow the very shapes they are meant to manipulate.
+    rect.pickable = false
+    rect.draggable = false
+    rect.visible = false
+    // Drawn in the always-on-top pass, so the frame never punches a depth hole through
+    // the text lane the way an ordinary translucent shape would.
+    rect.overlay = true
+    this.parts.push(rect)
+    this.addChild(rect)
+    return rect
   }
 
   /** The nodes this frame currently wraps. */
@@ -149,11 +166,7 @@ export class Transformer extends Container {
 
   /** True if `node` is one of this transformer's own visuals. */
   owns(node: Shape): boolean {
-    if (node === this.border) return true
-    for (const anchor of this.anchors.values()) {
-      if (node === anchor) return true
-    }
-    return false
+    return this.parts.includes(node as Rect)
   }
 
   /**
@@ -169,31 +182,28 @@ export class Transformer extends Container {
       return
     }
 
-    // World units per screen pixel: 1 at zoom 1, so handles shrink in world terms as the
-    // camera zooms in and stay the same size to the eye.
+    const framed = this.framedBox(box)
     const perPixel = 1 / this.zoom
-    const pad = this.padding * perPixel
-    const framed: OrientedBox = { ...box, halfW: box.halfW + pad, halfH: box.halfH + pad }
+    const thickness = this.borderWidth * perPixel
+    const fullW = framed.halfW * 2
+    const fullH = framed.halfH * 2
 
-    this.border.visible = true
-    this.border.x = framed.cx
-    this.border.y = framed.cy
-    this.border.rotation = framed.rotation
-    this.border.strokeWidth = BORDER_STROKE_PX * perPixel
-    this.setBorderSize(framed.halfW * 2, framed.halfH * 2)
+    // Four edge bars, each spanning one side of the frame. Overlapping at the corners by
+    // the bar thickness is what closes them cleanly.
+    this.placeEdge('top', framed, 0, framed.halfH, fullW + thickness, thickness)
+    this.placeEdge('bottom', framed, 0, -framed.halfH, fullW + thickness, thickness)
+    this.placeEdge('left', framed, -framed.halfW, 0, thickness, fullH + thickness)
+    this.placeEdge('right', framed, framed.halfW, 0, thickness, fullH + thickness)
 
     const size = this.anchorSize * perPixel
+    const inner = Math.max(size - 2 * this.anchorBorderWidth * perPixel, size * 0.2)
     for (const name of this.enabledAnchors) {
-      const anchor = this.anchors.get(name)
-      if (!anchor) continue
       const at = anchorPosition(framed, name)
-      this.placeAnchor(anchor, at.x, at.y, framed.rotation, size)
+      this.placeAnchor(name, at.x, at.y, framed.rotation, size, inner)
     }
-
-    const rotateAnchor = this.anchors.get('rotate')
-    if (rotateAnchor) {
+    if (this.anchors.has('rotate')) {
       const at = rotateAnchorPosition(framed, this.rotateAnchorOffset * perPixel)
-      this.placeAnchor(rotateAnchor, at.x, at.y, framed.rotation, size)
+      this.placeAnchor('rotate', at.x, at.y, framed.rotation, size, inner)
     }
   }
 
@@ -205,10 +215,8 @@ export class Transformer extends Container {
    */
   anchorAt(worldX: number, worldY: number): TransformerAnchor | null {
     if (!this.box || this.nodes.length === 0) return null
-    const perPixel = 1 / this.zoom
-    const reach = (this.anchorSize / 2 + ANCHOR_HIT_SLOP_PX) * perPixel
-    const pad = this.padding * perPixel
-    const framed: OrientedBox = { ...this.box, halfW: this.box.halfW + pad, halfH: this.box.halfH + pad }
+    const framed = this.framedBox(this.box)
+    const reach = (this.anchorSize / 2 + ANCHOR_HIT_SLOP_PX) / this.zoom
 
     let best: TransformerAnchor | null = null
     let bestDistance = reach
@@ -225,37 +233,59 @@ export class Transformer extends Container {
       bestIsCorner = isCorner
     }
 
-    if (this.rotateEnabled && this.anchors.has('rotate')) {
-      consider('rotate', rotateAnchorPosition(framed, this.rotateAnchorOffset * perPixel), false)
+    if (this.anchors.has('rotate')) {
+      consider('rotate', rotateAnchorPosition(framed, this.rotateAnchorOffset / this.zoom), false)
     }
     for (const name of this.enabledAnchors) {
-      const isCorner = name.includes('-') && !name.includes('center') && !name.includes('middle')
-      consider(name, anchorPosition(framed, name), isCorner)
+      const isCorner = name.startsWith('top-') || name.startsWith('bottom-')
+      consider(name, anchorPosition(framed, name), isCorner && !name.endsWith('-center'))
     }
     return best
   }
 
-  private placeAnchor(anchor: Rect, x: number, y: number, rotation: number, size: number): void {
-    anchor.visible = true
-    anchor.x = x
-    anchor.y = y
-    anchor.rotation = rotation
-    // The handle is a 1x1 rect scaled to size, so re-sizing it on zoom stays a pure
-    // transform change and never re-tessellates.
-    anchor.scaleX = size
-    anchor.scaleY = size
-    anchor.strokeWidth = ANCHOR_STROKE_PX / size / this.zoom
+  /** The selection box grown by the frame's padding, in world units. */
+  private framedBox(box: OrientedBox): OrientedBox {
+    const pad = this.padding / this.zoom
+    return { ...box, halfW: box.halfW + pad, halfH: box.halfH + pad }
   }
 
-  private setBorderSize(width: number, height: number): void {
-    if (this.border.width === width && this.border.height === height) return
-    this.border.width = width
-    this.border.height = height
-    this.border.markGeometryDirty()
+  private placeEdge(edge: EdgeName, box: OrientedBox, localX: number, localY: number, width: number, height: number): void {
+    const rect = this.edges.get(edge)
+    if (!rect) return
+    const c = Math.cos(box.rotation)
+    const s = Math.sin(box.rotation)
+    rect.visible = true
+    rect.x = box.cx + localX * c - localY * s
+    rect.y = box.cy + localX * s + localY * c
+    rect.rotation = box.rotation
+    rect.scaleX = width
+    rect.scaleY = height
+  }
+
+  private placeAnchor(
+    name: TransformerAnchor,
+    x: number,
+    y: number,
+    rotation: number,
+    size: number,
+    innerSize: number,
+  ): void {
+    const visual = this.anchors.get(name)
+    if (!visual) return
+    for (const [rect, scale] of [
+      [visual.outer, size],
+      [visual.inner, innerSize],
+    ] as const) {
+      rect.visible = true
+      rect.x = x
+      rect.y = y
+      rect.rotation = rotation
+      rect.scaleX = scale
+      rect.scaleY = scale
+    }
   }
 
   private setVisible(visible: boolean): void {
-    this.border.visible = visible
-    for (const anchor of this.anchors.values()) anchor.visible = visible
+    for (const rect of this.parts) rect.visible = visible
   }
 }

@@ -41,6 +41,7 @@ export class MarqueeOverlay {
       })
       this.rect.pickable = false
       this.rect.draggable = false
+      this.rect.overlay = true
       handle.scene.root.addChild(this.rect)
     }
 
