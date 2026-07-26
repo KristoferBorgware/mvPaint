@@ -28,17 +28,25 @@ export class OrthographicCamera extends Camera {
   }
 
   /**
-   * The camera's current view rectangle in world space (z=0, where every 2D shape
-   * lives) - an orthographic camera's frustum IS just an axis-aligned box centered on
-   * the camera, no plane/frustum math needed. Used for viewport culling (see
-   * scene/culling.ts): whatever doesn't overlap this box isn't worth drawing.
+   * The camera's current view rectangle in world space - an orthographic camera's
+   * frustum IS just an axis-aligned box centered on the camera, no plane/frustum math
+   * needed. Used for viewport culling (see scene/culling.ts): whatever doesn't overlap
+   * this box isn't worth drawing.
+   *
+   * Z spans +-Infinity rather than the "real" 0 every 2D shape's world bounds sits at:
+   * AABB.expanded() (the cull-margin debug knob) shrinks EVERY axis, and a margin big
+   * enough to go negative on a zero-thickness Z range inverts it (min > max), which
+   * makes AABB.intersects() reject every shape's Z on its own, regardless of X/Y overlap
+   * - i.e. everything vanishes as soon as the margin goes negative. Z was never a real
+   * constraint for a 2D scene to begin with, so making it unbounded here is the correct
+   * fix, not a workaround: only X/Y ever decide "on screen" for this camera.
    */
   viewBounds(aspect: number): AABB {
     const halfHeight = this.viewHeight / 2
     const halfWidth = halfHeight * aspect
     return new AABB(
-      new Vector3(this.eye.x - halfWidth, this.eye.y - halfHeight, 0),
-      new Vector3(this.eye.x + halfWidth, this.eye.y + halfHeight, 0),
+      new Vector3(this.eye.x - halfWidth, this.eye.y - halfHeight, -Infinity),
+      new Vector3(this.eye.x + halfWidth, this.eye.y + halfHeight, Infinity),
     )
   }
 }

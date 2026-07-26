@@ -4,6 +4,7 @@
 import { FreeFloatCamera } from './FreeFloatCamera'
 import { OrbitCamera } from './OrbitCamera'
 import { OrthographicCamera } from './OrthographicCamera'
+import { AABB } from '../math/AABB'
 import { Vector3 } from '../math/Vector3'
 
 let count = 0
@@ -97,6 +98,25 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
     zoomedIn.max.y - zoomedIn.min.y < bounds.max.y - bounds.min.y,
     'a smaller viewHeight (zoomed in) shrinks the view rectangle',
   )
+}
+
+// --- viewBounds() stays valid, and still overlaps a z=0 box, under ANY cull margin -
+//     regression for a real bug: a zero-thickness Z range ([0,0]) inverts (min>max) as
+//     soon as AABB.expanded() shrinks it by a negative margin, which makes
+//     AABB.intersects() reject on Z alone regardless of X/Y overlap - i.e. every shape
+//     gets culled the moment the debug cull-margin slider goes negative, no matter how
+//     far its bounds are from the view edge. viewBounds() now spans +-Infinity in Z
+//     specifically so no finite margin can ever invert it ---
+{
+  const cam = new OrthographicCamera()
+  cam.viewHeight = 720
+  const aspect = 1280 / 720
+  const atZ0 = new AABB(new Vector3(-1, -1, 0), new Vector3(1, 1, 0))
+  for (const margin of [-300, -10, 0, 300]) {
+    const bounds = cam.viewBounds(aspect).expanded(margin)
+    assert(bounds.valid(), `viewBounds stays valid at cull margin ${margin}`)
+    assert(bounds.intersects(atZ0), `a z=0 box still overlaps viewBounds at cull margin ${margin}`)
+  }
 }
 
 console.log(`[camera] self-test passed (${count} assertions)`)
