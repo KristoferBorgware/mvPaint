@@ -82,7 +82,7 @@ function corners(node: Shape): { x: number; y: number }[] {
   assert(near(s * s * 2, 1), 'sanity: sqrt(1/2) squared, doubled, is 1')
 }
 
-// --- boxForNodes: one node orients to it, several fall back to axis-aligned ---
+// --- boxForNodes: every selection orients to the FIRST node's rotation, one node or many ---
 {
   const solo = new Rect({ x: 100, y: 50, width: 40, height: 20, rotation: Math.PI / 4 })
   const box = boxForNodes([solo], localBoundsOf)!
@@ -90,14 +90,66 @@ function corners(node: Shape): { x: number; y: number }[] {
   assert(near(box.cx, 100) && near(box.cy, 50), "the box centers on the node's own bounds")
   assert(near(box.halfW, 20) && near(box.halfH, 10), 'and hugs it: half of 40x20, despite the rotation')
 
+  // Two unrotated nodes: happens to look axis-aligned, but only because the FIRST one is
+  // unrotated - not because multi-selection is special-cased to axis-aligned.
   const a = new Rect({ x: -50, y: 0, width: 20, height: 20 })
   const b = new Rect({ x: 50, y: 30, width: 20, height: 20 })
   const pair = boxForNodes([a, b], localBoundsOf)!
-  assert(pair.rotation === 0, 'a multi-node box is axis-aligned')
+  assert(pair.rotation === 0, "an unrotated first node gives an axis-aligned box")
   assert(near(pair.cx, 0) && near(pair.cy, 15), 'the multi-node box centers on the union')
   assert(near(pair.halfW, 60) && near(pair.halfH, 25), 'the multi-node box spans every node')
 
+  // REGRESSION: a multi-node box used to be forced axis-aligned regardless of any
+  // member's rotation - which meant that during a rotate drag, re-fitting the box every
+  // frame (as the renderer does) kept resetting it back to axis-aligned, so the frame
+  // never appeared to rotate with the selection even though the nodes genuinely were.
+  // Order matters: it's the FIRST selected node, not any rotated node in the set.
+  const rotatedFirst = new Rect({ x: 0, y: 0, width: 20, height: 20, rotation: Math.PI / 4 })
+  const unrotatedSecond = new Rect({ x: 100, y: 0, width: 20, height: 20 })
+  const orientedToFirst = boxForNodes([rotatedFirst, unrotatedSecond], localBoundsOf)!
+  assert(near(orientedToFirst.rotation, Math.PI / 4), 'a multi-node box orients to the FIRST selected node, not axis-aligned')
+
+  const reordered = boxForNodes([unrotatedSecond, rotatedFirst], localBoundsOf)!
+  assert(near(reordered.rotation, 0), 'reversing selection order changes which node orients the box')
+
   assert(boxForNodes([], localBoundsOf) === null, 'no nodes gives no box')
+}
+
+// --- REGRESSION: the box orientation must survive a live rotate gesture, i.e. re-fitting
+//     the box every frame (as the renderer does mid-drag) must show the selection turning,
+//     not snap back to axis-aligned - the bug the fix above addresses end to end ---
+{
+  const upright = new Rect({ x: -100, y: 0, width: 120, height: 40 })
+  const turned = new Rect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 })
+  const selection = [turned, upright] // turned selected FIRST
+
+  const pressBox = boxForNodes(selection, localBoundsOf)!
+  assert(near(pressBox.rotation, Math.PI / 4), 'the box starts oriented to the first-selected (turned) node')
+
+  const startWorld = rotateAnchorPosition(pressBox, 24)
+  const starts = selection.map((n) => n.captureTransform())
+
+  // Sweep the rotate handle through several steps, re-fitting the box after each one -
+  // exactly what happens once per frame during a live drag.
+  let lastBoxRotation = pressBox.rotation
+  for (const sweepDeg of [10, 25, 45, 70]) {
+    selection.forEach((n, i) => n.restoreTransform(starts[i]))
+    const angle = (sweepDeg * Math.PI) / 180
+    const pointer = rotateAbout({ x: pressBox.cx, y: pressBox.cy }, angle).transformPoint(
+      new Vector3(startWorld.x, startWorld.y, 0),
+    )
+    const delta = rotationDelta(pressBox, startWorld, { x: pointer.x, y: pointer.y })
+    const D = rotateAbout({ x: pressBox.cx, y: pressBox.cy }, delta)
+    for (const n of selection) applyWorldTransform(n, D)
+
+    const refit = boxForNodes(selection, localBoundsOf)!
+    assert(
+      near(refit.rotation, pressBox.rotation + angle, 1e-3),
+      `re-fitting mid-drag reports the box actually turning (swept ${sweepDeg} deg)`,
+    )
+    assert(!near(refit.rotation, lastBoxRotation), 'each step is a genuinely different orientation from the last')
+    lastBoxRotation = refit.rotation
+  }
 }
 
 // --- anchors: placement follows the box's rotation, and opposites really are opposite ---

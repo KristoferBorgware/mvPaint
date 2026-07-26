@@ -156,19 +156,33 @@ export function worldCorners(node: Shape, bounds: AABB): Point2[] {
 }
 
 /**
- * The selection box around one or more nodes. A lone node gives an oriented box matching
- * its own world rotation; several give the axis-aligned box enclosing all of them.
+ * The selection box around one or more nodes, oriented to the FIRST node's world
+ * rotation - so a lone selected node gets a box that hugs it exactly, and a multi-node
+ * selection rotates and resizes as a rigid group around whichever member was selected
+ * first, rather than snapping back to axis-aligned.
+ *
+ * That "snapping back" is not just a cosmetic difference: `update()` (see Transformer) is
+ * called every frame with a box freshly rebuilt here, including mid-gesture. An
+ * axis-aligned multi-node box would recompute as axis-aligned on every frame of a ROTATE
+ * drag too, so however much the selected nodes actually turned, the box shown on screen
+ * would appear frozen - it never looked like it was rotating with the selection at all,
+ * even though the nodes underneath genuinely were.
+ *
  * `boundsOf` supplies each node's LOCAL bounds (Shape.localBounds() for a mesh shape, the
- * shaped text bounds for a Text), returning null for anything with nothing to measure.
+ * shaped text bounds for a Text), returning null for anything with nothing to measure -
+ * `nodes[0]` still orients the box even if it happens to be one of those, since
+ * orientation only needs its rotation, not its bounds.
  */
 export function boxForNodes(nodes: readonly Shape[], boundsOf: (node: Shape) => AABB | null): OrientedBox | null {
+  if (nodes.length === 0) return null
+  const rotation = worldRotationOf(nodes[0])
+
   const measurable = nodes.filter((node) => {
     const b = boundsOf(node)
     return b !== null && b.valid()
   })
   if (measurable.length === 0) return null
 
-  const rotation = measurable.length === 1 ? worldRotationOf(measurable[0]) : 0
   const points: Point2[] = []
   for (const node of measurable) {
     points.push(...worldCorners(node, boundsOf(node)!))
