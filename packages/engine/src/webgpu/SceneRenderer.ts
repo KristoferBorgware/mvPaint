@@ -75,6 +75,10 @@ export class SceneRenderer {
   // set - so draw() can tell whether culling's output actually changed this frame.
   private visibleMeshShapes: Shape[] = []
   private visibleTexts: Text[] = []
+  // The last frame's (margin-expanded) cull rectangle, for getCullBounds() - lets a
+  // caller draw it as a debug overlay. Null before the first draw, or whenever the
+  // active camera isn't an OrthographicCamera (no rectangular frustum to show).
+  private lastCullBounds: AABB | null = null
 
   constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement, fontBook: FontBook) {
     this.canvas = canvas
@@ -118,6 +122,11 @@ export class SceneRenderer {
 
   getCullMargin(): number {
     return this.cullMargin
+  }
+
+  /** The last frame's (margin-expanded) cull rectangle, world space - for a debug overlay. */
+  getCullBounds(): AABB | null {
+    return this.lastCullBounds
   }
 
   /**
@@ -180,6 +189,7 @@ export class SceneRenderer {
     // non-orthographic camera, since only OrthographicCamera has a rectangular frustum.
     const viewBounds =
       camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
+    this.lastCullBounds = viewBounds
     const visibleMeshShapes = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
     const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
 
@@ -225,6 +235,8 @@ export interface SceneRendererHandle {
   /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
   setCullMargin: (margin: number) => void
   getCullMargin: () => number
+  /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
+  getCullBounds: () => AABB | null
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
   pick: (screenX: number, screenY: number) => PickableNode | null
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
@@ -315,6 +327,9 @@ export async function createSceneRenderer(
     },
     getCullMargin() {
       return scene.getCullMargin()
+    },
+    getCullBounds() {
+      return scene.getCullBounds()
     },
     pick(screenX: number, screenY: number) {
       return scene.pick(screenX, screenY)

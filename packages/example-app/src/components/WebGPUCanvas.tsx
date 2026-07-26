@@ -8,6 +8,7 @@ import {
 } from '@mvpaint/engine'
 import { buildDemoScene } from '../webgpu/demoScene'
 import { SelectionHighlight } from '../webgpu/selectionHighlight'
+import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
 
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
@@ -74,6 +75,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let inputController: SceneInputController | null = null
     const highlight = new SelectionHighlight()
     highlightRef.current = highlight
+    const cullBoundsOverlay = new CullBoundsOverlay()
 
     createSceneRenderer(canvas, {
       onDeviceError: (message) => onError?.(message),
@@ -91,6 +93,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         if (currentZoom !== undefined && currentZoom !== lastReportedZoom) {
           lastReportedZoom = currentZoom
           onZoomChangeRef.current?.(currentZoom)
+        }
+        // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
+        // updated every frame since it tracks the camera as it pans/zooms.
+        if (handleRef.current) {
+          cullBoundsOverlay.update(handleRef.current, handleRef.current.getCullMargin())
         }
       },
     })
