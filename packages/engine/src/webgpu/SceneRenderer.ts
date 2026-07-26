@@ -7,7 +7,6 @@
 // below, with content supplied by the caller through the `populate` option.
 
 import { Shape } from '../scene/Shape'
-import { MeshShape } from '../scene/MeshShape'
 import { Text } from '../shapes/Text'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
@@ -137,8 +136,10 @@ export class SceneRenderer {
     const ordered = collectZOrder(this.scene)
     const depths = new Map<Shape, number>()
     ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
-    const meshShapes = ordered.filter((s): s is MeshShape => s instanceof MeshShape)
+    // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
+    // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher.
     const texts = ordered.filter((s): s is Text => s instanceof Text)
+    const meshShapes = ordered.filter((s) => !(s instanceof Text))
 
     if (this.geometryDirty) {
       this.batcher.rebuild(meshShapes)

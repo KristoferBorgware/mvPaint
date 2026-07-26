@@ -13,7 +13,6 @@ import { Circle } from '../shapes/Circle'
 import { Rect } from '../shapes/Rect'
 import { Text } from '../shapes/Text'
 import { Shape } from './Shape'
-import { MeshShape } from './MeshShape'
 import type { MeshSink } from '../render/meshFormat'
 import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
 
@@ -122,7 +121,7 @@ class TransformGroup extends Container {
   // duplicate point from a stroke join), harmless for the GPU rasterizer - must never
   // match every point: its three edge signs are all exactly 0, so a naive "no negative
   // and no positive edge sign" test would wrongly call it a universal hit.
-  class DegenerateShape extends MeshShape {
+  class DegenerateShape extends Shape {
     tessellate(sink: MeshSink): void {
       const a = sink.vertex(10, 130, this.fill, true)
       const b = sink.vertex(10, 130, this.fill, true)
@@ -194,6 +193,16 @@ class TransformGroup extends Container {
   assert(Text.prototype instanceof Shape, 'Text extends Shape, carrying zIndex/offset/pickable like a mesh shape')
   assert(new Text().zIndex === 0, 'Text inherits the zIndex default')
   assert(new Text().pickable, 'Text inherits the pickable default')
+
+  // Shape's full styling vocabulary (width/height/fill/stroke/...) is inherited too, even
+  // though Text's own rich per-run styling doesn't use it - one shared vocabulary instead
+  // of the render lane dictating which fields a shape gets.
+  const text = new Text({ fill: [1, 0, 0, 1], stroke: [0, 1, 0, 1], strokeWidth: 2, width: 50 })
+  assert(text.fill[0] === 1 && text.stroke[1] === 1 && text.strokeWidth === 2 && text.width === 50, 'Text inherits Shape fields, not just Shape defaults')
+
+  let sawVertex = false
+  text.tessellate({ vertex: () => ((sawVertex = true), 0), triangle: () => {} })
+  assert(!sawVertex, "Text inherits Shape's no-op tessellate() (it renders through the text lane, not the mesh lane)")
 }
 
 // --- picking: textLocalBounds unions every quad's corners ---

@@ -1,49 +1,36 @@
 // Polyline - a stroked (no fill), open or closed path. Points are in local space,
 // positioned by the common Shape parameters (x, y, scale, rotation, offset); line style
-// matches the Canvas2D API: lineJoin ('miter'|'round'|'bevel'), lineCap
-// ('butt'|'round'|'square', open paths only), and miterLimit. Delegates entirely to the
-// shared contour stroker - this is the shape that most directly exercises "any contour,
-// with any join/cap style".
+// matches the Canvas2D API via the inherited stroke/lineJoin/lineCap/miterLimit
+// ('lineCap' only applies to open paths). Delegates entirely to the shared contour
+// stroker - this is the shape that most directly exercises "any contour, with any
+// join/cap style".
 //
 // Fill for closed polylines (treating them as a filled polygon) is a separate, harder
 // problem - general polygon triangulation (ear clipping) for arbitrary/concave shapes -
 // and is out of scope here; Polyline is stroke-only. width/height are unused (its size
 // comes from its own point list, not a settable size parameter).
 
-import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
-import type { MeshSink, RGBA } from '../render/meshFormat'
-import { strokePolyline, type LineCap, type LineJoin, type Point2 } from '../render/stroke'
+import { Shape, type ShapeOptions } from '../scene/Shape'
+import type { MeshSink } from '../render/meshFormat'
+import { strokePolyline, type Point2 } from '../render/stroke'
 
-export interface PolylineOptions extends MeshShapeOptions {
+export interface PolylineOptions extends ShapeOptions {
   points: Point2[]
   /** Loop back to the start (a closed contour) vs. an open path with caps. Default false. */
   closed?: boolean
-  stroke?: RGBA
-  strokeWidth?: number
-  lineJoin?: LineJoin
-  /** Only applies when `closed` is false. */
-  lineCap?: LineCap
-  miterLimit?: number
 }
 
-export class Polyline extends MeshShape {
+export class Polyline extends Shape {
   points: Point2[]
   closed: boolean
-  stroke: RGBA
-  strokeWidth: number
-  lineJoin: LineJoin
-  lineCap: LineCap
-  miterLimit: number
 
   constructor(options: PolylineOptions) {
     super(options)
     this.points = options.points
     this.closed = options.closed ?? false
-    this.stroke = options.stroke ?? [0, 0, 0, 1]
+    // Stroke-only: Shape's default strokeWidth of 0 would render nothing, so a Polyline
+    // defaults to a visible 1-unit stroke instead.
     this.strokeWidth = options.strokeWidth ?? 1
-    this.lineJoin = options.lineJoin ?? 'miter'
-    this.lineCap = options.lineCap ?? 'butt'
-    this.miterLimit = options.miterLimit ?? 10
   }
 
   override tessellate(sink: MeshSink): void {

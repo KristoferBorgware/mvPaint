@@ -6,7 +6,6 @@
 // buffers are recreated on rebuild (rebuilds are rare); per-slice incremental updates
 // and capacity pooling are a later optimization.
 
-import type { MeshShape } from '../scene/MeshShape'
 import type { Shape } from '../scene/Shape'
 import {
   FILL_TYPE_CODE,
@@ -45,7 +44,7 @@ export class MeshBatcher {
   }
 
   /** Re-tessellate all shapes (objectId = index) into the shared buffers and upload. */
-  rebuild(shapes: readonly MeshShape[]): void {
+  rebuild(shapes: readonly Shape[]): void {
     const posColor: number[] = [] // 6 per vertex: x,y,r,g,b,a
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isFill
     const indices: number[] = []
@@ -127,7 +126,7 @@ export class MeshBatcher {
    * (see scene/picking.ts's collectZOrder/depthForRank) - shared across both lanes so a
    * shape and a Text can interleave correctly regardless of draw order.
    */
-  updateObjects(shapes: readonly MeshShape[], depths: ReadonlyMap<Shape, number>): void {
+  updateObjects(shapes: readonly Shape[], depths: ReadonlyMap<Shape, number>): void {
     if (!this.objectBuffer || this.objectCount === 0) return
     const n = Math.min(this.objectCount, shapes.length)
     const buf = new ArrayBuffer(this.objectCount * OBJECT_STRIDE)

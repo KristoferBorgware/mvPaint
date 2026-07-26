@@ -7,6 +7,8 @@
 
 import { Rect } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
+import { Polyline } from '../shapes/Polyline'
+import { Path } from '../shapes/Path'
 import {
   FILL_TYPE_CODE,
   MESH_VERTEX_LAYOUT,
@@ -16,7 +18,7 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { MeshShape } from '../scene/MeshShape'
+import { Shape } from '../scene/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -54,7 +56,7 @@ function capturingSink(): { sink: MeshSink } & Captured {
 }
 
 // A capturing sink that records exactly what a shape emits (indices local to the shape).
-function capture(shape: MeshShape): Captured {
+function capture(shape: Shape): Captured {
   const { sink, verts, tris } = capturingSink()
   shape.tessellate(sink)
   return { verts, tris }
@@ -239,6 +241,28 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   ]
   assert(rect.fillPriority === 'linear-gradient', 'fillPriority is mutable')
   assert(rect.fillLinearGradientColorStops.length === 2, 'gradient stops are mutable')
+}
+
+// --- stroke/lineJoin/lineCap/miterLimit live on Shape itself now, one declaration
+//     shared by every concrete shape instead of each redeclaring the same fields ---
+{
+  const rect = new Rect()
+  const circle = new Circle()
+  const polyline = new Polyline({ points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })
+  const path = new Path()
+
+  assert(rect instanceof Shape && circle instanceof Shape && polyline instanceof Shape && path instanceof Shape, 'all four extend Shape directly')
+
+  assert(rect.stroke[3] === 1 && circle.stroke[3] === 1 && polyline.stroke[3] === 1 && path.stroke[3] === 1, 'stroke defaults to opaque black across every shape kind')
+  assert(rect.strokeWidth === 0 && circle.strokeWidth === 0 && path.strokeWidth === 0, 'strokeWidth defaults to 0 (no stroke) for fillable shapes')
+  assert(polyline.strokeWidth === 1, 'Polyline overrides the default to a visible 1-unit stroke (it is stroke-only)')
+
+  assert(rect.lineJoin === 'miter', "Rect inherits Shape's default lineJoin ('miter' suits its 90deg corners exactly)")
+  assert(circle.lineJoin === 'round', "Circle overrides the default to 'round' so its segmented rim doesn't facet")
+  assert(polyline.lineJoin === 'miter' && path.lineJoin === 'miter', 'Polyline/Path keep the inherited default')
+
+  circle.lineJoin = 'bevel'
+  assert(circle.lineJoin === 'bevel', 'lineJoin remains a plain mutable field, overridable after construction')
 }
 
 // ============================================================================

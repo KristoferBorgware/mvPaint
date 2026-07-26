@@ -21,7 +21,6 @@ export * from './scene/Container'
 export * from './scene/Node'
 export * from './scene/Scene'
 export * from './scene/Shape'
-export * from './scene/MeshShape'
 export * from './scene/picking'
 
 export * from './shapes/Circle'
@@ -31,6 +30,7 @@ export * from './shapes/Rect'
 export * from './shapes/Text'
 
 export type { RGBA, Point2, FillPriority, GradientStop } from './render/meshFormat'
+export type { LineJoin, LineCap } from './render/stroke'
 
 export * from './svg/loadSvg'
 

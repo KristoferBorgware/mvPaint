@@ -15,12 +15,11 @@ import { Vector3 } from '../math/Vector3'
 import type { Node } from './Node'
 import { Scene } from './Scene'
 import { Shape } from './Shape'
-import { MeshShape } from './MeshShape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { MeshSink, RGBA } from '../render/meshFormat'
 
-/** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now (MeshShape or Text). */
+/** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
 export type PickableNode = Shape
 
 /** The corners textLocalBounds needs from each quad - satisfied by ShapedText's TextQuad. */
@@ -103,14 +102,14 @@ function worldToLocal(node: Node, worldX: number, worldY: number): Vector3 {
 }
 
 /** A shape's fill+stroke triangles, tessellated fresh, as an axis-aligned box in its own local space. */
-export function shapeLocalBounds(shape: MeshShape): AABB {
+export function shapeLocalBounds(shape: Shape): AABB {
   const sink = new RecordingMeshSink()
   shape.tessellate(sink)
   return sink.getBounds()
 }
 
 /** True if the world point falls inside any of the shape's fill/stroke triangles. */
-export function hitTestShape(shape: MeshShape, worldX: number, worldY: number): boolean {
+export function hitTestShape(shape: Shape, worldX: number, worldY: number): boolean {
   const local = worldToLocal(shape, worldX, worldY)
   const sink = new RecordingMeshSink()
   shape.tessellate(sink)
@@ -176,8 +175,8 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?
     const node = ordered[i]
     if (node instanceof Text) {
       if (fontBook && hitTestText(node, fontBook, worldX, worldY)) return node
-    } else if (node instanceof MeshShape) {
-      if (hitTestShape(node, worldX, worldY)) return node
+    } else if (hitTestShape(node, worldX, worldY)) {
+      return node
     }
   }
   return null
@@ -185,5 +184,5 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?
 
 /** A pickable node's own local-space bounds (shape triangles, or shaped text quads). */
 export function localBoundsOf(node: PickableNode, fontBook: FontBook): AABB {
-  return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node as MeshShape)
+  return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node)
 }

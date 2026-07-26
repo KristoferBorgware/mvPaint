@@ -1,16 +1,16 @@
 // Path - a filled and/or stroked shape from arbitrary contours (typically flattened SVG
 // path data). Fill is triangulated with holes (earcut) and stroke is drawn by the shared
-// contour stroker; both reuse the mesh lane and the inherited MeshShape fill/gradient
+// contour stroker; both reuse the mesh lane and the inherited Shape fill/gradient/stroke
 // API, so a Path fills with a solid color or a gradient exactly like Rect/Circle.
 
-import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
-import type { MeshSink, RGBA } from '../render/meshFormat'
-import { strokeContours, type Contour, type LineCap, type LineJoin } from '../render/stroke'
+import { Shape, type ShapeOptions } from '../scene/Shape'
+import type { MeshSink } from '../render/meshFormat'
+import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
 import { classifyContours, type ContourGroup } from '../svg/contours'
 import { triangulateGroup } from '../svg/triangulate'
 
-export interface PathOptions extends MeshShapeOptions {
+export interface PathOptions extends ShapeOptions {
   /** SVG path data. Provide this OR `contours`. */
   d?: string
   /** Pre-flattened contours (e.g. from the SVG loader). Provide this OR `d`. */
@@ -19,24 +19,13 @@ export interface PathOptions extends MeshShapeOptions {
   tolerance?: number
   /** When false, the fill triangles are not emitted (e.g. SVG fill="none"). Default true. */
   filled?: boolean
-  stroke?: RGBA
-  /** Stroke width in world units; 0 = no stroke. */
-  strokeWidth?: number
-  lineJoin?: LineJoin
-  lineCap?: LineCap
-  miterLimit?: number
 }
 
-export class Path extends MeshShape {
+export class Path extends Shape {
   readonly contours: Contour[]
   private readonly groups: ContourGroup[]
   /** When false, fill triangles are skipped (e.g. SVG fill="none"). */
   filled: boolean
-  stroke: RGBA
-  strokeWidth: number
-  lineJoin: LineJoin
-  lineCap: LineCap
-  miterLimit: number
 
   constructor(options: PathOptions = {}) {
     super(options)
@@ -47,11 +36,6 @@ export class Path extends MeshShape {
     // is moved/animated via its transform, not by re-tessellating).
     this.groups = classifyContours(this.contours)
     this.filled = options.filled ?? true
-    this.stroke = options.stroke ?? [0, 0, 0, 1]
-    this.strokeWidth = options.strokeWidth ?? 0
-    this.lineJoin = options.lineJoin ?? 'miter'
-    this.lineCap = options.lineCap ?? 'butt'
-    this.miterLimit = options.miterLimit ?? 10
   }
 
   override tessellate(sink: MeshSink): void {

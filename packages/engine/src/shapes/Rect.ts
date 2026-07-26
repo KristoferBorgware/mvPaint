@@ -1,28 +1,21 @@
 // Rect - a filled, optionally stroked rectangle. Centered at (x, y) in the Z=0 plane
 // (before any offset), sized width×height, transformed by the common Shape parameters
 // (position, scale, rotation, offset). It owns no GPU resources: it tessellates a fill
-// quad in the mesh lane (fill color or gradient, via the inherited MeshShape fill API)
-// and strokes its own outline (a 4-corner contour) through the shared general-purpose
-// stroker.
+// quad in the mesh lane (fill color or gradient, via the inherited Shape fill API) and
+// strokes its own outline (a 4-corner contour) through the shared general-purpose
+// stroker, using the inherited stroke/lineJoin/miterLimit (a rectangle's corners are
+// always 90 degrees, so 'miter' - Shape's default - always lands exactly on the diagonal
+// bisector; lineCap is irrelevant since the outline is always closed).
 
-import { MeshShape, type MeshShapeOptions } from '../scene/MeshShape'
-import type { MeshSink, RGBA } from '../render/meshFormat'
+import { Shape, type ShapeOptions } from '../scene/Shape'
+import type { MeshSink } from '../render/meshFormat'
 import { strokePolyline } from '../render/stroke'
 
-export interface RectOptions extends MeshShapeOptions {
-  stroke?: RGBA
-  /** Stroke width in world units; 0 = no stroke. Centered on the edge. */
-  strokeWidth?: number
-}
+export type RectOptions = ShapeOptions
 
-export class Rect extends MeshShape {
-  stroke: RGBA
-  strokeWidth: number
-
+export class Rect extends Shape {
   constructor(options: RectOptions = {}) {
     super({ ...options, width: options.width ?? 1, height: options.height ?? 1 })
-    this.stroke = options.stroke ?? [0, 0, 0, 1]
-    this.strokeWidth = options.strokeWidth ?? 0
   }
 
   override tessellate(sink: MeshSink): void {
@@ -39,10 +32,6 @@ export class Rect extends MeshShape {
     sink.triangle(f0, f1, f2)
     sink.triangle(f0, f2, f3)
 
-    // Stroke: the 4-corner outline, through the shared contour stroker. A rectangle's
-    // corners are all 90 degrees, so a miter join here always lands exactly on the
-    // diagonal bisector - equivalent to offsetting each corner by ±strokeWidth/2 in x
-    // and y independently.
     if (this.strokeWidth > 0) {
       const corners = [
         { x: -hw, y: -hh },
@@ -54,7 +43,8 @@ export class Rect extends MeshShape {
         width: this.strokeWidth,
         color: this.stroke,
         closed: true,
-        join: 'miter',
+        join: this.lineJoin,
+        miterLimit: this.miterLimit,
       })
     }
   }
