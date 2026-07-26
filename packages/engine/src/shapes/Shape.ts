@@ -9,17 +9,23 @@
 // points; Path: contours; Text: runs and block layout).
 //
 // tessellate() caches its output (a list of local-space vertices + triangles) and
-// replays it into whatever sink is asking - the mesh batcher's rebuild, or a picking
-// hit-test - rather than re-running geometry generation every call. That matters most
-// for the expensive cases: a Path's earcut fill triangulation and contour stroking, or a
-// Polyline's stroke with many points, previously reran on EVERY rebuild - including one
-// triggered by an unrelated shape elsewhere in the scene - because the mesh batcher
-// rebuilds its whole shared buffer from every shape whenever anything changes. The cache
-// only goes stale when markGeometryDirty() is called; subclasses implement buildGeometry()
-// instead of tessellate() directly, since that's the method that only runs on a cache
-// miss. buildGeometry() defaults to emitting nothing - that's what makes it safe for Text
+// replays it into whatever sink is asking - the mesh batcher's rebuild - rather than
+// re-running geometry generation every call. That matters most for the expensive cases:
+// a Path's earcut fill triangulation and contour stroking, or a Polyline's stroke with
+// many points, previously reran on EVERY rebuild - including one triggered by an
+// unrelated shape elsewhere in the scene - because the mesh batcher rebuilds its whole
+// shared buffer from every shape whenever anything changes. The cache only goes stale
+// when markGeometryDirty() is called; subclasses implement buildGeometry() instead of
+// tessellate() directly, since that's the method that only runs on a cache miss.
+// buildGeometry() defaults to emitting nothing - that's what makes it safe for Text
 // (which renders through the separate MSDF text lane, not the mesh lane) to inherit it
 // unchanged.
+//
+// hitTestLocal()/localBounds() (used by scene/picking.ts) build a SEPARATE flat
+// xs/ys/tris/bounds structure derived from the same buildGeometry() output, cached and
+// invalidated alongside geometryCache - not a second tessellation, just a picking-
+// friendly layout of the one cached result, so repeated picks against an unchanged
+// shape (e.g. every mousemove while hovering) don't redo any array-building work either.
 //
 // Nothing here needs markGeometryDirty() after a transform change (x/y/rotation/scale/
 // offset/zIndex): those are applied per-frame via the object's world matrix, never baked
@@ -34,6 +40,7 @@
 // the shape's local geometry) before scale and rotation are applied about that pivot,
 // then the result is placed at (x, y). Skew (shear) is not currently supported.
 
+import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -124,6 +131,10 @@ export abstract class Shape extends Node {
   miterLimit = 10
 
   private geometryCache: CachedGeometry | null = null
+  // Derived from geometryCache (same lifetime, invalidated together) - a flat, picking-
+  // friendly layout (no MeshSink round-trip) built lazily on first hitTestLocal()/
+  // localBounds() call, not on every tessellate().
+  private pickCache: PickGeometry | null = null
 
   constructor(options: ShapeOptions = {}) {
     super(options.name)
@@ -167,6 +178,7 @@ export abstract class Shape extends Node {
    */
   markGeometryDirty(): void {
     this.geometryCache = null
+    this.pickCache = null
   }
 
   /**
@@ -179,6 +191,40 @@ export abstract class Shape extends Node {
    * Subclasses override buildGeometry(), not this.
    */
   tessellate(sink: MeshSink): void {
+    const geometry = this.ensureGeometryCache()
+    const remapped = geometry.vertices.map((v) => sink.vertex(v.x, v.y, v.isFill))
+    for (const [a, b, c] of geometry.triangles) {
+      sink.triangle(remapped[a], remapped[b], remapped[c])
+    }
+  }
+
+  /**
+   * True if a LOCAL-space point (pre-transform, same space buildGeometry() emits into)
+   * falls inside any of this shape's fill/stroke triangles. Picking (scene/picking.ts)
+   * builds on this rather than replaying tessellate() into its own recording sink - the
+   * flat xs/ys/tris arrays + bounding box built here are exactly what a MeshSink replay
+   * would produce, just cached instead of rebuilt on every hit-test call.
+   */
+  hitTestLocal(x: number, y: number): boolean {
+    const pick = this.ensurePickCache()
+    if (!pick.bounds.contains(new Vector3(x, y, 0))) return false
+    for (let i = 0; i < pick.tris.length; i += 3) {
+      const a = pick.tris[i]
+      const b = pick.tris[i + 1]
+      const c = pick.tris[i + 2]
+      if (pointInTriangle(x, y, pick.xs[a], pick.ys[a], pick.xs[b], pick.ys[b], pick.xs[c], pick.ys[c])) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /** This shape's fill+stroke triangles as an axis-aligned box, in its own local space. */
+  localBounds(): AABB {
+    return this.ensurePickCache().bounds
+  }
+
+  private ensureGeometryCache(): CachedGeometry {
     if (!this.geometryCache) {
       const vertices: CachedVertex[] = []
       const triangles: CachedTriangle[] = []
@@ -190,11 +236,21 @@ export abstract class Shape extends Node {
       })
       this.geometryCache = { vertices, triangles }
     }
+    return this.geometryCache
+  }
 
-    const remapped = this.geometryCache.vertices.map((v) => sink.vertex(v.x, v.y, v.isFill))
-    for (const [a, b, c] of this.geometryCache.triangles) {
-      sink.triangle(remapped[a], remapped[b], remapped[c])
+  private ensurePickCache(): PickGeometry {
+    if (!this.pickCache) {
+      const geometry = this.ensureGeometryCache()
+      const xs = geometry.vertices.map((v) => v.x)
+      const ys = geometry.vertices.map((v) => v.y)
+      const tris: number[] = []
+      const bounds = new AABB()
+      for (const v of geometry.vertices) bounds.encapsulate(new Vector3(v.x, v.y, 0))
+      for (const [a, b, c] of geometry.triangles) tris.push(a, b, c)
+      this.pickCache = { xs, ys, tris, bounds }
     }
+    return this.pickCache
   }
 
   /**
@@ -214,4 +270,43 @@ type CachedTriangle = readonly [number, number, number]
 interface CachedGeometry {
   vertices: CachedVertex[]
   triangles: CachedTriangle[]
+}
+
+interface PickGeometry {
+  xs: number[]
+  ys: number[]
+  tris: number[]
+  bounds: AABB
+}
+
+function edgeSign(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  return (px - bx) * (ay - by) - (ax - bx) * (py - by)
+}
+
+// Tessellated geometry can legitimately include zero-area triangles (e.g. duplicate
+// points from a stroke join) - harmless for the GPU rasterizer, which simply covers no
+// pixels, but fatal for the sign-based test below: a degenerate triangle's three edge
+// signs are all exactly 0, so "no negative and no positive" would call every point a
+// hit. Reject anything without a real interior first.
+const DEGENERATE_AREA_EPSILON = 1e-9
+
+function pointInTriangle(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+): boolean {
+  const area2 = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
+  if (Math.abs(area2) < DEGENERATE_AREA_EPSILON) return false
+
+  const d1 = edgeSign(px, py, ax, ay, bx, by)
+  const d2 = edgeSign(px, py, bx, by, cx, cy)
+  const d3 = edgeSign(px, py, cx, cy, ax, ay)
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0
+  return !(hasNeg && hasPos)
 }

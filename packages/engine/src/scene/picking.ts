@@ -4,11 +4,15 @@
 // from its rank in that list, and pickNode walks it front-to-back.
 //
 // Shapes are hit-tested exactly, against the same triangles the mesh lane renders (fill
-// + stroke) - tessellate() is fed into a recording MeshSink instead of the GPU batcher,
-// then the point is tested against every triangle in the shape's own local space. Text
-// is tested against its shaped quads' bounding box (glyph-accurate hit-testing isn't
-// worth the cost here). Both also expose their local-space bounds, for building a
-// selection highlight that matches a picked node's own geometry.
+// + stroke) - via Shape.hitTestLocal(), which caches its own picking-friendly layout of
+// buildGeometry()'s output (see Shape.ts), so this module does no tessellation or
+// recording of its own. hitTestShape() rejects cheaply first: a shape's local bounds
+// transformed into world space (a forward transform, no matrix inverse) either clears
+// the point immediately or is followed by the exact (inverse + per-triangle) test - most
+// shapes in a scene are nowhere near a given click, so this skips the expensive path for
+// nearly all of them. Text is tested against its shaped quads' bounding box (glyph-
+// accurate hit-testing isn't worth the cost here) - a single bounds check either way, so
+// there's no equivalent cheap/exact split to make there.
 
 import { AABB } from '../math/AABB'
 import { Vector3 } from '../math/Vector3'
@@ -17,7 +21,6 @@ import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
-import type { MeshSink } from '../render/meshFormat'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
 export type PickableNode = Shape
@@ -30,90 +33,22 @@ export interface QuadBounds {
   y1: number
 }
 
-class RecordingMeshSink implements MeshSink {
-  private readonly xs: number[] = []
-  private readonly ys: number[] = []
-  private readonly tris: number[] = []
-  private readonly bounds = new AABB()
-
-  vertex(x: number, y: number, _isFill: boolean): number {
-    const index = this.xs.length
-    this.xs.push(x)
-    this.ys.push(y)
-    this.bounds.encapsulate(new Vector3(x, y, 0))
-    return index
-  }
-
-  triangle(a: number, b: number, c: number): void {
-    this.tris.push(a, b, c)
-  }
-
-  containsPoint(x: number, y: number): boolean {
-    for (let i = 0; i < this.tris.length; i += 3) {
-      const a = this.tris[i]
-      const b = this.tris[i + 1]
-      const c = this.tris[i + 2]
-      if (pointInTriangle(x, y, this.xs[a], this.ys[a], this.xs[b], this.ys[b], this.xs[c], this.ys[c])) {
-        return true
-      }
-    }
-    return false
-  }
-
-  getBounds(): AABB {
-    return this.bounds
-  }
-}
-
-function edgeSign(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  return (px - bx) * (ay - by) - (ax - bx) * (py - by)
-}
-
-// Tessellated geometry can legitimately include zero-area triangles (e.g. duplicate
-// points from a stroke join) - harmless for the GPU rasterizer, which simply covers no
-// pixels, but fatal for the sign-based test below: a degenerate triangle's three edge
-// signs are all exactly 0, so "no negative and no positive" would call every point a
-// hit. Reject anything without a real interior first.
-const DEGENERATE_AREA_EPSILON = 1e-9
-
-function pointInTriangle(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number,
-): boolean {
-  const area2 = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay)
-  if (Math.abs(area2) < DEGENERATE_AREA_EPSILON) return false
-
-  const d1 = edgeSign(px, py, ax, ay, bx, by)
-  const d2 = edgeSign(px, py, bx, by, cx, cy)
-  const d3 = edgeSign(px, py, cx, cy, ax, ay)
-  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0
-  const hasPos = d1 > 0 || d2 > 0 || d3 > 0
-  return !(hasNeg && hasPos)
-}
-
 function worldToLocal(node: Node, worldX: number, worldY: number): Vector3 {
   return node.worldMatrix().inverse().transformPoint(new Vector3(worldX, worldY, 0))
 }
 
-/** A shape's fill+stroke triangles, tessellated fresh, as an axis-aligned box in its own local space. */
+/** A shape's fill+stroke triangles, as an axis-aligned box in its own local space (cached - see Shape.ts). */
 export function shapeLocalBounds(shape: Shape): AABB {
-  const sink = new RecordingMeshSink()
-  shape.tessellate(sink)
-  return sink.getBounds()
+  return shape.localBounds()
 }
 
 /** True if the world point falls inside any of the shape's fill/stroke triangles. */
 export function hitTestShape(shape: Shape, worldX: number, worldY: number): boolean {
-  const local = worldToLocal(shape, worldX, worldY)
-  const sink = new RecordingMeshSink()
-  shape.tessellate(sink)
-  return sink.containsPoint(local.x, local.y)
+  const world = shape.worldMatrix()
+  const worldBounds = shape.localBounds().transformed(world)
+  if (!worldBounds.valid() || !worldBounds.contains(new Vector3(worldX, worldY, 0))) return false
+  const local = world.inverse().transformPoint(new Vector3(worldX, worldY, 0))
+  return shape.hitTestLocal(local.x, local.y)
 }
 
 /** The union of a shaped text's glyph+decoration quads, in the Text node's own local space. */
