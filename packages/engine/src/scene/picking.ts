@@ -17,7 +17,7 @@ import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
-import type { MeshSink, RGBA } from '../render/meshFormat'
+import type { MeshSink } from '../render/meshFormat'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
 export type PickableNode = Shape
@@ -36,7 +36,7 @@ class RecordingMeshSink implements MeshSink {
   private readonly tris: number[] = []
   private readonly bounds = new AABB()
 
-  vertex(x: number, y: number, _color: RGBA, _isFill: boolean): number {
+  vertex(x: number, y: number, _isFill: boolean): number {
     const index = this.xs.length
     this.xs.push(x)
     this.ys.push(y)

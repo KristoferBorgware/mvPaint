@@ -37,7 +37,6 @@ export class Polyline extends Shape {
     if (this.strokeWidth <= 0 || this.points.length < 2) return
     strokePolyline(this.points, sink, {
       width: this.strokeWidth,
-      color: this.stroke,
       closed: this.closed,
       join: this.lineJoin,
       cap: this.lineCap,

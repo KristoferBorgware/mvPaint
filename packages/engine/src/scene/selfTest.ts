@@ -122,10 +122,10 @@ class TransformGroup extends Container {
   // match every point: its three edge signs are all exactly 0, so a naive "no negative
   // and no positive edge sign" test would wrongly call it a universal hit.
   class DegenerateShape extends Shape {
-    tessellate(sink: MeshSink): void {
-      const a = sink.vertex(10, 130, this.fill, true)
-      const b = sink.vertex(10, 130, this.fill, true)
-      const c = sink.vertex(10, 130, this.fill, true)
+    protected override buildGeometry(sink: MeshSink): void {
+      const a = sink.vertex(10, 130, true)
+      const b = sink.vertex(10, 130, true)
+      const c = sink.vertex(10, 130, true)
       sink.triangle(a, b, c)
     }
   }

@@ -77,16 +77,16 @@ export class Circle extends Shape {
     const n = this.segments ?? circleSegments(this.radius)
     const r = this.radius
 
-    // Fill: a triangle fan from the center to n perimeter points. The vertex color is a
-    // placeholder when fillPriority selects a gradient - the fragment shader computes
-    // the displayed color from the object's gradient parameters instead.
+    // Fill: a triangle fan from the center to n perimeter points. Color is not part of
+    // the geometry - the fragment shader reads the object's fillColor (solid) or
+    // gradient parameters.
     const rim: Point2[] = []
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
       rim.push({ x: Math.cos(a) * r, y: Math.sin(a) * r })
     }
-    const center = sink.vertex(0, 0, this.fill, true)
-    const rimIdx = rim.map((p) => sink.vertex(p.x, p.y, this.fill, true))
+    const center = sink.vertex(0, 0, true)
+    const rimIdx = rim.map((p) => sink.vertex(p.x, p.y, true))
     for (let i = 0; i < n; i++) {
       sink.triangle(center, rimIdx[i], rimIdx[(i + 1) % n])
     }
@@ -94,7 +94,6 @@ export class Circle extends Shape {
     if (this.strokeWidth > 0) {
       strokePolyline(rim, sink, {
         width: this.strokeWidth,
-        color: this.stroke,
         closed: true,
         join: this.lineJoin,
         miterLimit: this.miterLimit,

@@ -1,8 +1,8 @@
 // Self-test for the mesh-lane data path (no GPU). Tessellates shapes through a
-// capturing MeshSink and asserts the vertex/index/color/isFill layout, the format
-// constants, the fill-type encoding, and the general contour stroker (joins/caps/
-// multi-contour). WGSL fragment-shader math (gradient evaluation) cannot run without a
-// GPU and is not covered here - it's checked by numeric reference calculations instead.
+// capturing MeshSink and asserts the vertex/index/isFill layout, the format constants,
+// the fill-type encoding, and the general contour stroker (joins/caps/multi-contour).
+// WGSL fragment-shader math (gradient evaluation) cannot run without a GPU and is not
+// covered here - it's checked by numeric reference calculations instead.
 // Run with: npx tsx src/render/selfTest.ts
 
 import { Rect } from '../shapes/Rect'
@@ -33,7 +33,6 @@ function assert(cond: boolean, msg: string): void {
 interface CapturedVertex {
   x: number
   y: number
-  color: RGBA
   isFill: boolean
 }
 interface Captured {
@@ -45,8 +44,8 @@ function capturingSink(): { sink: MeshSink } & Captured {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
-    vertex: (x, y, color, isFill) => {
-      verts.push({ x, y, color, isFill })
+    vertex: (x, y, isFill) => {
+      verts.push({ x, y, isFill })
       return verts.length - 1
     },
     triangle: (a, b, c) => {
@@ -68,9 +67,12 @@ const hasVertexNear = (verts: CapturedVertex[], x: number, y: number, eps = 1e-6
   verts.some((v) => near(v.x, x, eps) && near(v.y, y, eps))
 
 // --- format constants match the WGSL structs ---
-assert(MESH_VERTEX_STRIDE === 28, 'mesh vertex stride is 28 bytes')
+assert(MESH_VERTEX_STRIDE === 12, 'mesh vertex stride is 12 bytes (position + packedId, no color)')
 assert(MESH_VERTEX_LAYOUT.arrayStride === MESH_VERTEX_STRIDE, 'layout stride matches')
-assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient material (208B)')
+assert(
+  OBJECT_STRIDE === 304,
+  'object stride is one mat4 (64B) + gradient material (208B) + fillColor/strokeColor (32B)',
+)
 
 // --- stroked rect: fill (4v/2t) + a 4-corner miter-joined contour ---
 {
@@ -83,14 +85,14 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   assert(verts.length === 4 + 40, 'stroked rect: 4 fill + 40 general-stroker vertices')
   assert(tris.length === 2 + 20, 'stroked rect: 2 fill + 20 general-stroker triangles')
 
-  // Fill verts (still emitted first, unchanged) carry the fill color, are marked
-  // isFill (gradient-eligible), and sit at (±w/2,±h/2).
-  assert(verts.slice(0, 4).every((v) => v.color === fill), 'first 4 verts are fill-colored')
+  // Fill verts (still emitted first, unchanged) carry no color of their own - just
+  // marked isFill (gradient-eligible) - and sit at (±w/2,±h/2). The shape's fill/stroke
+  // colors are read from the object buffer at fragment time, not from vertex data.
   assert(verts.slice(0, 4).every((v) => v.isFill), 'first 4 verts are marked isFill')
   assert(near(verts[0].x, -2) && near(verts[0].y, -1), 'fill corner at (-w/2,-h/2)')
   assert(near(verts[2].x, 2) && near(verts[2].y, 1), 'fill corner at (+w/2,+h/2)')
-  assert(verts.slice(4).every((v) => v.color === stroke), 'remaining verts are stroke-colored')
   assert(verts.slice(4).every((v) => !v.isFill), 'stroke verts are never marked isFill (no gradient on stroke)')
+  assert(rect.fill === fill && rect.stroke === stroke, 'the shape retains the fill/stroke colors it was constructed with')
 
   // A 90° miter offsets the OUTER (convex) corner by strokeWidth/2 in x AND y
   // independently - the exact geometry the old hand-rolled Rect stroke produced, now
@@ -126,10 +128,9 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   assert(tris.length > fillOnly.tris.length, 'stroke adds triangles beyond the fill fan')
   assert(near(verts[0].x, 0) && near(verts[0].y, 0), 'fan center at origin')
   assert(near(Math.hypot(verts[1].x, verts[1].y), r), 'first rim vertex is at the radius')
-  assert(verts.slice(0, n + 1).every((v) => v.color === fill), 'fan verts are fill-colored')
   assert(verts.slice(0, n + 1).every((v) => v.isFill), 'fan verts are marked isFill')
-  assert(verts.slice(n + 1).every((v) => v.color === stroke), 'stroke verts are stroke-colored')
   assert(verts.slice(n + 1).every((v) => !v.isFill), 'stroke verts are never marked isFill')
+  assert(circle.fill === fill && circle.stroke === stroke, 'the shape retains the fill/stroke colors it was constructed with')
   // The round join tracks the true offset circle closely (not exactly, since the round
   // arc is discretized per joint and the straight segment quads facet slightly inward -
   // the same faceting any polygon approximation of a circle has). Check the overall
@@ -232,7 +233,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
 
   // Switching fillPriority is a plain property assignment (Shape-level API), and it
   // doesn't affect what tessellate() emits per vertex - the fragment shader decides
-  // whether to use the vertex color or a gradient, based on the object's fillType.
+  // whether to use the object's flat fillColor or a gradient, based on its fillType.
   rect.fillPriority = 'linear-gradient'
   rect.fillLinearGradientStartPoint = { x: -1, y: 0 }
   rect.fillLinearGradientEndPoint = { x: 1, y: 0 }
@@ -280,9 +281,9 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
     protected override buildGeometry(sink: MeshSink): void {
       this.buildCalls++
       const h = this.size / 2
-      const a = sink.vertex(-h, -h, this.fill, true)
-      const b = sink.vertex(h, -h, this.fill, true)
-      const c = sink.vertex(h, h, this.fill, true)
+      const a = sink.vertex(-h, -h, true)
+      const b = sink.vertex(h, -h, true)
+      const c = sink.vertex(h, h, true)
       sink.triangle(a, b, c)
     }
   }
@@ -332,7 +333,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
     { x: -2, y: 1 },
   ]
   const { sink, verts } = capturingSink()
-  strokePolyline(corners, sink, { width: 0.4, color: [0, 0, 0, 1], closed: true, join: 'miter' })
+  strokePolyline(corners, sink, { width: 0.4, closed: true, join: 'miter' })
   assert(hasVertexNear(verts, -2.2, -1.2), 'engine: outer miter corner (-hw-s,-hh-s)')
   assert(hasVertexNear(verts, 2.2, 1.2), 'engine: outer miter corner (hw+s,hh+s)')
   // Concave (inner) side: the documented simplification (see stroke.ts), landing at each
@@ -351,7 +352,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   ]
   function counts(miterLimit: number): { v: number; t: number } {
     const { sink, verts, tris } = capturingSink()
-    strokePolyline(points, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'miter', miterLimit })
+    strokePolyline(points, sink, { width: 0.2, closed: false, join: 'miter', miterLimit })
     return { v: verts.length, t: tris.length }
   }
   const low = counts(1) // falls back to bevel: 2 edges (8v/4t) + 1 joint bevel (5v/2t)
@@ -368,7 +369,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
     { x: 1, y: 0 },
   ]
   const { sink, verts, tris } = capturingSink()
-  strokePolyline(points, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'round', roundSegments: 8 })
+  strokePolyline(points, sink, { width: 0.2, closed: false, join: 'round', roundSegments: 8 })
   // 2 edges (8v/4t) + 1 joint: pivot(1) + concave(2v/1t) + round(start(1) + 4 arc steps/4t).
   assert(verts.length === 16, 'round join at 90°: 8 segment + 8 joint vertices (1p+2+1+4 arc)')
   assert(tris.length === 9, 'round join at 90°: 4 segment + 5 joint triangles (1 concave + 4 arc)')
@@ -382,7 +383,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
   ]
   function capCounts(cap: LineCap): { v: number; t: number } {
     const { sink, verts, tris } = capturingSink()
-    strokePolyline(line, sink, { width: 0.2, color: [0, 0, 0, 1], closed: false, join: 'miter', cap })
+    strokePolyline(line, sink, { width: 0.2, closed: false, join: 'miter', cap })
     return { v: verts.length, t: tris.length }
   }
   const butt = capCounts('butt')
@@ -414,7 +415,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
       { points: hole, closed: true },
     ],
     sink,
-    { width: 0.2, color: [0, 0, 0, 1], join: 'miter' },
+    { width: 0.2, join: 'miter' },
   )
   // Each independent 4-corner miter loop contributes 40 vertices / 20 triangles (as above).
   assert(verts.length === 80, 'two independent contours contribute 40 vertices each')

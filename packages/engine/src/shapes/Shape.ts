@@ -23,12 +23,11 @@
 //
 // Nothing here needs markGeometryDirty() after a transform change (x/y/rotation/scale/
 // offset/zIndex): those are applied per-frame via the object's world matrix, never baked
-// into the cached local-space geometry. It IS needed after changing anything that affects
-// buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/lineJoin/
-// lineCap/miterLimit on any stroked shape, or Path.filled - and also after changing fill/
-// stroke COLOR on a solid (non-gradient) fill: unlike gradient parameters (read from the
-// per-object GPU buffer every frame), a solid color is baked into the vertex data at
-// tessellation time, the same as any other geometry.
+// into the cached local-space geometry. Fill/stroke color changes also don't need it -
+// solid colors, like gradient parameters, are read from the per-object GPU buffer every
+// frame, never baked into geometry. It IS needed after changing anything that actually
+// affects buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/
+// lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
 //
 // localMatrix() composes translate(x, y) * rotate(rotation) * scale(scaleX, scaleY) *
 // translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied first, to
@@ -171,19 +170,20 @@ export abstract class Shape extends Node {
   }
 
   /**
-   * Emit this shape's geometry (in local space) into the sink: vertices with per-vertex
-   * color and triangles referencing them. The renderer applies the per-object world
-   * matrix in the vertex shader, so positions here are pre-transform. Regenerates via
-   * buildGeometry() only on a cache miss (first call, or after markGeometryDirty()) -
-   * otherwise replays the cached vertices/triangles, which is just array pushes, not
-   * geometry math. Subclasses override buildGeometry(), not this.
+   * Emit this shape's geometry (in local space) into the sink: vertices and triangles
+   * referencing them (no color - that's read from the object's fillColor/strokeColor/
+   * gradient at fragment time). The renderer applies the per-object world matrix in the
+   * vertex shader, so positions here are pre-transform. Regenerates via buildGeometry()
+   * only on a cache miss (first call, or after markGeometryDirty()) - otherwise replays
+   * the cached vertices/triangles, which is just array pushes, not geometry math.
+   * Subclasses override buildGeometry(), not this.
    */
   tessellate(sink: MeshSink): void {
     if (!this.geometryCache) {
       const vertices: CachedVertex[] = []
       const triangles: CachedTriangle[] = []
       this.buildGeometry({
-        vertex: (x, y, color, isFill) => vertices.push({ x, y, color, isFill }) - 1,
+        vertex: (x, y, isFill) => vertices.push({ x, y, isFill }) - 1,
         triangle: (a, b, c) => {
           triangles.push([a, b, c])
         },
@@ -191,7 +191,7 @@ export abstract class Shape extends Node {
       this.geometryCache = { vertices, triangles }
     }
 
-    const remapped = this.geometryCache.vertices.map((v) => sink.vertex(v.x, v.y, v.color, v.isFill))
+    const remapped = this.geometryCache.vertices.map((v) => sink.vertex(v.x, v.y, v.isFill))
     for (const [a, b, c] of this.geometryCache.triangles) {
       sink.triangle(remapped[a], remapped[b], remapped[c])
     }
@@ -208,7 +208,6 @@ export abstract class Shape extends Node {
 interface CachedVertex {
   x: number
   y: number
-  color: RGBA
   isFill: boolean
 }
 type CachedTriangle = readonly [number, number, number]

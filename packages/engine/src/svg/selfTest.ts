@@ -13,7 +13,7 @@ import { parseColor } from './color'
 import { elementToPathData } from './shapeToPath'
 import { gradientToFill, type SvgGradient } from './gradient'
 import { Path } from '../shapes/Path'
-import type { MeshSink, Point2, RGBA } from '../render/meshFormat'
+import type { MeshSink, Point2 } from '../render/meshFormat'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -32,12 +32,12 @@ function trianglesArea(vertices: Point2[], indices: number[]): number {
   return area
 }
 
-interface CapturedVertex { x: number; y: number; color: RGBA; isFill: boolean }
+interface CapturedVertex { x: number; y: number; isFill: boolean }
 function capturingSink(): { sink: MeshSink; verts: CapturedVertex[]; tris: [number, number, number][] } {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
-    vertex: (x, y, color, isFill) => (verts.push({ x, y, color, isFill }), verts.length - 1),
+    vertex: (x, y, isFill) => (verts.push({ x, y, isFill }), verts.length - 1),
     triangle: (a, b, c) => void tris.push([a, b, c]),
   }
   return { sink, verts, tris }
@@ -173,7 +173,6 @@ const SQUARE_WITH_HOLE = 'M0 0 L100 0 L100 100 L0 100 Z M25 25 L25 75 L75 75 L75
   const strokeVerts = verts.filter((v) => !v.isFill)
   assert(fillVerts.length > 0, 'fill emits vertices')
   assert(strokeVerts.length > 0, 'stroke emits vertices')
-  assert(fillVerts.every((v) => v.color === filled.fill), 'fill vertices carry the fill color')
   assert(verts.every((v) => Number.isFinite(v.x) && Number.isFinite(v.y)), 'no NaN/Infinity coordinates')
 
   // filled=false (SVG fill="none") skips the fill triangles but keeps the stroke.

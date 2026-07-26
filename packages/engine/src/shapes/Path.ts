@@ -44,7 +44,7 @@ export class Path extends Shape {
     if (this.filled) {
       for (const group of this.groups) {
         const { vertices, indices } = triangulateGroup(group)
-        const base = vertices.map((v) => sink.vertex(v.x, v.y, this.fill, true))
+        const base = vertices.map((v) => sink.vertex(v.x, v.y, true))
         for (let i = 0; i < indices.length; i += 3) {
           sink.triangle(base[indices[i]], base[indices[i + 1]], base[indices[i + 2]])
         }
@@ -55,7 +55,6 @@ export class Path extends Shape {
     if (this.strokeWidth > 0 && this.contours.length > 0) {
       strokeContours(this.contours, sink, {
         width: this.strokeWidth,
-        color: this.stroke,
         join: this.lineJoin,
         cap: this.lineCap,
         miterLimit: this.miterLimit,

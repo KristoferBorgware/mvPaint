@@ -14,6 +14,7 @@ import {
   MESH_VERTEX_FLOATS,
   MESH_VERTEX_STRIDE,
   OBJECT_DEPTH_OFFSET,
+  OBJECT_FILL_COLOR_OFFSET,
   OBJECT_FILL_TYPE_OFFSET,
   OBJECT_GRADIENT_END_OFFSET,
   OBJECT_GRADIENT_END_RADIUS_OFFSET,
@@ -23,6 +24,7 @@ import {
   OBJECT_STOP_COUNT_OFFSET,
   OBJECT_STOP_POSITIONS_OFFSET,
   OBJECT_STRIDE,
+  OBJECT_STROKE_COLOR_OFFSET,
   type MeshSink,
 } from './meshFormat'
 
@@ -45,7 +47,7 @@ export class MeshBatcher {
 
   /** Re-tessellate all shapes (objectId = index) into the shared buffers and upload. */
   rebuild(shapes: readonly Shape[]): void {
-    const posColor: number[] = [] // 6 per vertex: x,y,r,g,b,a
+    const positions: number[] = [] // 2 per vertex: x,y
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isFill
     const indices: number[] = []
     let vertexCount = 0
@@ -54,8 +56,8 @@ export class MeshBatcher {
       if (!shape.visible) return
       const start = vertexCount
       const sink: MeshSink = {
-        vertex: (x, y, color, isFill) => {
-          posColor.push(x, y, color[0], color[1], color[2], color[3])
+        vertex: (x, y, isFill) => {
+          positions.push(x, y)
           packedIds.push(isFill ? objectId | MESH_FILL_BIT : objectId)
           return vertexCount++ - start
         },
@@ -66,19 +68,15 @@ export class MeshBatcher {
       shape.tessellate(sink)
     })
 
-    // Pack the interleaved vertex buffer (floats for pos/color, u32 bits for packedId).
+    // Pack the interleaved vertex buffer (floats for position, u32 bits for packedId).
     const vtx = new ArrayBuffer(vertexCount * MESH_VERTEX_STRIDE)
     const f32 = new Float32Array(vtx)
     const u32 = new Uint32Array(vtx)
     for (let i = 0; i < vertexCount; i++) {
       const b = i * MESH_VERTEX_FLOATS
-      f32[b + 0] = posColor[i * 6 + 0]
-      f32[b + 1] = posColor[i * 6 + 1]
-      f32[b + 2] = posColor[i * 6 + 2]
-      f32[b + 3] = posColor[i * 6 + 3]
-      f32[b + 4] = posColor[i * 6 + 4]
-      f32[b + 5] = posColor[i * 6 + 5]
-      u32[b + 6] = packedIds[i]
+      f32[b + 0] = positions[i * 2 + 0]
+      f32[b + 1] = positions[i * 2 + 1]
+      u32[b + 2] = packedIds[i]
     }
     const idx = new Uint32Array(indices)
 
@@ -174,6 +172,11 @@ export class MeshBatcher {
         f32[colorBase + 2] = bch
         f32[colorBase + 3] = a
       }
+
+      const fillBase = floatBase + OBJECT_FILL_COLOR_OFFSET / 4
+      f32.set(shape.fill, fillBase)
+      const strokeBase = floatBase + OBJECT_STROKE_COLOR_OFFSET / 4
+      f32.set(shape.stroke, strokeBase)
     }
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)

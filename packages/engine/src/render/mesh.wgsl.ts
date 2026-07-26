@@ -1,8 +1,9 @@
-// Mesh-lane shader. Every 2D shape flows through this: per-vertex position (local),
-// per-vertex color, and a packed id (object index + an "is fill" flag) that indexes
-// the per-object world matrix and fill/gradient material. The fragment either returns
-// the interpolated vertex color (solid fill, and always for stroke) or evaluates a
-// linear/radial gradient analytically from the fragment's local-space position.
+// Mesh-lane shader. Every 2D shape flows through this: per-vertex position (local) and
+// a packed id (object index + an "is fill" flag) that indexes the per-object world
+// matrix and fill/gradient/stroke material - there is no per-vertex color at all. The
+// fragment either returns the object's flat strokeColor/fillColor (stroke, and solid
+// fill) or evaluates a linear/radial gradient analytically from the fragment's
+// local-space position.
 export const meshShaderCode = /* wgsl */ `
 const MAX_STOPS: u32 = 8u;
 const FILL_BIT: u32 = 0x80000000u;
@@ -27,6 +28,8 @@ struct ObjectData {
   gradientEndRadius : f32,
   stopPositions : array<f32, MAX_STOPS>,
   stopColors : array<vec4<f32>, MAX_STOPS>,
+  fillColor : vec4<f32>,
+  strokeColor : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame : Frame;
@@ -34,15 +37,13 @@ struct ObjectData {
 
 struct VertexInput {
   @location(0) position : vec2<f32>,
-  @location(1) color : vec4<f32>,
-  @location(2) packedId : u32,
+  @location(1) packedId : u32,
 };
 
 struct VertexOutput {
   @builtin(position) clip : vec4<f32>,
-  @location(0) color : vec4<f32>,
-  @location(1) localPos : vec2<f32>,
-  @location(2) @interpolate(flat) packedId : u32,
+  @location(0) localPos : vec2<f32>,
+  @location(1) @interpolate(flat) packedId : u32,
 };
 
 @vertex
@@ -57,7 +58,6 @@ fn vs_main(input : VertexInput) -> VertexOutput {
   // perspective divide intact (w is always 1 for this orthographic camera, but this
   // stays correct if that ever changes).
   out.clip.z = objects[objectId].depth * out.clip.w;
-  out.color = input.color;
   out.localPos = input.position;
   out.packedId = input.packedId;
   return out;
@@ -138,8 +138,10 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   let obj = objects[input.packedId & OBJECT_ID_MASK];
 
   var color : vec4<f32>;
-  if (!isFill || obj.fillType == FILL_COLOR) {
-    color = input.color;
+  if (!isFill) {
+    color = obj.strokeColor;
+  } else if (obj.fillType == FILL_COLOR) {
+    color = obj.fillColor;
   } else {
     var t : f32;
     if (obj.fillType == FILL_LINEAR) {

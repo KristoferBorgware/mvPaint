@@ -20,7 +20,7 @@
 // out of scope here. Vertices are also not deduplicated across adjacent segments/
 // joints - a bit of extra geometry traded for a simple, easy-to-verify algorithm.
 
-import type { MeshSink, RGBA } from './meshFormat'
+import type { MeshSink } from './meshFormat'
 
 export type LineJoin = 'miter' | 'round' | 'bevel'
 export type LineCap = 'butt' | 'round' | 'square'
@@ -32,7 +32,6 @@ export interface Point2 {
 
 export interface StrokeOptions {
   width: number
-  color: RGBA
   /** Loop back to the start (a boundary/contour) vs. an open path with caps. Default true. */
   closed?: boolean
   join?: LineJoin
@@ -66,7 +65,6 @@ function perp(dx: number, dy: number): [number, number] {
 /** Emits a round fan from `center`, sweeping `sweep` radians starting at `startAngle`. */
 function emitArc(
   sink: MeshSink,
-  color: RGBA,
   center: Point2,
   radius: number,
   startAngle: number,
@@ -80,7 +78,7 @@ function emitArc(
     const a = startAngle + (sweep * k) / steps
     const x = center.x + Math.cos(a) * radius
     const y = center.y + Math.sin(a) * radius
-    const idx = sink.vertex(x, y, color, false)
+    const idx = sink.vertex(x, y, false)
     sink.triangle(hubIdx, prevIdx, idx)
     prevIdx = idx
   }
@@ -89,7 +87,6 @@ function emitArc(
 /** Emits a round or square cap at `p`, given the OUTWARD-facing side normal there. */
 function strokeCap(
   sink: MeshSink,
-  color: RGBA,
   p: Point2,
   normal: [number, number],
   s: number,
@@ -108,10 +105,10 @@ function strokeCap(
   if (cap === 'square') {
     const e0 = { x: p0.x + dx * s, y: p0.y + dy * s }
     const e1 = { x: p1.x + dx * s, y: p1.y + dy * s }
-    const i0 = sink.vertex(p0.x, p0.y, color, false)
-    const i1 = sink.vertex(p1.x, p1.y, color, false)
-    const ie0 = sink.vertex(e0.x, e0.y, color, false)
-    const ie1 = sink.vertex(e1.x, e1.y, color, false)
+    const i0 = sink.vertex(p0.x, p0.y, false)
+    const i1 = sink.vertex(p1.x, p1.y, false)
+    const ie0 = sink.vertex(e0.x, e0.y, false)
+    const ie1 = sink.vertex(e1.x, e1.y, false)
     sink.triangle(i0, ie0, ie1)
     sink.triangle(i0, ie1, i1)
     return
@@ -119,10 +116,10 @@ function strokeCap(
 
   // round: a half-circle from +normal to -normal, sweeping +π (which always passes
   // through the outward direction, since outward is exactly +90° from +normal).
-  const hubIdx = sink.vertex(p.x, p.y, color, false)
-  const firstIdx = sink.vertex(p0.x, p0.y, color, false)
+  const hubIdx = sink.vertex(p.x, p.y, false)
+  const firstIdx = sink.vertex(p0.x, p0.y, false)
   const startAngle = Math.atan2(ny, nx)
-  emitArc(sink, color, p, s, startAngle, Math.PI, Math.max(2, roundSegments), hubIdx, firstIdx)
+  emitArc(sink, p, s, startAngle, Math.PI, Math.max(2, roundSegments), hubIdx, firstIdx)
 }
 
 /**
@@ -132,7 +129,6 @@ function strokeCap(
 export function strokePolyline(points: readonly Point2[], sink: MeshSink, options: StrokeOptions): void {
   const {
     width,
-    color,
     closed = true,
     join = 'miter',
     cap = 'butt',
@@ -162,10 +158,10 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const a = points[e]
     const b = points[(e + 1) % n]
     const [nx, ny] = norms[e]
-    const ia0 = sink.vertex(a.x + nx * s, a.y + ny * s, color, false)
-    const ia1 = sink.vertex(a.x - nx * s, a.y - ny * s, color, false)
-    const ib0 = sink.vertex(b.x + nx * s, b.y + ny * s, color, false)
-    const ib1 = sink.vertex(b.x - nx * s, b.y - ny * s, color, false)
+    const ia0 = sink.vertex(a.x + nx * s, a.y + ny * s, false)
+    const ia1 = sink.vertex(a.x - nx * s, a.y - ny * s, false)
+    const ib0 = sink.vertex(b.x + nx * s, b.y + ny * s, false)
+    const ib1 = sink.vertex(b.x - nx * s, b.y - ny * s, false)
     sink.triangle(ia0, ib0, ib1)
     sink.triangle(ia0, ib1, ia1)
   }
@@ -192,11 +188,11 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const innerIn = { x: p.x - inNx * s * outerSign, y: p.y - inNy * s * outerSign }
     const innerOut = { x: p.x - outNx * s * outerSign, y: p.y - outNy * s * outerSign }
 
-    const pIdx = sink.vertex(p.x, p.y, color, false)
+    const pIdx = sink.vertex(p.x, p.y, false)
 
     // Concave side: direct fill (see the module-level note on overlap at sharp turns).
-    const iInIdx = sink.vertex(innerIn.x, innerIn.y, color, false)
-    const iOutIdx = sink.vertex(innerOut.x, innerOut.y, color, false)
+    const iInIdx = sink.vertex(innerIn.x, innerIn.y, false)
+    const iOutIdx = sink.vertex(innerOut.x, innerOut.y, false)
     sink.triangle(pIdx, iInIdx, iOutIdx)
 
     // Convex side: miter (falling back to bevel past the limit), round, or bevel.
@@ -206,9 +202,9 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       const miterRatio = cosHalf > 1e-6 ? 1 / cosHalf : Infinity
       if (miterRatio <= miterLimit) {
         const miterLen = s * miterRatio
-        const mIdx = sink.vertex(p.x + bisector[0] * miterLen, p.y + bisector[1] * miterLen, color, false)
-        const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
-        const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color, false)
+        const mIdx = sink.vertex(p.x + bisector[0] * miterLen, p.y + bisector[1] * miterLen, false)
+        const oInIdx = sink.vertex(outerIn.x, outerIn.y, false)
+        const oOutIdx = sink.vertex(outerOut.x, outerOut.y, false)
         sink.triangle(pIdx, oInIdx, mIdx)
         sink.triangle(pIdx, mIdx, oOutIdx)
         continue
@@ -223,23 +219,23 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       while (sweep > Math.PI) sweep -= TWO_PI
       while (sweep < -Math.PI) sweep += TWO_PI
       const steps = Math.max(1, Math.ceil((Math.abs(sweep) / Math.PI) * roundSegments))
-      const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
-      emitArc(sink, color, p, s, a0, sweep, steps, pIdx, oInIdx)
+      const oInIdx = sink.vertex(outerIn.x, outerIn.y, false)
+      emitArc(sink, p, s, a0, sweep, steps, pIdx, oInIdx)
       continue
     }
 
     // bevel (default, and the miter-limit fallback)
-    const oInIdx = sink.vertex(outerIn.x, outerIn.y, color, false)
-    const oOutIdx = sink.vertex(outerOut.x, outerOut.y, color, false)
+    const oInIdx = sink.vertex(outerIn.x, outerIn.y, false)
+    const oOutIdx = sink.vertex(outerOut.x, outerOut.y, false)
     sink.triangle(pIdx, oInIdx, oOutIdx)
   }
 
   // --- caps (open paths only) -------------------------------------------------------
   if (!closed) {
     // Start cap: outward = reverse of the first edge's direction, i.e. the negated normal.
-    strokeCap(sink, color, points[0], [-norms[0][0], -norms[0][1]], s, cap, roundSegments)
+    strokeCap(sink, points[0], [-norms[0][0], -norms[0][1]], s, cap, roundSegments)
     // End cap: outward = the last edge's own forward direction.
-    strokeCap(sink, color, points[n - 1], norms[segCount - 1], s, cap, roundSegments)
+    strokeCap(sink, points[n - 1], norms[segCount - 1], s, cap, roundSegments)
   }
 }
 

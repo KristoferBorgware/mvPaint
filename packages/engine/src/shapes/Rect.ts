@@ -22,13 +22,12 @@ export class Rect extends Shape {
     const hw = this.width / 2
     const hh = this.height / 2
 
-    // Fill: centered quad (two triangles). The vertex color is a placeholder when
-    // fillPriority selects a gradient - the fragment shader computes the displayed
-    // color from the object's gradient parameters instead.
-    const f0 = sink.vertex(-hw, -hh, this.fill, true)
-    const f1 = sink.vertex(hw, -hh, this.fill, true)
-    const f2 = sink.vertex(hw, hh, this.fill, true)
-    const f3 = sink.vertex(-hw, hh, this.fill, true)
+    // Fill: centered quad (two triangles). Color is not part of the geometry - the
+    // fragment shader reads the object's fillColor (solid) or gradient parameters.
+    const f0 = sink.vertex(-hw, -hh, true)
+    const f1 = sink.vertex(hw, -hh, true)
+    const f2 = sink.vertex(hw, hh, true)
+    const f3 = sink.vertex(-hw, hh, true)
     sink.triangle(f0, f1, f2)
     sink.triangle(f0, f2, f3)
 
@@ -41,7 +40,6 @@ export class Rect extends Shape {
       ]
       strokePolyline(corners, sink, {
         width: this.strokeWidth,
-        color: this.stroke,
         closed: true,
         join: this.lineJoin,
         miterLimit: this.miterLimit,

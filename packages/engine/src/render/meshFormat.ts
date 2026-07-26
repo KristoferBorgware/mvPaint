@@ -1,8 +1,8 @@
 // Shared formats for the mesh lane: the interleaved vertex layout, the per-object
-// storage layout (transform + fill/gradient material), the frame uniform layout, and
-// the CPU-facing MeshSink interface that shapes tessellate into. All geometry (rects,
-// polygons, future paths) flows through this one layout so it can share a single
-// pipeline and buffer set.
+// storage layout (transform + fill/gradient/stroke material), the frame uniform layout,
+// and the CPU-facing MeshSink interface that shapes tessellate into. All geometry
+// (rects, polygons, future paths) flows through this one layout so it can share a
+// single pipeline and buffer set.
 
 export type RGBA = readonly [number, number, number, number]
 export type Point2 = { x: number; y: number }
@@ -23,20 +23,23 @@ export const MAX_GRADIENT_STOPS = 8
  * Sink a Shape tessellates its geometry into. Positions are in the shape's LOCAL space
  * (the per-object transform is applied in the vertex shader). `isFill` marks vertices
  * that belong to the shape's fill (eligible for a gradient fill) as opposed to its
- * stroke (always a flat color). `vertex` returns an index local to this shape (0-based);
- * `triangle` references those local indices. The batcher rebases them into the shared
- * buffers and injects the object id.
+ * stroke (always a flat color, from the object's strokeColor). `vertex` returns an index
+ * local to this shape (0-based); `triangle` references those local indices. The batcher
+ * rebases them into the shared buffers and injects the object id. There is no color
+ * here: a solid fill/stroke color is read from the object's fillColor/strokeColor at
+ * fragment time, exactly like a gradient is - so recoloring a shape (unlike resizing or
+ * restroking it) never needs a geometry rebuild, only the per-frame object refresh.
  */
 export interface MeshSink {
-  vertex(x: number, y: number, color: RGBA, isFill: boolean): number
+  vertex(x: number, y: number, isFill: boolean): number
   triangle(a: number, b: number, c: number): void
 }
 
-// Interleaved vertex: position (vec2 f32) + color (vec4 f32) + packedId (u32).
-// packedId's low 31 bits are the object index; the top bit is the "is fill" flag
-// (stroke vertices always render their flat color, never a gradient).
-export const MESH_VERTEX_STRIDE = 28 // bytes
-export const MESH_VERTEX_FLOATS = 7 // 32-bit slots per vertex (2 + 4 + 1)
+// Interleaved vertex: position (vec2 f32) + packedId (u32). packedId's low 31 bits are
+// the object index; the top bit is the "is fill" flag (stroke vertices always render
+// the object's flat strokeColor, never a gradient).
+export const MESH_VERTEX_STRIDE = 12 // bytes
+export const MESH_VERTEX_FLOATS = 3 // 32-bit slots per vertex (2 + 1)
 export const MESH_FILL_BIT = 0x80000000
 export const MESH_OBJECT_ID_MASK = 0x7fffffff
 
@@ -44,8 +47,7 @@ export const MESH_VERTEX_LAYOUT: GPUVertexBufferLayout = {
   arrayStride: MESH_VERTEX_STRIDE,
   attributes: [
     { shaderLocation: 0, offset: 0, format: 'float32x2' }, // position
-    { shaderLocation: 1, offset: 8, format: 'float32x4' }, // color (rgba)
-    { shaderLocation: 2, offset: 24, format: 'uint32' }, //   packedId
+    { shaderLocation: 1, offset: 8, format: 'uint32' }, //    packedId
   ],
 }
 
@@ -61,7 +63,9 @@ export const MESH_VERTEX_LAYOUT: GPUVertexBufferLayout = {
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>       (32)
 //   132 (12 bytes padding, vec4 alignment)
 //   144 stopColors: array<vec4<f32>, MAX_GRADIENT_STOPS>    (128)
-//   272 end
+//   272 fillColor: vec4<f32>                   (16) - used when fillType == color
+//   288 strokeColor: vec4<f32>                 (16)
+//   304 end
 //
 // `depth` sits in what would otherwise be padding (4 bytes, needed anyway so gradientEnd
 // lands on its 8-byte vec2 alignment) - it doesn't grow the record. It is NOT derived
@@ -79,7 +83,9 @@ export const OBJECT_GRADIENT_END_OFFSET = 88
 export const OBJECT_GRADIENT_END_RADIUS_OFFSET = 96
 export const OBJECT_STOP_POSITIONS_OFFSET = 100
 export const OBJECT_STOP_COLORS_OFFSET = 144
-export const OBJECT_STRIDE = 272 // bytes
+export const OBJECT_FILL_COLOR_OFFSET = 272
+export const OBJECT_STROKE_COLOR_OFFSET = 288
+export const OBJECT_STRIDE = 304 // bytes
 
 export const FILL_TYPE_CODE: Record<FillPriority, number> = {
   color: 0,
