@@ -3,6 +3,7 @@
 
 import { FreeFloatCamera } from './FreeFloatCamera'
 import { OrbitCamera } from './OrbitCamera'
+import { OrthographicCamera } from './OrthographicCamera'
 import { Vector3 } from '../math/Vector3'
 
 let count = 0
@@ -71,6 +72,31 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   const d0 = cam.distance
   cam.update({ zoom: 1 }) // one notch in
   assert(cam.distance < d0, 'wheel zoom-in reduces distance')
+}
+
+// --- OrthographicCamera.viewBounds: a world-space rectangle centered on the camera,
+//     used for viewport culling (scene/culling.ts) - no plane/frustum math needed since
+//     an orthographic 2D frustum IS just an axis-aligned box ---
+{
+  const cam = new OrthographicCamera()
+  cam.eye = new Vector3(10, -5, 20) // z is irrelevant here (the camera always looks down -Z)
+  cam.viewHeight = 20
+  const bounds = cam.viewBounds(2) // 2:1 aspect -> width follows viewHeight * aspect
+  assert(near(bounds.min.x, 10 - 20) && near(bounds.max.x, 10 + 20), 'view width is viewHeight * aspect, centered on eye.x')
+  assert(near(bounds.min.y, -5 - 10) && near(bounds.max.y, -5 + 10), 'view height is viewHeight, centered on eye.y')
+
+  // Panning (eye moves) shifts the rectangle; zooming (viewHeight shrinks) shrinks it -
+  // the same pan/zoom model input/cameraControls.ts already drives.
+  cam.eye.x += 5
+  const panned = cam.viewBounds(2)
+  assert(near(panned.min.x, bounds.min.x + 5), 'panning the camera shifts the view rectangle with it')
+
+  cam.viewHeight = 10
+  const zoomedIn = cam.viewBounds(2)
+  assert(
+    zoomedIn.max.y - zoomedIn.min.y < bounds.max.y - bounds.min.y,
+    'a smaller viewHeight (zoomed in) shrinks the view rectangle',
+  )
 }
 
 console.log(`[camera] self-test passed (${count} assertions)`)

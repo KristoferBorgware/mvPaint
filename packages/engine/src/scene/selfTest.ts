@@ -5,6 +5,7 @@ import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
 import { Scene } from './Scene'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
+import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Transform } from '../math/Transform'
@@ -15,6 +16,7 @@ import { Text } from '../shapes/Text'
 import { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
+import { isShapeOnScreen } from './culling'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -217,6 +219,32 @@ class TransformGroup extends Container {
   assert(bounds.min.x === 0 && bounds.max.x === 20, 'text bounds union x across all quads')
   assert(bounds.min.y === -12 && bounds.max.y === 0, 'text bounds union y across all quads')
   assert(!textLocalBounds({ quads: [] }).valid(), 'text bounds invalid for no quads')
+}
+
+// --- culling: isShapeOnScreen tests WORLD-space bounds overlap against a view
+//     rectangle - moving a shape changes the answer immediately, no cache to invalidate ---
+{
+  const view = new AABB(new Vector3(-50, -50, 0), new Vector3(50, 50, 0))
+
+  const inside = new Rect({ x: 0, y: 0, width: 10, height: 10 })
+  assert(isShapeOnScreen(inside, view), 'a shape inside the view rectangle is on screen')
+
+  const farAway = new Rect({ x: 1000, y: 0, width: 10, height: 10 })
+  assert(!isShapeOnScreen(farAway, view), 'a shape far outside the view rectangle is culled')
+
+  // Spans x in [35,55] - the view rectangle ends at x=50, so this still overlaps.
+  const straddling = new Rect({ x: 45, y: 0, width: 20, height: 20 })
+  assert(isShapeOnScreen(straddling, view), 'a shape straddling the view edge still overlaps, not culled')
+
+  // Position is a per-frame transform, not baked geometry - moving a shape changes
+  // whether it's on screen without needing markGeometryDirty() or any cache invalidation.
+  farAway.x = 0
+  assert(isShapeOnScreen(farAway, view), 'moving a shape back into view is picked up immediately')
+
+  // A shape emitting no geometry at all (invalid local bounds) is never culled - there's
+  // nothing to skip drawing anyway.
+  class EmptyShape extends Shape {}
+  assert(isShapeOnScreen(new EmptyShape(), view), 'a shape with no geometry is never culled')
 }
 
 console.log(`[scene] self-test passed (${count} assertions)`)

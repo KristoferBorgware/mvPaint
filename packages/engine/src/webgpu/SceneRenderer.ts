@@ -2,9 +2,13 @@
 // and text lane pipelines/batchers, and renders by collecting visible shapes/text each
 // frame, assigning each a depth from its zIndex rank (see scene/picking.ts) so the two
 // lanes' draw calls resolve their stacking order correctly via the depth buffer instead
-// of "whichever lane draws last always wins". It does NOT own the GPU context, resize
-// observer, frame loop, or any scene content - those are wired by createSceneRenderer()
-// below, with content supplied by the caller through the `populate` option.
+// of "whichever lane draws last always wins". Shapes/text outside the camera's current
+// view rectangle are culled before reaching either batcher (see scene/culling.ts) - a
+// rebuild only re-runs when the visible SET changes (content added/removed, or something
+// crossing the view boundary), not on every frame just because something moved. It does
+// NOT own the GPU context, resize observer, frame loop, or any scene content - those are
+// wired by createSceneRenderer() below, with content supplied by the caller through the
+// `populate` option.
 
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
@@ -12,6 +16,7 @@ import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { screenToWorld } from '../input/viewport'
 import {
   createFrameBindGroupLayout,
@@ -33,6 +38,17 @@ import { FrameRenderer, type FrameContext } from '../systems/FrameRenderer'
 const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
 const SAMPLE_COUNT = 4
 
+// Both arrays are filtered from the SAME zIndex-sorted list, so if the underlying set of
+// members is unchanged, filtering it again reproduces the identical order - a plain
+// elementwise reference comparison is enough to detect "did the visible set change".
+function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 export class SceneRenderer {
   /** The scene graph: root -> camera, root -> content added by the caller. */
   readonly scene = new Scene()
@@ -51,6 +67,10 @@ export class SceneRenderer {
   private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   private geometryDirty = true
   private textGeometryDirty = true
+  // The shapes/text currently packed into the batchers - i.e. the last computed visible
+  // set - so draw() can tell whether culling's output actually changed this frame.
+  private visibleMeshShapes: Shape[] = []
+  private visibleTexts: Text[] = []
 
   constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement, fontBook: FontBook) {
     this.canvas = canvas
@@ -132,7 +152,8 @@ export class SceneRenderer {
 
     // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
     // a Text can interleave correctly under the depth test regardless of which lane's
-    // draw call runs first (see scene/picking.ts).
+    // draw call runs first (see scene/picking.ts). Depth ranks are scene-wide (based on
+    // EVERY shape), not affected by culling below.
     const ordered = collectZOrder(this.scene)
     const depths = new Map<Shape, number>()
     ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
@@ -141,19 +162,33 @@ export class SceneRenderer {
     const texts = ordered.filter((s): s is Text => s instanceof Text)
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
 
-    if (this.geometryDirty) {
-      this.batcher.rebuild(meshShapes)
+    // Viewport cull: skip anything whose bounds don't overlap the camera's current view
+    // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
+    // non-orthographic camera, since only OrthographicCamera has a rectangular frustum.
+    const viewBounds = camera instanceof OrthographicCamera ? camera.viewBounds(width / height) : null
+    const visibleMeshShapes = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
+    const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
+
+    // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
+    // objects belong in them changes - content added/removed, or the visible set itself
+    // changing as the camera pans/zooms or an object crosses the view boundary - not
+    // every frame just because something moved (that's updateObjects(), below, cheap and
+    // unconditional either way).
+    if (this.geometryDirty || !sameMembers(visibleMeshShapes, this.visibleMeshShapes)) {
+      this.batcher.rebuild(visibleMeshShapes)
       this.geometryDirty = false
     }
-    this.batcher.updateObjects(meshShapes, depths)
+    this.visibleMeshShapes = visibleMeshShapes
+    this.batcher.updateObjects(visibleMeshShapes, depths)
 
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup)
 
-    if (this.textGeometryDirty) {
-      this.textBatcher.rebuild(texts, this.fontBook)
+    if (this.textGeometryDirty || !sameMembers(visibleTexts, this.visibleTexts)) {
+      this.textBatcher.rebuild(visibleTexts, this.fontBook)
       this.textGeometryDirty = false
     }
+    this.visibleTexts = visibleTexts
     this.textBatcher.updateObjects(depths)
     pass.setPipeline(this.textPipeline)
     this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
