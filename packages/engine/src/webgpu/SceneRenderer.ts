@@ -17,6 +17,7 @@ import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
+import { nodesInBox, type MarqueeOptions } from '../scene/selection'
 import { screenToWorld } from '../input/viewport'
 import {
   createFrameBindGroupLayout,
@@ -147,6 +148,14 @@ export class SceneRenderer {
     return localBoundsOf(node, this.fontBook)
   }
 
+  /**
+   * Every visible, pickable shape meeting a world-space rectangle - what a marquee
+   * selects. Goes through the renderer so Text is measured against the loaded atlases.
+   */
+  nodesInBox(from: { x: number; y: number }, to: { x: number; y: number }, options: MarqueeOptions = {}): Shape[] {
+    return nodesInBox(this.scene, from, to, { fontBook: this.fontBook, ...options })
+  }
+
   /** Force a mesh-lane geometry rebuild on the next draw (call after adding/removing shapes). */
   markGeometryDirty(): void {
     this.geometryDirty = true
@@ -241,6 +250,8 @@ export interface SceneRendererHandle {
   pick: (screenX: number, screenY: number) => PickableNode | null
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
   localBoundsOf: (node: PickableNode) => AABB
+  /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
+  nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
   destroy: () => void
@@ -336,6 +347,9 @@ export async function createSceneRenderer(
     },
     localBoundsOf(node: PickableNode) {
       return scene.localBoundsOf(node)
+    },
+    nodesInBox(from, to, options) {
+      return scene.nodesInBox(from, to, options)
     },
     markGeometryDirty() {
       scene.markGeometryDirty()

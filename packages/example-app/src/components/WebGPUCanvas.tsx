@@ -1,15 +1,17 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import Stats from 'stats.js'
 import {
+  boxForNodes,
   createSceneRenderer,
   SceneInputController,
-  type PickableNode,
+  Transformer,
   type Rect,
   type SceneRendererHandle,
+  type Shape,
 } from '@mvpaint/engine'
 import { buildDemoScene } from '../webgpu/demoScene'
-import { SelectionHighlight } from '../webgpu/selectionHighlight'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
+import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
 
 interface WebGPUCanvasProps {
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
@@ -21,46 +23,43 @@ interface WebGPUCanvasProps {
   /** Debug/testing: grows (or shrinks, if negative) the viewport-culling rectangle, in
    * world units, so popping at the view edge - or the cull itself - can be seen live. */
   cullMargin: number
+  /** When false, dragging a corner anchor scales each axis freely instead of uniformly. */
+  uniformCornerScale: boolean
   /** Called with a human-readable message on WebGPU init or device errors. */
   onError?: (message: string) => void
-  /** Called with the clicked/tapped node, or null on empty space / Escape. */
-  onSelect?: (node: PickableNode | null) => void
+  /** Called with every selected node (empty when the selection is cleared). */
+  onSelectionChange?: (nodes: readonly Shape[]) => void
 }
 
 export interface WebGPUCanvasHandle {
-  /** Clears the current selection (and its highlight) the same way Escape does. */
+  /** Clears the current selection (and its transformer) the same way Escape does. */
   clearSelection: () => void
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
-  { speed, zoom, onZoomChange, cullMargin, onError, onSelect },
+  { speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
-  const highlightRef = useRef<SelectionHighlight | null>(null)
+  const controllerRef = useRef<SceneInputController | null>(null)
+  const transformerRef = useRef<Transformer | null>(null)
   const speedRef = useRef(speed)
   const onZoomChangeRef = useRef(onZoomChange)
-  const onSelectRef = useRef(onSelect)
+  const onSelectionChangeRef = useRef(onSelectionChange)
 
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange
   }, [onZoomChange])
   useEffect(() => {
-    onSelectRef.current = onSelect
-  }, [onSelect])
+    onSelectionChangeRef.current = onSelectionChange
+  }, [onSelectionChange])
 
   useImperativeHandle(
     ref,
     () => ({
-      clearSelection: () => {
-        const handle = handleRef.current
-        const highlight = highlightRef.current
-        if (!handle || !highlight) return
-        highlight.update(handle, null)
-        onSelectRef.current?.(null)
-      },
+      clearSelection: () => controllerRef.current?.setSelection([]),
     }),
     [],
   )
@@ -75,9 +74,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let spins = new Map<Rect, number>()
     let lastReportedZoom = zoom
     let inputController: SceneInputController | null = null
-    const highlight = new SelectionHighlight()
-    highlightRef.current = highlight
     const cullBoundsOverlay = new CullBoundsOverlay()
+    const marqueeOverlay = new MarqueeOverlay()
+
+    // The selection frame: eight resize anchors plus a rotate handle. It lives in the
+    // scene like any other content, and is re-fitted to the selection every frame below.
+    const transformer = new Transformer({ keepRatio: uniformCornerScale })
+    transformerRef.current = transformer
 
     // stats.js - the small FPS/MS/memory overlay three.js examples use. Click it to
     // cycle panels. It renders itself into a fixed-position DOM node it owns, updated
@@ -92,27 +95,36 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       onDeviceError: (message) => onError?.(message),
       populate: (scene) => {
         spins = buildDemoScene(scene)
+        scene.root.addChild(transformer)
       },
       onFrame: (dt) => {
-        angle += dt * speedRef.current
-        for (const [rect, spinScale] of spins) {
-          rect.rotation = angle * spinScale
+        // The spin drives these rects' rotation every frame, which would overwrite
+        // anything the transformer's rotate handle did to them - so at speed 0 the
+        // animation lets go entirely and they can be turned by hand instead.
+        if (speedRef.current > 0) {
+          angle += dt * speedRef.current
+          for (const [rect, spinScale] of spins) {
+            rect.rotation = angle * spinScale
+          }
         }
         // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll
         // it back so the zoom slider stays in sync, without a setState on every frame.
-        const currentZoom = handleRef.current?.getZoom()
+        const handle = handleRef.current
+        const currentZoom = handle?.getZoom()
         if (currentZoom !== undefined && currentZoom !== lastReportedZoom) {
           lastReportedZoom = currentZoom
           onZoomChangeRef.current?.(currentZoom)
         }
         // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
         // updated every frame since it tracks the camera as it pans/zooms.
-        if (handleRef.current) {
-          cullBoundsOverlay.update(handleRef.current, handleRef.current.getCullMargin())
+        if (handle) {
+          cullBoundsOverlay.update(handle, handle.getCullMargin())
+          // Re-fit the frame to whatever is selected: the selection may be moving under
+          // a drag, spinning with the animation above, or unchanged - all one code path.
+          const selection = transformer.selection
+          const box = selection.length > 0 ? boxForNodes(selection, (node) => handle.localBoundsOf(node)) : null
+          transformer.update(box, handle.getZoom())
         }
-        // Keeps the selection outline on its node as that node moves - dragged by the
-        // pointer, or spun by the animation above.
-        highlight.sync()
         stats.update()
       },
     })
@@ -125,17 +137,17 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         handle.setZoom(zoom)
         handle.setCullMargin(cullMargin)
         inputController = new SceneInputController(canvas, handle, {
-          onPick: (node) => {
-            highlight.update(handle, node)
-            onSelectRef.current?.(node)
+          transformer,
+          // Settle onto the 45-degree marks while rotating, which is what makes it
+          // possible to get something exactly upright again by hand.
+          rotationSnaps: [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, (5 * Math.PI) / 4, (3 * Math.PI) / 2, (7 * Math.PI) / 4],
+          onSelectionChange: (nodes) => {
+            onSelectionChangeRef.current?.(nodes)
+            handle.markGeometryDirty()
           },
-          // Grabbing a node selects it, the way direct-manipulation editors do - so the
-          // outline is already on it (and following it, via sync() above) as it moves.
-          onDragStart: (node) => {
-            highlight.update(handle, node)
-            onSelectRef.current?.(node)
-          },
+          onMarquee: (corners) => marqueeOverlay.update(handle, corners),
         })
+        controllerRef.current = inputController
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -145,9 +157,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     return () => {
       cancelled = true
       inputController?.destroy()
+      controllerRef.current = null
+      transformerRef.current = null
       handleRef.current?.destroy()
       handleRef.current = null
-      highlightRef.current = null
       stats.dom.remove()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,6 +180,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useEffect(() => {
     handleRef.current?.setCullMargin(cullMargin)
   }, [cullMargin])
+
+  // Push the uniform/free corner-scaling toggle to the live transformer.
+  useEffect(() => {
+    if (transformerRef.current) transformerRef.current.keepRatio = uniformCornerScale
+  }, [uniformCornerScale])
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>

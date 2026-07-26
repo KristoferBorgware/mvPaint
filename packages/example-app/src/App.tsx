@@ -1,13 +1,15 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   Alert,
   Box,
   Chip,
   Collapse,
+  FormControlLabel,
   IconButton,
   Paper,
   Slider,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material'
 import SpeedIcon from '@mui/icons-material/Speed'
@@ -16,7 +18,7 @@ import CropFreeIcon from '@mui/icons-material/CropFree'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
-import type { PickableNode } from '@mvpaint/engine'
+import type { Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 
 const panelSx = {
@@ -36,13 +38,17 @@ export default function App() {
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [cullMargin, setCullMargin] = useState(0)
+  const [uniformCornerScale, setUniformCornerScale] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<PickableNode | null>(null)
+  const [selected, setSelected] = useState<readonly Shape[]>([])
   // Both panels start collapsed - on mobile they otherwise eat most of the screen; the
   // user opts in via the toggle row instead of having them always on.
   const [infoOpen, setInfoOpen] = useState(false)
   const [controlsOpen, setControlsOpen] = useState(false)
   const canvasRef = useRef<WebGPUCanvasHandle>(null)
+
+  // Stable identity so the canvas's effect doesn't see a new callback every render.
+  const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
 
   return (
     <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -53,8 +59,9 @@ export default function App() {
         zoom={zoom}
         onZoomChange={setZoom}
         cullMargin={cullMargin}
+        uniformCornerScale={uniformCornerScale}
         onError={setError}
-        onSelect={setSelected}
+        onSelectionChange={handleSelectionChange}
       />
 
       {error && (
@@ -133,6 +140,24 @@ export default function App() {
                   so any popping at the view edge shows up sooner.
                 </Typography>
               </Stack>
+
+              <Stack spacing={0.5}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={uniformCornerScale}
+                      onChange={(e) => setUniformCornerScale(e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2">Uniform corner scaling</Typography>}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  Corner anchors keep the aspect ratio; edge anchors always scale one axis.
+                  Hold shift while dragging a corner to invert this, alt to scale about the
+                  center.
+                </Typography>
+              </Stack>
             </Stack>
           </Paper>
         </Collapse>
@@ -151,26 +176,39 @@ export default function App() {
                 <Typography variant="body2" color="text.secondary">
                   Selection
                 </Typography>
-                {selected ? (
-                  <Chip
-                    size="small"
-                    label={`${selected.constructor.name}${selected.name ? ` "${selected.name}"` : ''}`}
-                    onDelete={() => canvasRef.current?.clearSelection()}
-                    color="primary"
-                    variant="outlined"
-                    sx={{ alignSelf: 'flex-start' }}
-                  />
+                {selected.length > 0 ? (
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                    {selected.slice(0, 4).map((node, i) => (
+                      <Chip
+                        key={`${node.name}-${i}`}
+                        size="small"
+                        label={node.name || node.constructor.name}
+                        color="primary"
+                        variant="outlined"
+                      />
+                    ))}
+                    {selected.length > 4 && (
+                      <Chip size="small" label={`+${selected.length - 4} more`} variant="outlined" />
+                    )}
+                    <Chip
+                      size="small"
+                      label="clear"
+                      onDelete={() => canvasRef.current?.clearSelection()}
+                      sx={{ alignSelf: 'flex-start' }}
+                    />
+                  </Stack>
                 ) : (
                   <Typography variant="caption" color="text.secondary">
-                    Nothing selected - click or tap a shape.
+                    Nothing selected - click a shape, or drag a box around several.
                   </Typography>
                 )}
               </Stack>
 
               <Typography variant="caption" color="text.secondary">
                 Gradient-filled and stroked shapes in the Z=0 plane, viewed through a 2D
-                orthographic camera. Drag to pan, scroll or pinch to zoom, click/tap to
-                select, Escape to deselect.
+                orthographic camera. Drag a shape to move it; drag empty space to rubber-band
+                a selection (on touch, press and hold first). Shift extends the selection.
+                Scroll or pinch to zoom, middle-drag or space+drag to pan, Escape to deselect.
               </Typography>
             </Stack>
           </Paper>

@@ -17,6 +17,7 @@ import { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
 import { isShapeOnScreen } from './culling'
+import { nodesInBox } from './selection'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -245,6 +246,58 @@ class TransformGroup extends Container {
   // nothing to skip drawing anyway.
   class EmptyShape extends Shape {}
   assert(isShapeOnScreen(new EmptyShape(), view), 'a shape with no geometry is never culled')
+}
+
+// --- marquee: nodesInBox picks up everything a dragged rectangle meets ---
+{
+  const scene = new Scene()
+  const left = scene.root.addChild(new Rect({ name: 'left', x: -100, y: 0, width: 40, height: 40 }))
+  const right = scene.root.addChild(new Rect({ name: 'right', x: 100, y: 0, width: 40, height: 40 }))
+  const far = scene.root.addChild(new Rect({ name: 'far', x: 0, y: 900, width: 40, height: 40 }))
+
+  // A rectangle over just the left shape takes only it - and the drag's corners may be
+  // given in any order, since a marquee can be pulled in any direction.
+  const onlyLeft = nodesInBox(scene, { x: -140, y: -40 }, { x: -60, y: 40 })
+  assert(onlyLeft.length === 1 && onlyLeft[0] === left, 'a box over one shape selects just that shape')
+  const reversed = nodesInBox(scene, { x: -60, y: 40 }, { x: -140, y: -40 })
+  assert(reversed.length === 1 && reversed[0] === left, 'dragging the box the other way selects the same shape')
+
+  const both = nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 })
+  assert(both.length === 2 && both.includes(left) && both.includes(right), 'a wider box takes both, and not the far one')
+  assert(!both.includes(far), 'a shape outside the box is left alone')
+
+  // 'intersect' (the default) takes anything the box touches; 'contain' needs the whole
+  // shape inside - the two conventions editors split over.
+  const clipping = { from: { x: -140, y: -40 }, to: { x: -100, y: 40 } } // covers half of `left`
+  assert(nodesInBox(scene, clipping.from, clipping.to).includes(left), 'intersect mode takes a partly-covered shape')
+  assert(
+    !nodesInBox(scene, clipping.from, clipping.to, { mode: 'contain' }).includes(left),
+    'contain mode skips a shape that is only partly inside',
+  )
+  assert(
+    nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }, { mode: 'contain' }).includes(left),
+    'contain mode takes a shape that is fully inside',
+  )
+
+  // The same visible/pickable rules picking uses - an overlay must not be marquee-able.
+  right.pickable = false
+  assert(!nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }).includes(right), 'a non-pickable shape is skipped')
+  right.pickable = true
+  left.visible = false
+  assert(!nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }).includes(left), 'an invisible shape is skipped')
+  left.visible = true
+
+  // Results come back in z-order, matching collectZOrder rather than traversal order.
+  right.zIndex = -5
+  const ordered = nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 })
+  assert(ordered[0] === right, 'marquee results come back in z-order, back to front')
+  right.zIndex = 0
+
+  // A moved shape is picked up at its new position: bounds are read live, not cached.
+  assert(!nodesInBox(scene, { x: 800, y: 800 }, { x: 1000, y: 1000 }).includes(left), 'sanity: left is not out there yet')
+  left.x = 900
+  left.y = 900
+  assert(nodesInBox(scene, { x: 800, y: 800 }, { x: 1000, y: 1000 }).includes(left), 'a moved shape is found where it now is')
 }
 
 console.log(`[scene] self-test passed (${count} assertions)`)
