@@ -1,16 +1,16 @@
 // Pure math behind the Transformer, split out so it can be self-tested without a canvas
 // or a GPU (the same split cameraControls.ts and nodeDrag.ts use).
 //
-// The whole design rests on one idea, adapted from Konva's Transformer: every gesture is
-// expressed as a single WORLD-space delta matrix, which is then pushed into each selected
-// node. That is what makes multi-select fall out for free (one delta, applied to every
-// node) and what makes nesting work (a node under a rotated/scaled/flipped parent gets
-// the delta converted into its own parent's frame, rather than the transformer needing to
-// know anything about the hierarchy).
+// The whole design rests on one idea: every gesture is expressed as a single WORLD-space
+// delta matrix, which is then pushed into each selected node. That is what makes
+// multi-select fall out for free (one delta, applied to every node) and what makes
+// nesting work (a node under a rotated/scaled/flipped parent gets the delta converted
+// into its own parent's frame, rather than the transformer needing to know anything
+// about the hierarchy).
 //
 // Non-uniformly scaling a ROTATED node produces a sheared matrix, which a
 // translate/rotate/scale transform cannot hold. Shape therefore carries skewX/skewY too
-// (Konva's shear, applied between rotation and scale), so rotate+skew+scale spans every
+// (a shear term, applied between rotation and scale), so rotate+skew+scale spans every
 // invertible 2x2 and the decomposition below is EXACT rather than a best fit.
 
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -23,7 +23,7 @@ export interface Point2 {
   y: number
 }
 
-/** The eight resize handles, named as in Konva. 'top' is +y (the scene is y-up). */
+/** The eight resize handles, named by edge/corner. 'top' is +y (the scene is y-up). */
 export type ResizeAnchor =
   | 'top-left'
   | 'top-center'
@@ -354,14 +354,14 @@ export interface DecomposedTransform {
 
 /**
  * Splits a 2x2 linear transform into rotation, skew and scale, matching the order
- * localMatrix() composes them in (R · skew · S). This is Konva's QR-style decomposition:
- * the rotation and scaleX come from the x axis' direction and length, the determinant
- * fixes scaleY, and whatever obliqueness is left over lands in skewX.
+ * localMatrix() composes them in (R · skew · S). This is a QR-style decomposition: the
+ * rotation and scaleX come from the x axis' direction and length, the determinant fixes
+ * scaleY, and whatever obliqueness is left over lands in skewX.
  *
  * Five stored fields describe a four-degree-of-freedom matrix, so one has to be pinned to
- * make the answer unique - skewY is pinned to 0, exactly as Konva does. Every invertible
- * 2x2 is still reachable, which is the point: it makes the decomposition EXACT, so
- * non-uniformly scaling a rotated shape is represented faithfully instead of approximated.
+ * make the answer unique - skewY is pinned to 0. Every invertible 2x2 is still reachable,
+ * which is the point: it makes the decomposition EXACT, so non-uniformly scaling a
+ * rotated shape is represented faithfully instead of approximated.
  *
  * `a`/`b` are the x axis (column 0), `c`/`d` the y axis (column 1).
  */

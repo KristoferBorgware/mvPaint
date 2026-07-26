@@ -120,7 +120,7 @@ export abstract class Shape extends Node {
   offsetX = 0
   offsetY = 0
   /**
-   * Shear, matching Canvas/Konva semantics: skewX slides x by `skewX` per unit of y, and
+   * Shear: skewX slides x by `skewX` per unit of y, and
    * skewY slides y by `skewY` per unit of x - so the matrix contributed is
    * [[1, skewX], [skewY, 1]]. Applied between rotation and scale (see localMatrix), which
    * is what lets an arbitrary affine transform be represented exactly: rotate+skew+scale

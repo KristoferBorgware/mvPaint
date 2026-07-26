@@ -394,7 +394,7 @@ function TWO_PI_PLUS(a: number): number {
   }
 }
 
-// --- skew composes where Konva puts it: between rotation and scale ---
+// --- skew composes between rotation and scale ---
 {
   // A pure skewX shifts x in proportion to y, leaving y alone.
   const sheared = new Rect({ skewX: 0.5 })

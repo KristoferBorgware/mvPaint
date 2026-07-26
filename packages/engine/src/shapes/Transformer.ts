@@ -1,7 +1,7 @@
 // Transformer - the classic selection frame: a border around the current selection, eight
-// resize anchors, and a rotate handle above the top edge. Adapted from Konva's Transformer
-// to this engine: it is an ordinary Container of Rects in the scene, so it draws through
-// the same mesh lane as everything else and needs no special-case rendering.
+// resize anchors, and a rotate handle above the top edge. It is an ordinary Container of
+// Rects in the scene, so it draws through the same mesh lane as everything else and needs
+// no special-case rendering.
 //
 // It never parents itself to the selected nodes. It sits at the scene root and re-fits
 // itself from their world bounds, which is what lets one frame wrap a multi-node selection
