@@ -3,7 +3,7 @@
 // contour stroker; both reuse the mesh lane and the inherited Shape fill/gradient/stroke
 // API, so a Path fills with a solid color or a gradient exactly like Rect/Circle.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'

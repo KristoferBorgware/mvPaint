@@ -10,7 +10,7 @@
 // and is out of scope here; Polyline is stroke-only. width/height are unused (its size
 // comes from its own point list, not a settable size parameter).
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { strokePolyline, type Point2 } from '../render/stroke'
 

@@ -6,7 +6,7 @@
 // Materials (static) are separated from the per-frame transform refresh, so moving or animating
 // a Text updates only the object buffer, never the geometry.
 
-import type { Shape } from '../scene/Shape'
+import type { Shape } from '../shapes/Shape'
 import type { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { TextMaterial } from '../text/layout'

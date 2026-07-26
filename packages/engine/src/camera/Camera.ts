@@ -11,7 +11,7 @@ import { Matrix4x4 } from '../math/Matrix4x4'
 import { Ray } from '../math/Ray'
 import { Vector3 } from '../math/Vector3'
 import { Vector4 } from '../math/Vector4'
-import { Node } from '../scene/Node'
+import { Node } from '../shapes/Node'
 
 export class Camera extends Node {
   /** The scene renders through the camera whose flag is set. */

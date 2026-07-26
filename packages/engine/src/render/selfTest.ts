@@ -18,7 +18,7 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { Shape } from '../scene/Shape'
+import { Shape } from '../shapes/Shape'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -211,7 +211,7 @@ assert(OBJECT_STRIDE === 272, 'object stride is one mat4 (64B) + fill/gradient m
 }
 
 // ============================================================================
-// Shape-level fill/gradient API (src/scene/Shape.ts) and its numeric encoding.
+// Shape-level fill/gradient API (src/shapes/Shape.ts) and its numeric encoding.
 // ============================================================================
 
 // --- fill-type encoding matches the shader's expected FILL_COLOR/LINEAR/RADIAL values ---

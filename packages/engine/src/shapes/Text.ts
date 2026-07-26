@@ -6,7 +6,7 @@
 // applied in the vertex shader like every other node, so moving or scaling a Text never
 // re-shapes it; only editing the runs or layout does.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { Shape, type ShapeOptions } from './Shape'
 import type { FontBook } from '../text/FontAtlas'
 import {
   layoutText,

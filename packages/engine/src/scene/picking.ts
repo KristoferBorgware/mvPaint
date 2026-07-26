@@ -12,9 +12,9 @@
 
 import { AABB } from '../math/AABB'
 import { Vector3 } from '../math/Vector3'
-import type { Node } from './Node'
+import type { Node } from '../shapes/Node'
 import { Scene } from './Scene'
-import { Shape } from './Shape'
+import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { MeshSink, RGBA } from '../render/meshFormat'

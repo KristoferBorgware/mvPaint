@@ -1,8 +1,8 @@
 // Self-test for the ported scene graph (Node / Container / Shape + Scene). Run with:
 //   npx tsx src/scene/selfTest.ts
 
-import { Container } from './Container'
-import { Node } from './Node'
+import { Container } from '../shapes/Container'
+import { Node } from '../shapes/Node'
 import { Scene } from './Scene'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -12,7 +12,7 @@ import { Vector3 } from '../math/Vector3'
 import { Circle } from '../shapes/Circle'
 import { Rect } from '../shapes/Rect'
 import { Text } from '../shapes/Text'
-import { Shape } from './Shape'
+import { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
 

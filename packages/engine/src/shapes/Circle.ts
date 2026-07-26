@@ -15,7 +15,7 @@
 // zoom context). True screen-aware density (re-tessellate when the on-screen size
 // changes) is a follow-up once the batcher can pass pixels-per-unit into tessellation.
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { strokePolyline, type Point2 } from '../render/stroke'
 

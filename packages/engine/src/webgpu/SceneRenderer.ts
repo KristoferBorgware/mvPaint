@@ -6,7 +6,7 @@
 // observer, frame loop, or any scene content - those are wired by createSceneRenderer()
 // below, with content supplied by the caller through the `populate` option.
 
-import { Shape } from '../scene/Shape'
+import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'

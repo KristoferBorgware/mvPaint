@@ -1,7 +1,7 @@
 // Scene - owns the scene-graph root (a Container) and resolves the active camera by
 // traversing the tree for the Camera whose `active` flag is set.
 
-import { Container } from './Container'
+import { Container } from '../shapes/Container'
 import { Camera } from '../camera/Camera'
 
 export class Scene {

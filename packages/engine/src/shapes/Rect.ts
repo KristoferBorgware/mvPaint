@@ -7,7 +7,7 @@
 // always 90 degrees, so 'miter' - Shape's default - always lands exactly on the diagonal
 // bisector; lineCap is irrelevant since the outline is always closed).
 
-import { Shape, type ShapeOptions } from '../scene/Shape'
+import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { strokePolyline } from '../render/stroke'
 

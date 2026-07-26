@@ -4,7 +4,7 @@
 // onto the reused Shape API. The pure helpers it composes (matrix, color, shapeToPath,
 // gradient) are unit-tested; this DOM glue is exercised in the browser.
 
-import { Container } from '../scene/Container'
+import { Container } from '../shapes/Container'
 import { Path } from '../shapes/Path'
 import type { GradientStop, RGBA } from '../render/meshFormat'
 import type { Contour, LineCap, LineJoin } from '../render/stroke'

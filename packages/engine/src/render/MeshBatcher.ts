@@ -6,7 +6,7 @@
 // buffers are recreated on rebuild (rebuilds are rare); per-slice incremental updates
 // and capacity pooling are a later optimization.
 
-import type { Shape } from '../scene/Shape'
+import type { Shape } from '../shapes/Shape'
 import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,
