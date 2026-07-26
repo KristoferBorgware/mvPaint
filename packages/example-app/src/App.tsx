@@ -10,12 +10,14 @@ import {
 } from '@mui/material'
 import SpeedIcon from '@mui/icons-material/Speed'
 import ZoomInIcon from '@mui/icons-material/ZoomIn'
+import CropFreeIcon from '@mui/icons-material/CropFree'
 import type { PickableNode } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 
 export default function App() {
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
+  const [cullMargin, setCullMargin] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<PickableNode | null>(null)
   const canvasRef = useRef<WebGPUCanvasHandle>(null)
@@ -28,6 +30,7 @@ export default function App() {
         speed={speed}
         zoom={zoom}
         onZoomChange={setZoom}
+        cullMargin={cullMargin}
         onError={setError}
         onSelect={setSelected}
       />
@@ -91,6 +94,28 @@ export default function App() {
                   valueLabelDisplay="auto"
                 />
               </Stack>
+            </Stack>
+
+            <Stack spacing={0.5}>
+              <Typography variant="body2" color="text.secondary">
+                Cull margin (debug): {cullMargin.toFixed(0)}px
+              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center">
+                <CropFreeIcon fontSize="small" />
+                <Slider
+                  aria-label="Viewport cull margin"
+                  value={cullMargin}
+                  min={-300}
+                  max={300}
+                  step={10}
+                  onChange={(_, value) => setCullMargin(value as number)}
+                  valueLabelDisplay="auto"
+                />
+              </Stack>
+              <Typography variant="caption" color="text.secondary">
+                Shrinks or grows the viewport-culling rectangle - negative values cull
+                more aggressively, so any popping at the view edge shows up sooner.
+              </Typography>
             </Stack>
 
             <Stack spacing={0.5}>

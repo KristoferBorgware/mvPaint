@@ -16,6 +16,9 @@ interface WebGPUCanvasProps {
    * also updated live in the other direction by wheel/pinch/keyboard zoom. */
   zoom: number
   onZoomChange?: (zoom: number) => void
+  /** Debug/testing: grows (or shrinks, if negative) the viewport-culling rectangle, in
+   * world units, so popping at the view edge - or the cull itself - can be seen live. */
+  cullMargin: number
   /** Called with a human-readable message on WebGPU init or device errors. */
   onError?: (message: string) => void
   /** Called with the clicked/tapped node, or null on empty space / Escape. */
@@ -28,7 +31,7 @@ export interface WebGPUCanvasHandle {
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
-  { speed, zoom, onZoomChange, onError, onSelect },
+  { speed, zoom, onZoomChange, cullMargin, onError, onSelect },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -98,6 +101,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         }
         handleRef.current = handle
         handle.setZoom(zoom)
+        handle.setCullMargin(cullMargin)
         inputController = new SceneInputController(canvas, handle, {
           onPick: (node) => {
             highlight.update(handle, node)
@@ -129,6 +133,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useEffect(() => {
     handleRef.current?.setZoom(zoom)
   }, [zoom])
+
+  // Push cull-margin-slider changes to the running renderer.
+  useEffect(() => {
+    handleRef.current?.setCullMargin(cullMargin)
+  }, [cullMargin])
 
   return (
     <canvas

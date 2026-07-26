@@ -108,4 +108,12 @@ export class AABB {
     for (let i = 0; i < 8; i++) box.encapsulate(m.transformPoint(this.corner(i)))
     return box
   }
+
+  /** Grown (or shrunk, for a negative margin) by the same amount on every side/axis. */
+  expanded(margin: number): AABB {
+    return new AABB(
+      new Vector3(this.min.x - margin, this.min.y - margin, this.min.z - margin),
+      new Vector3(this.max.x + margin, this.max.y + margin, this.max.z + margin),
+    )
+  }
 }

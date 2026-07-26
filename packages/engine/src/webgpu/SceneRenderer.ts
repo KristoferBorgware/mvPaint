@@ -65,6 +65,10 @@ export class SceneRenderer {
   private readonly fontBook: FontBook
 
   private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
+  // Debug/testing knob: grows (or shrinks, if negative) the culling view rectangle by
+  // this many world units on every side, so popping at the view edge - or the cull
+  // itself - can be seen and tuned live. 0 = cull exactly at the camera's view rectangle.
+  private cullMargin = 0
   private geometryDirty = true
   private textGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
@@ -105,6 +109,15 @@ export class SceneRenderer {
 
   getZoom(): number {
     return this.zoom
+  }
+
+  /** Debug/testing knob - see `cullMargin`. */
+  setCullMargin(margin: number): void {
+    this.cullMargin = margin
+  }
+
+  getCullMargin(): number {
+    return this.cullMargin
   }
 
   /**
@@ -165,7 +178,8 @@ export class SceneRenderer {
     // Viewport cull: skip anything whose bounds don't overlap the camera's current view
     // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
     // non-orthographic camera, since only OrthographicCamera has a rectangular frustum.
-    const viewBounds = camera instanceof OrthographicCamera ? camera.viewBounds(width / height) : null
+    const viewBounds =
+      camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
     const visibleMeshShapes = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
     const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
 
@@ -208,6 +222,9 @@ export interface SceneRendererHandle {
   camera: OrthographicCamera
   setZoom: (zoom: number) => void
   getZoom: () => number
+  /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
+  setCullMargin: (margin: number) => void
+  getCullMargin: () => number
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
   pick: (screenX: number, screenY: number) => PickableNode | null
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
@@ -292,6 +309,12 @@ export async function createSceneRenderer(
     },
     getZoom() {
       return scene.getZoom()
+    },
+    setCullMargin(margin: number) {
+      scene.setCullMargin(margin)
+    },
+    getCullMargin() {
+      return scene.getCullMargin()
     },
     pick(screenX: number, screenY: number) {
       return scene.pick(screenX, screenY)

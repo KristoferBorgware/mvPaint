@@ -129,6 +129,12 @@ assert(Transform.identity().forward().nearEquals(Vector3.forward()), 'identity f
     grow.valid() && grow.min.nearEquals(new Vector3(1, 2, 3)) && grow.max.nearEquals(new Vector3(1, 2, 3)),
     'encapsulate point',
   )
+
+  // expanded() grows (or, for a negative margin, shrinks) every side by the same amount.
+  const grown = box.expanded(2)
+  assert(grown.min.nearEquals(new Vector3(-3, -3, -3)) && grown.max.nearEquals(new Vector3(3, 3, 3)), 'expanded grows every side')
+  const shrunk = box.expanded(-0.5)
+  assert(shrunk.min.nearEquals(new Vector3(-0.5, -0.5, -0.5)) && shrunk.max.nearEquals(new Vector3(0.5, 0.5, 0.5)), 'a negative margin shrinks every side')
 }
 
 // --- Ray vs AABB --- slab test: front hit, miss, inside-origin, flat box.
