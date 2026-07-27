@@ -230,7 +230,9 @@ export class SceneRenderer {
     const depths = new Map<Shape, number>()
     ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
     // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
-    // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher.
+    // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher,
+    // VectorText very much included: it is text drawn AS mesh geometry, so it wants the
+    // mesh lane, not this filter's other side.
     const texts = ordered.filter((s): s is Text => s instanceof Text)
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
 

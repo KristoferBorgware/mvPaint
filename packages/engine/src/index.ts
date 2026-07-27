@@ -1,6 +1,7 @@
 // Public entry point for @mvpaint/engine: the scene graph, shapes, camera, SVG loader,
-// and MSDF text - everything needed to render a 2D scene through createSceneRenderer(),
-// without any example/demo content.
+// and both text implementations (MSDF atlas text and outline-tessellated vector text) -
+// everything needed to render a 2D scene through createSceneRenderer(), without any
+// example/demo content.
 
 export * from './math/AABB'
 export * from './math/Matrix4x4'
@@ -28,8 +29,10 @@ export * from './shapes/Path'
 export * from './shapes/Polyline'
 export * from './shapes/Rect'
 export * from './shapes/Text'
+export * from './shapes/TextBlock'
+export * from './shapes/VectorText'
 
-export type { RGBA, Point2, FillPriority, GradientStop } from './render/meshFormat'
+export type { RGBA, Point2, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export type { LineJoin, LineCap } from './render/stroke'
 
 export * from './svg/loadSvg'
@@ -37,6 +40,8 @@ export * from './svg/loadSvg'
 export * from './text/FontAtlas'
 export * from './text/layout'
 export * from './text/msdfMetrics'
+export * from './text/VectorFont'
+export * from './text/vectorFonts'
 
 export * from './systems/CanvasResizer'
 export * from './systems/GpuContext'

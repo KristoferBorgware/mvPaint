@@ -122,6 +122,7 @@ export interface TextMaterial {
 /** One quad in node-local space (y-up). Glyph quads carry an atlas uv rect; `skew` shears x. */
 export interface TextQuad {
   material: number
+  /** Which font source the glyph came from - an atlas for MSDF text, a parsed TTF for vector text. */
   atlasIndex: number
   isGlyph: boolean
   x0: number
@@ -136,6 +137,19 @@ export interface TextQuad {
   /** Faux-italic shear factor: each corner's x is offset by skew*(y - skewPivotY). */
   skew: number
   skewPivotY: number
+  // --- outline placement -------------------------------------------------------------
+  // The three fields below say where this glyph's OUTLINE sits, for a consumer that draws
+  // the real contours instead of sampling a textured quad (see shapes/VectorText.ts).
+  // The quad itself is only the glyph's bounding box, which a blank glyph doesn't have and
+  // an outline can't be reconstructed from - so the shaper records the placement directly
+  // rather than making the second consumer re-derive it and drift from this one.
+  /** The glyph's code point; 0 on a decoration or highlight quad. */
+  codePoint: number
+  /** Pen origin ON the baseline, including baseline shift and any shadow/glow offset. */
+  originX: number
+  originY: number
+  /** Font units -> node-local units: multiply an outline's coordinates by this. */
+  unitScale: number
 }
 
 export interface ShapedText {
@@ -453,7 +467,7 @@ function layoutHorizontal(
           spanEntry = e
         }
         spanEnd = pen + e.advance
-        if (e.glyph) emitGlyphStack(resolved[e.rr], e.glyph, pen, baselineY, 0, glyphs, shadows, glows)
+        if (e.glyph) emitGlyphStack(resolved[e.rr], e.glyph, e.cp, pen, baselineY, 0, glyphs, shadows, glows)
         pen += e.advance
       } else {
         pen += e.advance + extraPerSpacer
@@ -477,6 +491,7 @@ function layoutHorizontal(
 function emitGlyphStack(
   rr: RunResolved,
   glyph: Glyph,
+  codePoint: number,
   penX: number,
   baselineY: number,
   penYOffset: number,
@@ -485,20 +500,21 @@ function emitGlyphStack(
   glows: TextQuad[],
 ): void {
   if (rr.glowMaterial >= 0 && rr.glow) {
-    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0))
+    glows.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0))
   }
   if (rr.shadowMaterial >= 0 && rr.shadow) {
     // offsetY is downward-positive; the scene is y-up, so the rotated vector's y is negated.
     shadows.push(
-      makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
+      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
     )
   }
-  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0))
+  glyphs.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0))
 }
 
 function makeGlyphQuad(
   rr: RunResolved,
   g: Glyph,
+  codePoint: number,
   penX: number,
   baselineY: number,
   penYOffset: number,
@@ -508,8 +524,13 @@ function makeGlyphQuad(
   offY: number,
 ): TextQuad {
   const scale = rr.scale
-  const leftX = penX + g.xoffset * scale + offX
-  const topGY = baselineY + rr.baselineShift + penYOffset + (rr.metrics.base - g.yoffset) * scale + offY
+  // The pen origin: where the glyph's own coordinate system is planted on the baseline.
+  // The bounding box below is that origin plus the glyph's extents; an outline consumer
+  // wants the origin itself.
+  const originX = penX + offX
+  const originY = baselineY + rr.baselineShift + penYOffset + offY
+  const leftX = originX + g.xoffset * scale
+  const topGY = originY + (rr.metrics.base - g.yoffset) * scale
   return {
     material,
     atlasIndex: rr.atlasIndex,
@@ -525,6 +546,10 @@ function makeGlyphQuad(
     color,
     skew: rr.skew,
     skewPivotY: baselineY,
+    codePoint,
+    originX,
+    originY,
+    unitScale: scale,
   }
 }
 
@@ -538,7 +563,9 @@ function emitRunDecorations(
   decorations: TextQuad[],
 ): void {
   const solid = (x0: number, y0: number, x1: number, y1: number, color: RGBA, out: TextQuad[]) => {
-    out.push({ material: rr.mainMaterial, atlasIndex: rr.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color, skew: 0, skewPivotY: 0 })
+    // No outline behind a rule or a highlight - the quad IS the shape, so codePoint 0 tells
+    // an outline consumer to draw the rectangle itself.
+    out.push({ material: rr.mainMaterial, atlasIndex: rr.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color, skew: 0, skewPivotY: 0, codePoint: 0, originX: x0, originY: y0, unitScale: rr.scale })
   }
   const shift = rr.baselineShift
   if (rr.highlight) {
@@ -606,7 +633,7 @@ function layoutVertical(
         const centerX = columnX - columnWidth / 2
         const leftX = centerX - (e.glyph.width * scale) / 2 - e.glyph.xoffset * scale
         const baselineY = penY - ascent
-        emitCenteredGlyph(rr, e.glyph, leftX, baselineY, glyphs, shadows, glows)
+        emitCenteredGlyph(rr, e.glyph, e.cp, leftX, baselineY, glyphs, shadows, glows)
         penY -= step
       } else if (e.rr >= 0) {
         penY -= resolved[e.rr].metrics.lineHeight * resolved[e.rr].scale * lineHeightMult
@@ -625,15 +652,15 @@ function layoutVertical(
   }
 }
 
-function emitCenteredGlyph(rr: RunResolved, glyph: Glyph, leftX: number, baselineY: number, glyphs: TextQuad[], shadows: TextQuad[], glows: TextQuad[]): void {
+function emitCenteredGlyph(rr: RunResolved, glyph: Glyph, codePoint: number, leftX: number, baselineY: number, glyphs: TextQuad[], shadows: TextQuad[], glows: TextQuad[]): void {
   const penX = leftX - glyph.xoffset * rr.scale // makeGlyphQuad re-adds xoffset
   if (rr.glowMaterial >= 0 && rr.glow) {
-    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0))
+    glows.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0))
   }
   if (rr.shadowMaterial >= 0 && rr.shadow) {
     shadows.push(
-      makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
+      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
     )
   }
-  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0))
+  glyphs.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0))
 }

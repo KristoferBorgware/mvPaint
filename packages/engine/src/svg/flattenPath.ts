@@ -23,9 +23,17 @@ function pointLineDistance(px: number, py: number, ax: number, ay: number, bx: n
   return Math.abs((px - ax) * dy - (py - ay) * dx) / len
 }
 
-// Adaptive de Casteljau subdivision: emit the cubic's interior/end points into `out`,
-// stopping when both control points sit within `tol` of the chord.
-function flattenCubic(
+/**
+ * Adaptive de Casteljau subdivision: emit the cubic's interior/end points into `out`,
+ * stopping when both control points sit within `tol` of the chord. The start point is
+ * NOT emitted (the caller already has it as the current point), so consecutive segments
+ * chain without duplicating their shared endpoint.
+ *
+ * Exported because glyph outlines need exactly this and nothing else about SVG path data
+ * (see text/glyphOutline.ts): a font's contours arrive as the same move/line/curve/close
+ * stream, just from a binary table instead of a `d` string.
+ */
+export function flattenCubic(
   x0: number, y0: number,
   x1: number, y1: number,
   x2: number, y2: number,
@@ -48,7 +56,8 @@ function flattenCubic(
   flattenCubic(xm, ym, x123, y123, x23, y23, x3, y3, tol, out, depth + 1)
 }
 
-function flattenQuadratic(
+/** As flattenCubic, for a quadratic - the segment type TrueType outlines are built from. */
+export function flattenQuadratic(
   x0: number, y0: number,
   cx: number, cy: number,
   x1: number, y1: number,

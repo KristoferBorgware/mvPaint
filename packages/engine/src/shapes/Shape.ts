@@ -1,12 +1,12 @@
 // Shape - the base for every drawable scene-graph node (Rect, Circle, Polyline, Path,
-// Text). Carries the full common vocabulary every drawable shares: transform (position,
-// scale, rotation, pivot offset), visibility/pickability, stacking order (zIndex), a
+// Text, VectorText). Carries the full common vocabulary every drawable shares: transform
+// (position, scale, rotation, pivot offset), visibility/pickability, stacking order (zIndex), a
 // settable size (width/height), and the complete fill/stroke styling API (flat color or
 // gradient fill; stroke color/width/join/cap/miter limit) - mirroring how a well-known
 // 2D canvas library's Shape class puts all of this in one place rather than splitting it
 // by "how the shape happens to be drawn". Concrete shapes only add what's genuinely
 // specific to them (Rect: nothing beyond a default size; Circle: radius; Polyline:
-// points; Path: contours; Text: runs and block layout).
+// points; Path: contours; Text/VectorText: runs and block layout).
 //
 // tessellate() caches its output (a list of local-space vertices + triangles) and
 // replays it into whatever sink is asking - the mesh batcher's rebuild - rather than
@@ -19,7 +19,9 @@
 // tessellate() directly, since that's the method that only runs on a cache miss.
 // buildGeometry() defaults to emitting nothing - that's what makes it safe for Text
 // (which renders through the separate MSDF text lane, not the mesh lane) to inherit it
-// unchanged.
+// unchanged. VectorText, the other text implementation, overrides it like any mesh shape:
+// it tessellates real glyph outlines, and is therefore picked, bounded and shadowed by
+// everything below without a single special case.
 //
 // hitTestLocal()/localBounds() (used by scene/picking.ts) build a SEPARATE flat
 // xs/ys/tris/bounds structure derived from the same buildGeometry() output, cached and
@@ -56,13 +58,14 @@
 // work once its texture is cached, and moving/scaling/spinning a shape never re-bakes it.
 // Text ignores these fields: it carries its own per-run shadow styling instead (an offset
 // duplicate of the glyphs, see text/layout.ts), since it has no mesh geometry to
-// rasterize a silhouette from.
+// rasterize a silhouette from. VectorText, which does, honours them like any other mesh
+// shape - a blurred shadow cast from the letterforms themselves.
 
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
-import type { FillPriority, GradientStop, MeshSink, Point2, RGBA } from '../render/meshFormat'
+import type { FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { Node } from './Node'
 
@@ -245,6 +248,10 @@ export abstract class Shape extends Node {
   lineCap: LineCap = 'butt'
   miterLimit = 10
 
+  // A Shape is its own (single) material - see materials(). Held as a fixed one-element
+  // array so the common case costs no per-frame allocation in the batcher's hot loop.
+  private readonly selfMaterials: readonly MeshMaterial[] = [this]
+
   private geometryCache: CachedGeometry | null = null
   // Derived from geometryCache (same lifetime, invalidated together) - a flat, picking-
   // friendly layout (no MeshSink round-trip) built lazily on first hitTestLocal()/
@@ -389,10 +396,27 @@ export abstract class Shape extends Node {
    */
   tessellate(sink: MeshSink): void {
     const geometry = this.ensureGeometryCache()
-    const remapped = geometry.vertices.map((v) => sink.vertex(v.x, v.y, v.isFill))
+    const remapped = geometry.vertices.map((v) => sink.vertex(v.x, v.y, v.isFill, v.material))
     for (const [a, b, c] of geometry.triangles) {
       sink.triangle(remapped[a], remapped[b], remapped[c])
     }
+  }
+
+  /**
+   * The materials this shape's vertices select between via MeshSink's `material` index -
+   * the paint for one object, not several placed objects (they all share this shape's
+   * world matrix and depth). An ordinary shape has exactly one, itself, since Shape already
+   * carries the whole fill/gradient/stroke vocabulary; only a shape whose parts are styled
+   * independently - VectorText, whose runs each have their own color, gradient or outline -
+   * overrides this.
+   *
+   * The returned list must line up with the material indices buildGeometry() emitted, so a
+   * change that alters its LENGTH is a geometry change and needs markGeometryDirty() (and a
+   * renderer-level rebuild) like any other. Changing a material's colors in place does not:
+   * those are re-read into the per-object buffer every frame.
+   */
+  materials(): readonly MeshMaterial[] {
+    return this.selfMaterials
   }
 
   /**
@@ -426,7 +450,7 @@ export abstract class Shape extends Node {
       const vertices: CachedVertex[] = []
       const triangles: CachedTriangle[] = []
       this.buildGeometry({
-        vertex: (x, y, isFill) => vertices.push({ x, y, isFill }) - 1,
+        vertex: (x, y, isFill, material = 0) => vertices.push({ x, y, isFill, material }) - 1,
         triangle: (a, b, c) => {
           triangles.push([a, b, c])
         },
@@ -473,6 +497,8 @@ interface CachedVertex {
   x: number
   y: number
   isFill: boolean
+  /** Index into materials() - 0 for every single-material shape. */
+  material: number
 }
 type CachedTriangle = readonly [number, number, number]
 interface CachedGeometry {

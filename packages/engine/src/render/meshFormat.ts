@@ -20,24 +20,49 @@ export interface GradientStop {
 export const MAX_GRADIENT_STOPS = 8
 
 /**
+ * The styling half of a per-object record: everything the fragment shader reads to color
+ * a triangle. A Shape structurally satisfies this with its own fill/stroke fields, which
+ * is what makes the single-material case free (see Shape.materials()); a shape that needs
+ * several - a text node whose runs each have their own color, gradient or outline - hands
+ * back one of these per run instead. All of a shape's materials share its world matrix and
+ * depth, so they are alternative paint for one object, not separately placed objects.
+ */
+export interface MeshMaterial {
+  fillPriority: FillPriority
+  fill: RGBA
+  stroke: RGBA
+  fillLinearGradientStartPoint: Point2
+  fillLinearGradientEndPoint: Point2
+  fillLinearGradientColorStops: readonly GradientStop[]
+  fillRadialGradientStartPoint: Point2
+  fillRadialGradientStartRadius: number
+  fillRadialGradientEndPoint: Point2
+  fillRadialGradientEndRadius: number
+  fillRadialGradientColorStops: readonly GradientStop[]
+}
+
+/**
  * Sink a Shape tessellates its geometry into. Positions are in the shape's LOCAL space
  * (the per-object transform is applied in the vertex shader). `isFill` marks vertices
  * that belong to the shape's fill (eligible for a gradient fill) as opposed to its
- * stroke (always a flat color, from the object's strokeColor). `vertex` returns an index
- * local to this shape (0-based); `triangle` references those local indices. The batcher
- * rebases them into the shared buffers and injects the object id. There is no color
- * here: a solid fill/stroke color is read from the object's fillColor/strokeColor at
- * fragment time, exactly like a gradient is - so recoloring a shape (unlike resizing or
- * restroking it) never needs a geometry rebuild, only the per-frame object refresh.
+ * stroke (always a flat color, from the object's strokeColor). `material` selects which
+ * of the shape's materials paints the vertex (see MeshMaterial); it defaults to 0, which
+ * is the only one an ordinary single-material shape has. `vertex` returns an index local
+ * to this shape (0-based); `triangle` references those local indices. The batcher rebases
+ * them into the shared buffers and injects the object id. There is no color here: a solid
+ * fill/stroke color is read from the object's fillColor/strokeColor at fragment time,
+ * exactly like a gradient is - so recoloring a shape (unlike resizing or restroking it)
+ * never needs a geometry rebuild, only the per-frame object refresh.
  */
 export interface MeshSink {
-  vertex(x: number, y: number, isFill: boolean): number
+  vertex(x: number, y: number, isFill: boolean, material?: number): number
   triangle(a: number, b: number, c: number): void
 }
 
 // Interleaved vertex: position (vec2 f32) + packedId (u32). packedId's low 31 bits are
-// the object index; the top bit is the "is fill" flag (stroke vertices always render
-// the object's flat strokeColor, never a gradient).
+// the object index - a (shape, material) pair, since a shape may contribute more than one
+// object record (see MeshMaterial); the top bit is the "is fill" flag (stroke vertices
+// always render the object's flat strokeColor, never a gradient).
 export const MESH_VERTEX_STRIDE = 12 // bytes
 export const MESH_VERTEX_FLOATS = 3 // 32-bit slots per vertex (2 + 1)
 export const MESH_FILL_BIT = 0x80000000

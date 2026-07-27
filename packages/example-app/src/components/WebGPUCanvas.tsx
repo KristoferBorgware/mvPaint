@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import Stats from 'stats.js'
 import {
   boxForNodes,
@@ -76,6 +76,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const speedRef = useRef(speed)
   const onZoomChangeRef = useRef(onZoomChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
+  const onErrorRef = useRef(onError)
 
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange
@@ -83,6 +84,63 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange
   }, [onSelectionChange])
+  useEffect(() => {
+    onErrorRef.current = onError
+  }, [onError])
+
+  /**
+   * Build `def` into the live scene graph, optionally clearing whatever is there first.
+   *
+   * A scene that declares `prepare` is loaded asynchronously, and the previous one stays on
+   * screen until its assets are in - a blank canvas would read as a failure rather than as
+   * waiting. The definition is re-checked afterwards so a fast switch away doesn't have a
+   * slow scene land on top of the one the user actually chose.
+   */
+  const applyScene = useCallback((def: ExampleScene, replace: boolean) => {
+    const commit = () => {
+      const sceneGraph = sceneGraphRef.current
+      const handle = handleRef.current
+      const transformer = transformerRef.current
+      if (!sceneGraph) return
+
+      if (replace && handle && transformer) {
+        // Drop the selection first: the transformer holds references to nodes that are about
+        // to leave the graph, and a stale selection would keep re-fitting a frame around them.
+        controllerRef.current?.setSelection([])
+        const keep = new Set<Node>([transformer, handle.camera])
+        for (const child of [...sceneGraph.root.children]) {
+          if (!keep.has(child)) sceneGraph.root.removeChild(child)
+        }
+      }
+
+      contentRef.current = def.build(sceneGraph)
+
+      // Re-frame: each scene lays itself out around the origin, so a pan left over from the
+      // previous one would otherwise start the new scene half off-screen.
+      if (replace && handle && homeCameraRef.current) {
+        handle.camera.eye = homeCameraRef.current.eye.clone()
+        handle.camera.target = homeCameraRef.current.target.clone()
+      }
+
+      // Both lanes rebuild from the visible set, which has just changed wholesale.
+      handle?.markGeometryDirty()
+      handle?.markTextGeometryDirty()
+    }
+
+    if (!def.prepare) {
+      // Synchronous by default, so the very first scene is on screen for the first frame.
+      commit()
+      return
+    }
+    def
+      .prepare()
+      .then(() => {
+        if (sceneDefRef.current === def) commit()
+      })
+      .catch((err: unknown) => {
+        onErrorRef.current?.(err instanceof Error ? err.message : String(err))
+      })
+  }, [])
 
   useImperativeHandle(
     ref,
@@ -125,7 +183,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // The transformer is added ONCE and deliberately outlives every scene switch: it is
         // editor furniture, not content, so loadScene below skips it when clearing.
         sceneGraph.root.addChild(transformer)
-        contentRef.current = sceneDefRef.current.build(sceneGraph)
+        applyScene(sceneDefRef.current, false)
       },
       onFrame: (dt) => {
         // A scene's own animation. It would overwrite anything the transformer's rotate
@@ -198,35 +256,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // survive; only the scene graph's content is replaced.
   useEffect(() => {
     sceneDefRef.current = scene
-    const handle = handleRef.current
-    const sceneGraph = sceneGraphRef.current
-    const transformer = transformerRef.current
     // Before the first frame the initial scene is built by `populate` instead, so there is
     // nothing to swap yet.
-    if (!handle || !sceneGraph || !transformer) return
-
-    // Drop the selection first: the transformer holds references to nodes that are about to
-    // leave the graph, and a stale selection would keep re-fitting a frame around them.
-    controllerRef.current?.setSelection([])
-
-    const keep = new Set<Node>([transformer, handle.camera])
-    for (const child of [...sceneGraph.root.children]) {
-      if (!keep.has(child)) sceneGraph.root.removeChild(child)
-    }
-
-    contentRef.current = scene.build(sceneGraph)
-
-    // Re-frame: each scene lays itself out around the origin, so a pan left over from the
-    // previous one would otherwise start the new scene half off-screen.
-    if (homeCameraRef.current) {
-      handle.camera.eye = homeCameraRef.current.eye.clone()
-      handle.camera.target = homeCameraRef.current.target.clone()
-    }
-
-    // Both lanes rebuild from the visible set, which has just changed wholesale.
-    handle.markGeometryDirty()
-    handle.markTextGeometryDirty()
-  }, [scene, reloadToken])
+    if (!handleRef.current || !sceneGraphRef.current || !transformerRef.current) return
+    applyScene(scene, true)
+  }, [scene, reloadToken, applyScene])
 
   // Push speed changes to the running renderer.
   useEffect(() => {

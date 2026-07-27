@@ -6,6 +6,7 @@ import { buildShapesScene } from './shapesScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
 import { buildTextScene } from './textScene'
+import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildZIndexScene } from './zIndexScene'
 import type { ExampleScene } from './types'
 
@@ -25,6 +26,14 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Four Inter styles, mixed sizes, per-letter outlines, decorations, gradient and highlighted runs, wrapping and justification, RTL and vertical flow.',
     build: buildTextScene,
+  },
+  {
+    id: 'vector-text',
+    title: 'Outline text',
+    description:
+      'The same runs and shaping drawn as tessellated glyph outlines through the mesh lane instead of an MSDF atlas - with real blurred shadows and per-glyph picking. Fetches the TTFs on first open.',
+    prepare: prepareVectorTextScene,
+    build: buildVectorTextScene,
   },
   {
     id: 'shadows',

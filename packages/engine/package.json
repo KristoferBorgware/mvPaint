@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "earcut": "^3.2.3",
+    "opentype.js": "2.0.0",
     "svgpath": "^2.6.0"
   },
   "devDependencies": {

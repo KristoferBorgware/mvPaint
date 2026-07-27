@@ -20,6 +20,14 @@ export interface ExampleScene {
   title: string
   /** One or two lines shown under the title in the picker. */
   description: string
+  /**
+   * Any assets this scene needs fetched before it can be built - awaited by the canvas, and
+   * expected to memoize, since it runs again on every switch back to the scene. Only for
+   * things the engine doesn't load at startup: the vector text scene's TTFs are ~1.6MB and
+   * would be dead weight for every other scene, so they're fetched on first open instead.
+   * The canvas keeps the previous scene on screen while this runs.
+   */
+  prepare?: () => Promise<void>
   /** Populates `scene.root`. The root is already emptied of the previous scene's content. */
   build: (scene: Scene) => SceneContent
 }
