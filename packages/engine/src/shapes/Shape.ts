@@ -35,10 +35,21 @@
 // affects buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/
 // lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
 //
-// localMatrix() composes translate(x, y) * rotate(rotation) * scale(scaleX, scaleY) *
-// translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied first, to
-// the shape's local geometry) before scale and rotation are applied about that pivot,
-// then the result is placed at (x, y). Skew (shear) is not currently supported.
+// localMatrix() composes translate(x, y) * rotate(rotation) * skew * scale(scaleX,
+// scaleY) * translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied
+// first, to the shape's local geometry) before skew/scale/rotation are applied about
+// that pivot, then the result is placed at (x, y).
+//
+// `shadow` (see the Shadow type below) draws an extra offset/rotated/scaled copy of the
+// shape behind it. shadowMatrix() reuses the same T*R*skew*S composition (coreMatrix()),
+// splicing the shadow's own offset/rotation/size in right before the pivot translation -
+// so the shadow inherits the shape's transform (and, through worldMatrix(), its
+// parent's) exactly the way the shape's own geometry does. That placement math is
+// shared by every shape; how the shadow's blur/spread actually get rendered differs by
+// lane - mesh shapes render it through an offscreen blur pass (webgpu/ShadowRenderer),
+// while Text (which has no mesh geometry to rasterize there) renders it as an extra MSDF
+// glyph copy, softened via the same distance field the glyph body already uses (see
+// text/layout.ts).
 
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -59,6 +70,40 @@ export interface ShapeTransform {
   skewY: number
   offsetX: number
   offsetY: number
+}
+
+/**
+ * A drop shadow (or, for Text's `glow`, a symmetric halo reusing the same fields): an
+ * extra copy of the shape, offset/rotated/scaled and tinted flat, drawn behind it.
+ * `offsetX`/`offsetY` and `rotation` place the copy (rotation turns the offset vector,
+ * and - for ordinary shapes - the copy itself; Text only rotates the offset, see
+ * text/layout.ts). `size` scales the copy. `spread` grows its silhouette outward before
+ * blurring; `blur` softens the result. `opacity` multiplies `color`'s own alpha.
+ */
+export interface Shadow {
+  offsetX: number
+  offsetY: number
+  rotation: number
+  size: number
+  blur: number
+  spread: number
+  opacity: number
+  color: RGBA
+}
+
+/** `shadow(partial)` fills in the rest with sensible defaults (no offset/blur/spread, opaque black). */
+export function shadow(overrides: Partial<Shadow> = {}): Shadow {
+  return {
+    offsetX: 0,
+    offsetY: 0,
+    rotation: 0,
+    size: 1,
+    blur: 0,
+    spread: 0,
+    opacity: 1,
+    color: [0, 0, 0, 1],
+    ...overrides,
+  }
 }
 
 export interface ShapeOptions {
@@ -89,6 +134,8 @@ export interface ShapeOptions {
   overlay?: boolean
   /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
   draggable?: boolean
+  /** Drop shadow, rendered behind the shape. Undefined (default) = no shadow. */
+  shadow?: Shadow
   fill?: RGBA
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. */
@@ -137,6 +184,8 @@ export abstract class Shape extends Node {
    * write depth would punch a hole through whatever draws later, notably the text lane.
    */
   overlay = false
+  /** Drop shadow, rendered behind the shape. Undefined (default) = no shadow. */
+  shadow: Shadow | undefined = undefined
 
   protected _width = 0
   protected _height = 0
@@ -198,6 +247,7 @@ export abstract class Shape extends Node {
     this.zIndex = options.zIndex ?? 0
     this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
+    this.shadow = options.shadow
     this.fill = options.fill ?? [0, 0, 0, 1]
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0
@@ -206,7 +256,10 @@ export abstract class Shape extends Node {
     this.miterLimit = options.miterLimit ?? 10
   }
 
-  override localMatrix(): Matrix4x4 {
+  // T(x,y) * R(rotation) * skew * S(scaleX,scaleY) - everything localMatrix() composes
+  // except the trailing pivot translation, so shadowMatrix() below can splice its own
+  // extra transform in at that same point (closest to the raw local-space geometry).
+  private coreMatrix(): Matrix4x4 {
     let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
     if (this.rotation !== 0) {
       m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
@@ -217,10 +270,52 @@ export abstract class Shape extends Node {
     if (this.scaleX !== 1 || this.scaleY !== 1) {
       m = m.mul(Matrix4x4.scaling(new Vector3(this.scaleX, this.scaleY, 1)))
     }
+    return m
+  }
+
+  override localMatrix(): Matrix4x4 {
+    let m = this.coreMatrix()
     if (this.offsetX !== 0 || this.offsetY !== 0) {
       m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
     }
     return m
+  }
+
+  /**
+   * The shadow copy's own local matrix - `coreMatrix()` with the shadow's offset/
+   * rotation/size spliced in between the shape's own scale and its pivot translation, so
+   * the shadow inherits the shape's position/rotation/skew/scale (and, through
+   * worldMatrix(), its parent's) exactly like the shape's own geometry does. Null when
+   * there is no shadow.
+   */
+  shadowMatrix(): Matrix4x4 | null {
+    if (!this.shadow) return null
+    const s = this.shadow
+    let m = this.coreMatrix()
+    if (s.offsetX !== 0 || s.offsetY !== 0) {
+      m = m.mul(Matrix4x4.translation(new Vector3(s.offsetX, s.offsetY, 0)))
+    }
+    if (s.rotation !== 0) {
+      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), s.rotation)))
+    }
+    if (s.size !== 1) {
+      m = m.mul(Matrix4x4.scaling(new Vector3(s.size, s.size, 1)))
+    }
+    if (this.offsetX !== 0 || this.offsetY !== 0) {
+      m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
+    }
+    return m
+  }
+
+  /** shadowMatrix() composed with every ancestor's localMatrix(), mirroring worldMatrix(). */
+  shadowWorldMatrix(): Matrix4x4 | null {
+    const local = this.shadowMatrix()
+    if (!local) return null
+    let world = local
+    for (let p = this.parent; p !== null; p = p.parent) {
+      world = p.localMatrix().mul(world)
+    }
+    return world
   }
 
   /**

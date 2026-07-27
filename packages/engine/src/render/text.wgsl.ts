@@ -33,6 +33,7 @@ struct ObjectData {
   hasStroke : u32,
   distanceRange : f32,
   dilate : f32,
+  blur : f32,
 };
 
 @group(0) @binding(0) var<uniform> frame : Frame;
@@ -180,13 +181,16 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     let screenPerWorld = 2.0 / max(abs(localDeriv.x) + abs(localDeriv.y), 1e-5);
 
     // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
-    // The dilate term widens coverage (faux bold, and the soft spread of glow/shadow copies).
+    // The dilate term widens coverage (faux bold, and the hard spread of glow/shadow copies).
     let sd = median(msd);
     let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
     let screenTexSize = vec2<f32>(1.0) / uvDeriv;
     let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
     let screenPxDist = screenPxRange * (sd - 0.5) + obj.dilate * screenPerWorld;
-    let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
+    // The coverage ramp is normally 1px wide (screenPxDist in [-0.5, 0.5] maps linearly to
+    // [0, 1]); blur widens that ramp to soften the edge, independent of dilate's hard offset.
+    let halfWidth = max(0.5, obj.blur * screenPerWorld);
+    let fillAlpha = clamp(screenPxDist / (2.0 * halfWidth) + 0.5, 0.0, 1.0);
 
     if (obj.hasStroke == 0u) {
       color = vec4<f32>(base.rgb, base.a * fillAlpha);

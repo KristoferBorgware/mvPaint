@@ -29,6 +29,7 @@ import { DEPTH_FORMAT } from '../render/depthFormat'
 import { FrameUniforms } from '../render/FrameUniforms'
 import { MeshBatcher } from '../render/MeshBatcher'
 import { createMeshPipeline } from '../render/MeshPipeline'
+import { ShadowRenderer } from '../render/ShadowRenderer'
 import { TextBatcher } from '../render/TextBatcher'
 import { createTextPipeline } from '../render/TextPipeline'
 import { FontBook } from '../text/FontAtlas'
@@ -67,6 +68,8 @@ export class SceneRenderer {
   private readonly textBatcher: TextBatcher
   private readonly fontBook: FontBook
 
+  private readonly shadowRenderer: ShadowRenderer
+
   private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   // Debug/testing knob: grows (or shrinks, if negative) the culling view rectangle by
   // this many world units on every side, so popping at the view edge - or the cull
@@ -99,6 +102,12 @@ export class SceneRenderer {
     const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
     this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
     this.textBatcher = new TextBatcher(device, objectLayout)
+
+    // Ordinary shapes' shadows (Rect/Circle/Polyline/Path - Text softens its own shadow
+    // through the MSDF distance field instead, see text/layout.ts) render through their own
+    // offscreen blur pipeline; see render/ShadowRenderer.ts for why that needs real GPU
+    // passes rather than a shader trick like the text lane's.
+    this.shadowRenderer = new ShadowRenderer(device, frameLayout, format, SAMPLE_COUNT)
 
     // 2D orthographic camera looking down -Z, parented to the scene root. viewHeight is
     // set from the canvas's CSS height every frame (see draw()), so 1 world unit = 1 CSS
@@ -169,6 +178,33 @@ export class SceneRenderer {
     this.textGeometryDirty = true
   }
 
+  /**
+   * Renders every shadow-casting shape's blurred/dilated shadow into an offscreen
+   * accumulation texture, ready for draw() to composite. Must run on the SAME command
+   * encoder BEFORE the main render pass begins (offscreen work needs its own passes) -
+   * see createSceneRenderer's `onPrePass` wiring below.
+   */
+  prepareShadows(encoder: GPUCommandEncoder, width: number, height: number): void {
+    const camera = this.scene.activeCamera
+    if (!camera) return
+    if (camera instanceof OrthographicCamera) {
+      camera.viewHeight = Math.max(1, this.canvas.clientHeight / this.zoom)
+    }
+    this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
+
+    const ordered = collectZOrder(this.scene)
+    const meshShapes = ordered.filter((s) => !(s instanceof Text))
+    const viewBounds =
+      camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
+    const onScreen = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
+
+    // 1 world unit = 1 CSS px at zoom 1 (see draw()'s own comment); device pixels are CSS
+    // pixels times the backing store's device pixel ratio, which `width` (device px) over
+    // the canvas's CSS width recovers without needing the DPR directly.
+    const pixelsPerWorldUnit = this.zoom * (width / Math.max(1, this.canvas.clientWidth))
+    this.shadowRenderer.prepare(encoder, this.frameUniforms.bindGroup, onScreen, width, height, pixelsPerWorldUnit)
+  }
+
   /** Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both lanes. */
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
     const camera = this.scene.activeCamera
@@ -225,6 +261,11 @@ export class SceneRenderer {
     this.visibleMeshShapes = visibleMeshShapes
     this.batcher.updateObjects(visibleMeshShapes, depths)
 
+    // Shadows first - drawn without depth testing, so they sit behind the whole scene
+    // rather than punching through the depth buffer (see ShadowRenderer's file header for
+    // why they aren't depth-interleaved per shape against other content).
+    this.shadowRenderer.composite(pass)
+
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
 
@@ -251,6 +292,7 @@ export class SceneRenderer {
   destroy(): void {
     this.batcher.destroy()
     this.textBatcher.destroy()
+    this.shadowRenderer.destroy()
     this.fontBook.destroy()
     this.frameUniforms.destroy()
   }
@@ -341,7 +383,14 @@ export async function createSceneRenderer(
       options.onFrame?.(dt)
       scene.draw(pass, width, height)
     },
-    { clearColor: WHITE, sampleCount: SAMPLE_COUNT, depthFormat: DEPTH_FORMAT },
+    {
+      clearColor: WHITE,
+      sampleCount: SAMPLE_COUNT,
+      depthFormat: DEPTH_FORMAT,
+      // Shadow rendering needs its own offscreen render passes on the same encoder,
+      // finished before the main pass (which draws the composited result) begins.
+      onPrePass: (encoder, width, height) => scene.prepareShadows(encoder, width, height),
+    },
   )
   frameRenderer.start()
 

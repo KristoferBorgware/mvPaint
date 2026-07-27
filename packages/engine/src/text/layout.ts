@@ -10,8 +10,11 @@
 // origin (horizontal lines descend to negative y; vertical columns extend to negative x).
 
 import type { FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
+import type { Shadow } from '../shapes/Shape'
 import type { FontStyle } from './FontAtlas'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
+
+export type { Shadow }
 
 export interface TextGradient {
   type: 'linear' | 'radial'
@@ -21,20 +24,6 @@ export interface TextGradient {
   startRadius?: number
   endRadius?: number
   stops: GradientStop[]
-}
-
-/** Drop shadow: an offset copy of the glyphs drawn behind them. `blur` softens the edge (px). */
-export interface TextShadow {
-  color: RGBA
-  offsetX: number
-  offsetY: number
-  blur?: number
-}
-
-/** Soft glow: a dilated copy of the glyphs drawn behind them; `radius` is the spread in px. */
-export interface TextGlow {
-  color: RGBA
-  radius: number
 }
 
 export interface TextRunStyle {
@@ -58,8 +47,10 @@ export interface TextRunStyle {
   fauxBold?: boolean
   /** Force synthetic italic (horizontal shear) on top of the resolved atlas. */
   fauxItalic?: boolean
-  shadow?: TextShadow
-  glow?: TextGlow
+  /** Drop shadow: an offset copy of the glyphs drawn behind them. */
+  shadow?: Shadow
+  /** Soft glow: a symmetric halo behind the glyphs - a Shadow with offset normally left at 0. */
+  glow?: Shadow
 }
 
 export interface TextRun {
@@ -105,8 +96,10 @@ export interface TextMaterial {
   stops: GradientStop[]
   strokeColor: RGBA
   strokeWidth: number
-  /** Extra coverage in world px (faux bold, glow/shadow softening). */
+  /** Extra coverage in world px (faux bold, glow/shadow spread) - a hard distance offset. */
   dilate: number
+  /** Softens the coverage edge over this many world px (0 = the glyph's normal crisp AA). */
+  blur: number
   distanceRange: number
 }
 
@@ -158,8 +151,8 @@ interface RunResolved {
   mainMaterial: number
   shadowMaterial: number
   glowMaterial: number
-  shadow: TextShadow | undefined
-  glow: TextGlow | undefined
+  shadow: Shadow | undefined
+  glow: Shadow | undefined
 }
 
 // One laid-out character: a glyph, or a space/spacer that only advances the pen (rr = -1).
@@ -176,9 +169,8 @@ interface ResolveResult {
   materials: TextMaterial[]
 }
 
-function solidMaterial(color: RGBA, dilate: number, distanceRange: number): TextMaterial {
-  // `color` rides the per-vertex channel; the material stays a solid (fillType 'color').
-  void color
+function solidMaterial(dilate: number, blur: number, distanceRange: number): TextMaterial {
+  // Color rides the per-vertex channel; the material stays a solid (fillType 'color').
   return {
     fillPriority: 'color',
     gradientStart: ORIGIN,
@@ -189,8 +181,22 @@ function solidMaterial(color: RGBA, dilate: number, distanceRange: number): Text
     strokeColor: BLACK,
     strokeWidth: 0,
     dilate,
+    blur,
     distanceRange,
   }
+}
+
+/** Rotates a shadow's offset vector by its `rotation` (radians). */
+function rotatedOffset(s: Shadow): { x: number; y: number } {
+  if (s.rotation === 0) return { x: s.offsetX, y: s.offsetY }
+  const c = Math.cos(s.rotation)
+  const sn = Math.sin(s.rotation)
+  return { x: s.offsetX * c - s.offsetY * sn, y: s.offsetX * sn + s.offsetY * c }
+}
+
+/** `color` with its own alpha multiplied by the shadow's `opacity`. */
+function withOpacity(color: RGBA, opacity: number): RGBA {
+  return [color[0], color[1], color[2], color[3] * opacity]
 }
 
 function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResult {
@@ -221,18 +227,19 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       strokeColor: style.strokeColor ?? BLACK,
       strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
       dilate: boldDilate,
+      blur: 0,
       distanceRange: metrics.distanceRange,
     })
 
     let glowMaterial = -1
     if (style.glow) {
       glowMaterial = materials.length
-      materials.push(solidMaterial(style.glow.color, style.glow.radius + boldDilate, metrics.distanceRange))
+      materials.push(solidMaterial(style.glow.spread + boldDilate, style.glow.blur, metrics.distanceRange))
     }
     let shadowMaterial = -1
     if (style.shadow) {
       shadowMaterial = materials.length
-      materials.push(solidMaterial(style.shadow.color, (style.shadow.blur ?? 0) + boldDilate, metrics.distanceRange))
+      materials.push(solidMaterial(style.shadow.spread + boldDilate, style.shadow.blur, metrics.distanceRange))
     }
 
     resolved.push({
@@ -472,13 +479,16 @@ function emitGlyphStack(
   glows: TextQuad[],
 ): void {
   if (rr.glowMaterial >= 0 && rr.glow) {
-    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.glowMaterial, rr.glow.color, 0, 0))
+    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0, rr.glow.size))
   }
   if (rr.shadowMaterial >= 0 && rr.shadow) {
-    // offsetY is downward-positive; the scene is y-up, so subtract it.
-    shadows.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.shadowMaterial, rr.shadow.color, rr.shadow.offsetX, -rr.shadow.offsetY))
+    // offsetY is downward-positive; the scene is y-up, so the rotated vector's y is negated.
+    const off = rotatedOffset(rr.shadow)
+    shadows.push(
+      makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), off.x, -off.y, rr.shadow.size),
+    )
   }
-  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0))
+  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0, 1))
 }
 
 function makeGlyphQuad(
@@ -491,18 +501,33 @@ function makeGlyphQuad(
   color: RGBA,
   offX: number,
   offY: number,
+  sizeMul: number,
 ): TextQuad {
   const scale = rr.scale
   const leftX = penX + g.xoffset * scale + offX
   const topGY = baselineY + rr.baselineShift + penYOffset + (rr.metrics.base - g.yoffset) * scale + offY
+  let x0 = leftX
+  let y0 = topGY - g.height * scale
+  let x1 = leftX + g.width * scale
+  let y1 = topGY
+  if (sizeMul !== 1) {
+    // Grow/shrink the copy from its own center - a glow/shadow "size" scale, distinct
+    // from the glyph's own font-size scale above.
+    const cx = (x0 + x1) / 2
+    const cy = (y0 + y1) / 2
+    x0 = cx + (x0 - cx) * sizeMul
+    x1 = cx + (x1 - cx) * sizeMul
+    y0 = cy + (y0 - cy) * sizeMul
+    y1 = cy + (y1 - cy) * sizeMul
+  }
   return {
     material,
     atlasIndex: rr.atlasIndex,
     isGlyph: true,
-    x0: leftX,
-    y0: topGY - g.height * scale,
-    x1: leftX + g.width * scale,
-    y1: topGY,
+    x0,
+    y0,
+    x1,
+    y1,
     u0: g.u0,
     v0: g.v0,
     u1: g.u1,
@@ -612,7 +637,14 @@ function layoutVertical(
 
 function emitCenteredGlyph(rr: RunResolved, glyph: Glyph, leftX: number, baselineY: number, glyphs: TextQuad[], shadows: TextQuad[], glows: TextQuad[]): void {
   const penX = leftX - glyph.xoffset * rr.scale // makeGlyphQuad re-adds xoffset
-  if (rr.glowMaterial >= 0 && rr.glow) glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.glowMaterial, rr.glow.color, 0, 0))
-  if (rr.shadowMaterial >= 0 && rr.shadow) shadows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.shadowMaterial, rr.shadow.color, rr.shadow.offsetX, -rr.shadow.offsetY))
-  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0))
+  if (rr.glowMaterial >= 0 && rr.glow) {
+    glows.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0, rr.glow.size))
+  }
+  if (rr.shadowMaterial >= 0 && rr.shadow) {
+    const off = rotatedOffset(rr.shadow)
+    shadows.push(
+      makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), off.x, -off.y, rr.shadow.size),
+    )
+  }
+  glyphs.push(makeGlyphQuad(rr, glyph, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0, 1))
 }

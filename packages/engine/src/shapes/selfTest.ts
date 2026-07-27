@@ -9,7 +9,7 @@ import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
 import { Rect } from './Rect'
-import type { Shape } from './Shape'
+import { shadow, type Shape } from './Shape'
 import { Transformer } from './Transformer'
 import {
   ANCHOR_DIRECTION,
@@ -585,6 +585,47 @@ function TWO_PI_PLUS(a: number): number {
   t.detach()
   assert(!edge('top').visible, 'clearing the selection hides the frame')
   assert(t.currentBox === null, 'and drops its box')
+}
+
+// --- Shadow: shadowMatrix()/shadowWorldMatrix() place the shadow copy in the shape's own
+// rotated/scaled frame (so it inherits rotation/scale/parenting exactly like the shape's own
+// geometry does), not in plain world axes ---
+{
+  const plain = new Rect({ x: 5, y: 7, rotation: Math.PI / 2 })
+  assert(plain.shadowMatrix() === null, 'no shadow means no shadow matrix')
+
+  // The offset is measured in the shape's own (rotated) frame: a +x offset on a shape
+  // rotated 90 degrees lands along the shape's local x axis, which world space sees as +y.
+  const rotated = new Rect({ x: 5, y: 7, rotation: Math.PI / 2, shadow: shadow({ offsetX: 10 }) })
+  const p = rotated.shadowMatrix()!.transformPoint(new Vector3(0, 0, 0))
+  assert(near(p.x, 5) && near(p.y, 17), 'the shadow offset rotates with the shape (90deg: +x offset -> +y world)')
+
+  // size scales the copy; rotation on the Shadow itself adds on top of the shape's rotation.
+  const sized = new Rect({ shadow: shadow({ size: 2 }) })
+  const corner = sized.shadowMatrix()!.transformPoint(new Vector3(1, 0, 0))
+  assert(near(corner.x, 2) && near(corner.y, 0), 'shadow.size scales the copy')
+
+  const shadowRotated = new Rect({ shadow: shadow({ rotation: Math.PI / 2 }) })
+  const turned = shadowRotated.shadowMatrix()!.transformPoint(new Vector3(1, 0, 0))
+  assert(near(turned.x, 0) && near(turned.y, 1), 'shadow.rotation turns the copy on top of the shape')
+
+  // shadowWorldMatrix() composes through parents exactly like worldMatrix() does.
+  class TransformGroup extends Container {
+    matrix = Matrix4x4.identity()
+    override localMatrix(): Matrix4x4 {
+      return this.matrix
+    }
+  }
+  const parent = new TransformGroup()
+  parent.matrix = Matrix4x4.translation(new Vector3(100, 0, 0))
+  const child = parent.addChild(new Rect({ shadow: shadow({ offsetX: 3 }) }))
+  const worldP = child.shadowWorldMatrix()!.transformPoint(new Vector3(0, 0, 0))
+  assert(near(worldP.x, 103) && near(worldP.y, 0), 'shadowWorldMatrix() inherits the parent transform')
+
+  // opacity/color/blur/spread are plain data, carried on the Shadow object unchanged.
+  const s = shadow({ opacity: 0.4, blur: 5, spread: 2, color: [1, 0, 0, 0.5] })
+  assert(s.opacity === 0.4 && s.blur === 5 && s.spread === 2 && s.color[3] === 0.5, 'shadow() carries every override through')
+  assert(s.offsetX === 0 && s.rotation === 0 && s.size === 1, 'shadow() defaults the fields it was not given')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

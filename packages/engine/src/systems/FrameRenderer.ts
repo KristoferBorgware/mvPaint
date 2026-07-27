@@ -22,6 +22,12 @@ export interface FrameRendererOptions {
   depthFormat?: GPUTextureFormat
   /** MSAA sample count (1 = no multisampling). Must match the pipeline's `multisample.count`. */
   sampleCount?: number
+  /**
+   * Recorded on the same command encoder BEFORE the main render pass begins - for work
+   * that needs its own pass(es) on a different target (e.g. offscreen shadow rendering,
+   * see webgpu/ShadowRenderer), which the main pass's single beginRenderPass() can't do.
+   */
+  onPrePass?: (encoder: GPUCommandEncoder, width: number, height: number, dt: number) => void
 }
 
 export class FrameRenderer {
@@ -31,6 +37,7 @@ export class FrameRenderer {
   private readonly clearColor: GPUColor
   private readonly depthFormat?: GPUTextureFormat
   private readonly sampleCount: number
+  private readonly onPrePass?: (encoder: GPUCommandEncoder, width: number, height: number, dt: number) => void
 
   private depthTexture: GPUTexture | null = null
   private msaaTexture: GPUTexture | null = null
@@ -50,6 +57,7 @@ export class FrameRenderer {
     this.clearColor = options.clearColor ?? { r: 0.07, g: 0.07, b: 0.07, a: 1 }
     this.depthFormat = options.depthFormat
     this.sampleCount = options.sampleCount ?? 1
+    this.onPrePass = options.onPrePass
   }
 
   start(): void {
@@ -129,6 +137,8 @@ export class FrameRenderer {
         }
 
     const encoder = this.gpu.device.createCommandEncoder()
+    this.onPrePass?.(encoder, width, height, dt)
+
     const pass = encoder.beginRenderPass({
       colorAttachments: [colorAttachment],
       depthStencilAttachment: this.depthTexture

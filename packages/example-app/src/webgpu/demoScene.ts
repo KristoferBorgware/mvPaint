@@ -10,6 +10,7 @@ import {
   Scene,
   Text,
   loadSvgDocument,
+  shadow,
   type RGBA,
 } from '@mvpaint/engine'
 import { EXAMPLE_SVG } from '../svg/exampleSvg'
@@ -40,6 +41,8 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       fill: [0.9, 0.28, 0.24, 1],
       stroke: [0.5, 0.1, 0.08, 1],
       strokeWidth: 6,
+      // A hard shadow (no blur): just an offset, darker, semi-transparent copy.
+      shadow: shadow({ offsetX: 10, offsetY: -14, opacity: 0.5 }),
     }),
   )
   // Linear gradient across the rect's own diagonal, in its local (pre-transform)
@@ -61,6 +64,10 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       fill: [0.2, 0.45, 0.9, 1],
       stroke: [0.08, 0.18, 0.5, 1],
       strokeWidth: 6,
+      // A soft shadow: spread grows the silhouette outward before blur softens its edge -
+      // rendered through ShadowRenderer's offscreen dilate+gaussian passes (see there),
+      // since this Rect has no distance field to soften analytically the way Text does.
+      shadow: shadow({ offsetX: 8, offsetY: -20, spread: 6, blur: 14, opacity: 0.45 }),
     }),
   )
   spins.set(left, 1)
@@ -76,6 +83,7 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       fill: [0.2, 0.72, 0.36, 1],
       stroke: [0.1, 0.4, 0.2, 1],
       strokeWidth: 6,
+      shadow: shadow({ offsetY: -16, blur: 8, opacity: 0.4 }),
     }),
   )
   // Radial gradient from the circle's own center out to its own radius, in local
@@ -327,7 +335,7 @@ function addTextExamples(scene: Scene): void {
         fontStyle: 'bold',
         fontSize: 44,
         color: [0.15, 0.4, 0.85, 1],
-        shadow: { color: [0, 0, 0, 0.35], offsetX: 3, offsetY: 4, blur: 1 },
+        shadow: shadow({ color: [0, 0, 0, 0.35], offsetX: 3, offsetY: 4, blur: 1 }),
       },
     }),
   )
@@ -339,7 +347,7 @@ function addTextExamples(scene: Scene): void {
       x: 90,
       y: 155,
       text: 'Soft glow',
-      style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: { color: [1, 0.8, 0.15, 1], radius: 6 } },
+      style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: shadow({ color: [1, 0.8, 0.15, 1], spread: 6, blur: 3 }) },
     }),
   )
 

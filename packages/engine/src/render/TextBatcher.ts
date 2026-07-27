@@ -13,6 +13,7 @@ import type { TextMaterial } from '../text/layout'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
 import {
   TEXT_GLYPH_BIT,
+  TEXT_OBJECT_BLUR_OFFSET,
   TEXT_OBJECT_DEPTH_OFFSET,
   TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
@@ -200,6 +201,7 @@ export class TextBatcher {
       u32[base + TEXT_OBJECT_HAS_STROKE_OFFSET / 4] = material.strokeWidth > 0 ? 1 : 0
       f32[base + TEXT_OBJECT_DISTANCE_RANGE_OFFSET / 4] = material.distanceRange
       f32[base + TEXT_OBJECT_DILATE_OFFSET / 4] = material.dilate
+      f32[base + TEXT_OBJECT_BLUR_OFFSET / 4] = material.blur
     })
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)
