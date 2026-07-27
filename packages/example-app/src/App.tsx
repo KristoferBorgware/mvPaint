@@ -19,7 +19,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
-import { shadow, Text, type RGBA, type Shape } from '@mvpaint/engine'
+import { Text, type RGBA, type Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 
 function hexToRgb(hex: string): RGBA {
@@ -56,46 +56,31 @@ export default function App() {
   // Stable identity so the canvas's effect doesn't see a new callback every render.
   const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
 
-  // Shadow controls: edit the selected shape(s)' `.shadow` directly (a plain data field -
-  // no engine API needed to push it, and no geometry rebuild since it's read fresh every
-  // frame). offsetY is downward-positive (see Shadow's doc comment), so a shadow that
-  // falls down-and-right under top-left light wants a positive offsetX AND offsetY.
+  // Shadow controls, mirroring the canvas 2D property names the engine uses. Everything
+  // except blur is a per-frame quad parameter, so dragging those sliders costs nothing;
+  // blur re-bakes the shape's atlas texture, which is why it is the one to watch when
+  // judging performance. offsetY is downward-positive, so a shadow falling down-and-right
+  // under upper-left light wants a positive offsetX AND offsetY.
   const [shadowEnabled, setShadowEnabled] = useState(false)
   const [shadowOffsetX, setShadowOffsetX] = useState(12)
   const [shadowOffsetY, setShadowOffsetY] = useState(16)
-  const [shadowRotationDeg, setShadowRotationDeg] = useState(0)
-  const [shadowSize, setShadowSize] = useState(1)
-  const [shadowBlur, setShadowBlur] = useState(12)
-  const [shadowSpread, setShadowSpread] = useState(4)
+  const [shadowBlur, setShadowBlur] = useState(24)
   const [shadowOpacity, setShadowOpacity] = useState(0.5)
   const [shadowColor, setShadowColor] = useState('#000000')
-  // Mesh shapes only - a Text's shadow copy never includes its per-letter outline
-  // regardless (see Shadow's doc comment), so this is a no-op for a selected Text.
-  const [shadowIncludeStroke, setShadowIncludeStroke] = useState(true)
+  // Mesh shapes only: Text has no rasterized silhouette to blur, so it ignores blur and
+  // shadowForStroke entirely and just duplicates its glyphs at the offset.
+  const [shadowForStroke, setShadowForStroke] = useState(true)
 
   const shadowConfig = useMemo(
     () => ({
       offsetX: shadowOffsetX,
       offsetY: shadowOffsetY,
-      rotation: (shadowRotationDeg * Math.PI) / 180,
-      size: shadowSize,
       blur: shadowBlur,
-      spread: shadowSpread,
       opacity: shadowOpacity,
       color: hexToRgb(shadowColor),
-      includeStroke: shadowIncludeStroke,
+      forStroke: shadowForStroke,
     }),
-    [
-      shadowOffsetX,
-      shadowOffsetY,
-      shadowRotationDeg,
-      shadowSize,
-      shadowBlur,
-      shadowSpread,
-      shadowOpacity,
-      shadowColor,
-      shadowIncludeStroke,
-    ],
+    [shadowOffsetX, shadowOffsetY, shadowBlur, shadowOpacity, shadowColor, shadowForStroke],
   )
 
   // Only touches the CURRENT selection at the moment a control changes - not on every
@@ -109,13 +94,34 @@ export default function App() {
     let touchedText = false
     for (const node of selectedRef.current) {
       if (node instanceof Text) {
-        // Text has no `.shadow` field of its own - its shadow is per-run styling (so a
-        // rich-text node with several runs could in principle carry different shadows;
-        // this panel just applies one shadow to every run at once).
-        node.setRuns(node.runs.map((run) => ({ ...run, style: { ...run.style, shadow: shadowEnabled ? shadow(shadowConfig) : undefined } })))
+        // Text carries its shadow as per-run styling rather than through the shape-level
+        // shadow* properties, and has no blur of its own - it is an offset duplicate of
+        // the glyphs. This panel applies one shadow across every run at once.
+        node.setRuns(
+          node.runs.map((run) => ({
+            ...run,
+            style: {
+              ...run.style,
+              shadow: shadowEnabled
+                ? {
+                    color: shadowConfig.color,
+                    offsetX: shadowConfig.offsetX,
+                    offsetY: shadowConfig.offsetY,
+                    opacity: shadowConfig.opacity,
+                  }
+                : undefined,
+            },
+          })),
+        )
         touchedText = true
       } else {
-        node.shadow = shadowEnabled ? shadow(shadowConfig) : undefined
+        node.shadowEnabled = shadowEnabled
+        node.shadowColor = shadowConfig.color
+        node.shadowOffsetX = shadowConfig.offsetX
+        node.shadowOffsetY = shadowConfig.offsetY
+        node.shadowBlur = shadowConfig.blur
+        node.shadowOpacity = shadowConfig.opacity
+        node.shadowForStrokeEnabled = shadowConfig.forStroke
       }
     }
     if (touchedText) canvasRef.current?.markTextDirty()
@@ -279,46 +285,15 @@ export default function App() {
                     />
 
                     <Typography variant="caption" color="text.secondary">
-                      Blur: {shadowBlur.toFixed(0)} · Spread: {shadowSpread.toFixed(0)}
+                      Blur: {shadowBlur.toFixed(0)}
                     </Typography>
                     <Slider
                       aria-label="Shadow blur"
                       value={shadowBlur}
                       min={0}
-                      max={40}
+                      max={80}
                       step={1}
                       onChange={(_, v) => setShadowBlur(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-                    <Slider
-                      aria-label="Shadow spread"
-                      value={shadowSpread}
-                      min={0}
-                      max={30}
-                      step={1}
-                      onChange={(_, v) => setShadowSpread(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-
-                    <Typography variant="caption" color="text.secondary">
-                      Rotation: {shadowRotationDeg.toFixed(0)}° · Size: {shadowSize.toFixed(2)}×
-                    </Typography>
-                    <Slider
-                      aria-label="Shadow rotation"
-                      value={shadowRotationDeg}
-                      min={-180}
-                      max={180}
-                      step={1}
-                      onChange={(_, v) => setShadowRotationDeg(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-                    <Slider
-                      aria-label="Shadow size"
-                      value={shadowSize}
-                      min={0.5}
-                      max={2}
-                      step={0.05}
-                      onChange={(_, v) => setShadowSize(v as number)}
                       disabled={!shadowEnabled}
                     />
 
@@ -357,18 +332,18 @@ export default function App() {
                       control={
                         <Switch
                           size="small"
-                          checked={shadowIncludeStroke}
-                          onChange={(e) => setShadowIncludeStroke(e.target.checked)}
+                          checked={shadowForStroke}
+                          onChange={(e) => setShadowForStroke(e.target.checked)}
                           disabled={!shadowEnabled}
                         />
                       }
-                      label={<Typography variant="body2">Include stroke in shadow</Typography>}
+                      label={<Typography variant="body2">Shadow for stroke</Typography>}
                     />
                     <Typography variant="caption" color="text.secondary">
                       Off casts the shadow from the fill only, skipping the stroke ring - a
                       thick decorative outline otherwise widens the shadow with it. No
-                      effect on a selected Text (its shadow never includes the per-letter
-                      outline).
+                      effect on a selected Text, which duplicates its glyphs rather than
+                      blurring a silhouette.
                     </Typography>
                   </Stack>
                 )}

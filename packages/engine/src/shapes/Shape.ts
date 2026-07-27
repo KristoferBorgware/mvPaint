@@ -40,16 +40,22 @@
 // first, to the shape's local geometry) before skew/scale/rotation are applied about
 // that pivot, then the result is placed at (x, y).
 //
-// `shadow` (see the Shadow type below) draws an extra offset/rotated/scaled copy of the
-// shape behind it. shadowMatrix() reuses the same T*R*skew*S composition (coreMatrix()),
-// splicing the shadow's own offset/rotation/size in right before the pivot translation -
-// so the shadow inherits the shape's transform (and, through worldMatrix(), its
-// parent's) exactly the way the shape's own geometry does. That placement math is
-// shared by every shape; how the shadow's blur/spread actually get rendered differs by
-// lane - mesh shapes render it through an offscreen blur pass (webgpu/ShadowRenderer),
-// while Text (which has no mesh geometry to rasterize there) renders it as an extra MSDF
-// glyph copy, softened via the same distance field the glyph body already uses (see
-// text/layout.ts).
+// The shadow* properties mirror the canvas 2D shadow model (and the same names a
+// well-known 2D canvas library uses): shadowColor, shadowBlur, shadowOffsetX/Y,
+// shadowOpacity, shadowEnabled, shadowForStrokeEnabled. shadowBlur is a canvas blur
+// radius - a Gaussian of sigma = blur/2 - authored in the shape's own local units, so it
+// scales with the shape the way the rest of its geometry does. shadowOffsetX/Y are
+// downward-positive and scale with the shape's absolute scale but are NOT turned by its
+// rotation, matching how a canvas shadow's offset is applied outside the current
+// transform (see render/shadowMath.ts).
+//
+// Mesh shapes render the shadow by baking a blurred silhouette into a shared atlas keyed
+// on local-space geometry + blur, then drawing one textured quad per shadow (see
+// render/ShadowAtlas.ts and render/ShadowBatcher.ts) - so a shadow costs no per-frame GPU
+// work once its texture is cached, and moving/scaling/spinning a shape never re-bakes it.
+// Text ignores these fields: it carries its own per-run shadow styling instead (an offset
+// duplicate of the glyphs, see text/layout.ts), since it has no mesh geometry to
+// rasterize a silhouette from.
 
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -70,54 +76,6 @@ export interface ShapeTransform {
   skewY: number
   offsetX: number
   offsetY: number
-}
-
-/**
- * A drop shadow (or, for Text's `glow`, a symmetric halo reusing the same fields): an
- * extra copy of the shape, offset/rotated/scaled and tinted flat, drawn behind it.
- * `offsetX`/`offsetY` and `rotation` place the copy (rotation turns the offset vector,
- * and - for ordinary shapes - the copy itself; Text only rotates the offset, see
- * text/layout.ts). `size` scales the copy. `spread` grows its silhouette outward before
- * blurring; `blur` softens the result. `opacity` multiplies `color`'s own alpha.
- *
- * `offsetY` is downward-positive (matching the everyday "shadow falls down and to the
- * right" mental model), even though the scene itself is y-up - both Shape.shadowMatrix()
- * and Text's shadow/glow quads negate it internally to land in the right direction. So a
- * shadow under light from the upper-left wants a POSITIVE offsetX and a POSITIVE offsetY,
- * for a Shape exactly as it would for a Text.
- *
- * `includeStroke` (default true) controls whether a mesh shape's stroke ring is part of
- * the silhouette the shadow is cast from, or only its fill - e.g. a thin decorative
- * outline that would otherwise widen the shadow more than the fill shape itself warrants
- * (see webgpu/ShadowRenderer). Text has no mesh geometry to filter this way; its shadow
- * copy never includes the per-letter outline regardless of this flag.
- */
-export interface Shadow {
-  offsetX: number
-  offsetY: number
-  rotation: number
-  size: number
-  blur: number
-  spread: number
-  opacity: number
-  color: RGBA
-  includeStroke: boolean
-}
-
-/** `shadow(partial)` fills in the rest with sensible defaults (no offset/blur/spread, opaque black, stroke included). */
-export function shadow(overrides: Partial<Shadow> = {}): Shadow {
-  return {
-    offsetX: 0,
-    offsetY: 0,
-    rotation: 0,
-    size: 1,
-    blur: 0,
-    spread: 0,
-    opacity: 1,
-    includeStroke: true,
-    color: [0, 0, 0, 1],
-    ...overrides,
-  }
 }
 
 export interface ShapeOptions {
@@ -148,8 +106,19 @@ export interface ShapeOptions {
   overlay?: boolean
   /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
   draggable?: boolean
-  /** Drop shadow, rendered behind the shape. Undefined (default) = no shadow. */
-  shadow?: Shadow
+  /** Shadow tint. Default opaque black. */
+  shadowColor?: RGBA
+  /** Canvas-style blur radius in local units (Gaussian sigma = blur/2). Default 0. */
+  shadowBlur?: number
+  /** Shadow offset, downward-positive, in local units. Default 0. */
+  shadowOffsetX?: number
+  shadowOffsetY?: number
+  /** Multiplies shadowColor's own alpha. Default 1. */
+  shadowOpacity?: number
+  /** Master switch; false suppresses the shadow entirely. Default true. */
+  shadowEnabled?: boolean
+  /** Cast the shadow from fill+stroke (true, default) or from the fill alone. */
+  shadowForStrokeEnabled?: boolean
   fill?: RGBA
   stroke?: RGBA
   /** Stroke width in world units; 0 = no stroke. */
@@ -198,8 +167,32 @@ export abstract class Shape extends Node {
    * write depth would punch a hole through whatever draws later, notably the text lane.
    */
   overlay = false
-  /** Drop shadow, rendered behind the shape. Undefined (default) = no shadow. */
-  shadow: Shadow | undefined = undefined
+
+  // --- shadow (canvas 2D / Konva model; see the file header) --------------------------
+  /** Shadow tint; its alpha is multiplied by shadowOpacity. */
+  shadowColor: RGBA = [0, 0, 0, 1]
+  /**
+   * Canvas-style blur radius in LOCAL units: the silhouette is blurred by a Gaussian of
+   * sigma = shadowBlur/2. Changing it re-bakes the shape's atlas texture, so it is the one
+   * shadow field that isn't free to animate; the rest are per-frame quad parameters.
+   */
+  shadowBlur = 0
+  /**
+   * Offset in local units, downward-positive. Scales with the shape's absolute scale but
+   * is not turned by its rotation - see render/shadowMath.ts's shadowWorldOffset.
+   */
+  shadowOffsetX = 0
+  shadowOffsetY = 0
+  /** Multiplies shadowColor's alpha; 0 hides the shadow. */
+  shadowOpacity = 1
+  /** Master switch - false suppresses the shadow however the other fields are set. */
+  shadowEnabled = true
+  /**
+   * Whether the stroke ring is part of the silhouette the shadow is cast from. False casts
+   * from the fill alone, so a thick decorative outline doesn't fatten the shadow with it.
+   * Re-bakes the atlas texture when changed.
+   */
+  shadowForStrokeEnabled = true
 
   protected _width = 0
   protected _height = 0
@@ -244,6 +237,7 @@ export abstract class Shape extends Node {
   // friendly layout (no MeshSink round-trip) built lazily on first hitTestLocal()/
   // localBounds() call, not on every tessellate().
   private pickCache: PickGeometry | null = null
+  private geometryVersionCounter = 0
 
   constructor(options: ShapeOptions = {}) {
     super(options.name)
@@ -261,7 +255,13 @@ export abstract class Shape extends Node {
     this.zIndex = options.zIndex ?? 0
     this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
-    this.shadow = options.shadow
+    this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]
+    this.shadowBlur = options.shadowBlur ?? 0
+    this.shadowOffsetX = options.shadowOffsetX ?? 0
+    this.shadowOffsetY = options.shadowOffsetY ?? 0
+    this.shadowOpacity = options.shadowOpacity ?? 1
+    this.shadowEnabled = options.shadowEnabled ?? true
+    this.shadowForStrokeEnabled = options.shadowForStrokeEnabled ?? true
     this.fill = options.fill ?? [0, 0, 0, 1]
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0
@@ -296,41 +296,17 @@ export abstract class Shape extends Node {
   }
 
   /**
-   * The shadow copy's own local matrix - `coreMatrix()` with the shadow's offset/
-   * rotation/size spliced in between the shape's own scale and its pivot translation, so
-   * the shadow inherits the shape's position/rotation/skew/scale (and, through
-   * worldMatrix(), its parent's) exactly like the shape's own geometry does. Null when
-   * there is no shadow.
+   * Whether this shape casts a shadow at all - the same test the canvas library uses:
+   * enabled, not fully transparent, and at least one shadow field actually set (a shadow
+   * with no blur and no offset would sit exactly behind the shape and never be seen).
    */
-  shadowMatrix(): Matrix4x4 | null {
-    if (!this.shadow) return null
-    const s = this.shadow
-    let m = this.coreMatrix()
-    if (s.offsetX !== 0 || s.offsetY !== 0) {
-      // offsetY is downward-positive (see Shadow) - the scene is y-up, so negate it.
-      m = m.mul(Matrix4x4.translation(new Vector3(s.offsetX, -s.offsetY, 0)))
-    }
-    if (s.rotation !== 0) {
-      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), s.rotation)))
-    }
-    if (s.size !== 1) {
-      m = m.mul(Matrix4x4.scaling(new Vector3(s.size, s.size, 1)))
-    }
-    if (this.offsetX !== 0 || this.offsetY !== 0) {
-      m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
-    }
-    return m
-  }
-
-  /** shadowMatrix() composed with every ancestor's localMatrix(), mirroring worldMatrix(). */
-  shadowWorldMatrix(): Matrix4x4 | null {
-    const local = this.shadowMatrix()
-    if (!local) return null
-    let world = local
-    for (let p = this.parent; p !== null; p = p.parent) {
-      world = p.localMatrix().mul(world)
-    }
-    return world
+  hasShadow(): boolean {
+    return (
+      this.shadowEnabled &&
+      this.shadowOpacity !== 0 &&
+      this.shadowColor[3] !== 0 &&
+      (this.shadowBlur !== 0 || this.shadowOffsetX !== 0 || this.shadowOffsetY !== 0)
+    )
   }
 
   /**
@@ -376,6 +352,16 @@ export abstract class Shape extends Node {
   markGeometryDirty(): void {
     this.geometryCache = null
     this.pickCache = null
+    this.geometryVersionCounter++
+  }
+
+  /**
+   * Bumped by every markGeometryDirty(). The shadow atlas keys its baked silhouette on
+   * this (see render/ShadowAtlas.ts), so it re-bakes exactly when the geometry it
+   * rasterized actually changed - and never merely because the shape moved.
+   */
+  get geometryVersion(): number {
+    return this.geometryVersionCounter
   }
 
   /**

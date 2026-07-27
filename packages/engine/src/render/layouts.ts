@@ -75,14 +75,15 @@ export function createTextPipelineLayout(
   return device.createPipelineLayout({ bindGroupLayouts: [frameLayout, objectLayout, atlasLayout] })
 }
 
+
 /**
- * group(1) for the shadow caster (see render/ShadowRenderer.ts + shadowCaster.wgsl.ts):
- * one shape's shadow placement (model matrix) + flat tint color, as a uniform (not the
- * mesh lane's storage array) since the caster draws exactly one object per pass.
+ * group(0) for a shadow-atlas bake pass: one small uniform (the local->clip projection for
+ * the silhouette pass, or the kernel parameters for a blur pass). Both are a single
+ * fragment/vertex-visible uniform buffer, so they share one layout.
  */
-export function createShadowObjectBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+export function createShadowBakeProjectLayout(device: GPUDevice): GPUBindGroupLayout {
   return device.createBindGroupLayout({
-    label: 'shadow-object',
+    label: 'shadow-bake-params',
     entries: [
       {
         binding: 0,
@@ -93,53 +94,23 @@ export function createShadowObjectBindGroupLayout(device: GPUDevice): GPUBindGro
   })
 }
 
-/** Shadow caster pipeline layout: shared frame (group 0) + the shadow object (group 1). */
-export function createShadowCasterPipelineLayout(
-  device: GPUDevice,
-  frameLayout: GPUBindGroupLayout,
-  shadowObjectLayout: GPUBindGroupLayout,
-): GPUPipelineLayout {
-  return device.createPipelineLayout({ bindGroupLayouts: [frameLayout, shadowObjectLayout] })
-}
-
-/** group(0) for a blur/dilate/composite filter pass: its radius/direction/texel-size uniform. */
-export function createFilterParamsBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
-  return device.createBindGroupLayout({
-    label: 'filter-params',
-    entries: [
-      {
-        binding: 0,
-        visibility: GPUShaderStage.FRAGMENT,
-        buffer: { type: 'uniform' },
-      },
-    ],
-  })
-}
-
-/** group(1) for a filter pass: the source texture it samples, plus its sampler. */
+/** group(1) for a shadow blur pass: the source texture it samples, plus its sampler. */
 export function createFilterTextureBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
   return device.createBindGroupLayout({
-    label: 'filter-texture',
+    label: 'shadow-bake-source',
     entries: [
-      {
-        binding: 0,
-        visibility: GPUShaderStage.FRAGMENT,
-        texture: { sampleType: 'float' },
-      },
-      {
-        binding: 1,
-        visibility: GPUShaderStage.FRAGMENT,
-        sampler: { type: 'filtering' },
-      },
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
     ],
   })
 }
 
-/** Filter pipeline layout: the params uniform (group 0) + the source texture (group 1). */
-export function createFilterPipelineLayout(
+/** Shadow-lane pipeline layout: shared frame + shadow objects (groups 0/1) plus the shadow atlas. */
+export function createShadowPipelineLayout(
   device: GPUDevice,
-  filterParamsLayout: GPUBindGroupLayout,
-  filterTextureLayout: GPUBindGroupLayout,
+  frameLayout: GPUBindGroupLayout,
+  objectLayout: GPUBindGroupLayout,
+  atlasLayout: GPUBindGroupLayout,
 ): GPUPipelineLayout {
-  return device.createPipelineLayout({ bindGroupLayouts: [filterParamsLayout, filterTextureLayout] })
+  return device.createPipelineLayout({ bindGroupLayouts: [frameLayout, objectLayout, atlasLayout] })
 }

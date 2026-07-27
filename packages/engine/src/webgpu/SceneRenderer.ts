@@ -20,16 +20,20 @@ import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
 import { screenToWorld } from '../input/viewport'
 import {
+  createAtlasBindGroupLayout,
   createFrameBindGroupLayout,
   createMeshPipelineLayout,
   createObjectBindGroupLayout,
+  createShadowPipelineLayout,
   createTextPipelineLayout,
 } from '../render/layouts'
 import { DEPTH_FORMAT } from '../render/depthFormat'
 import { FrameUniforms } from '../render/FrameUniforms'
 import { MeshBatcher } from '../render/MeshBatcher'
 import { createMeshPipeline } from '../render/MeshPipeline'
-import { ShadowRenderer } from '../render/ShadowRenderer'
+import { ShadowAtlas } from '../render/ShadowAtlas'
+import { ShadowBatcher } from '../render/ShadowBatcher'
+import { createShadowPipeline } from '../render/ShadowPipeline'
 import { TextBatcher } from '../render/TextBatcher'
 import { createTextPipeline } from '../render/TextPipeline'
 import { FontBook } from '../text/FontAtlas'
@@ -68,7 +72,10 @@ export class SceneRenderer {
   private readonly textBatcher: TextBatcher
   private readonly fontBook: FontBook
 
-  private readonly shadowRenderer: ShadowRenderer
+  private readonly shadowAtlas: ShadowAtlas
+  private readonly shadowBatcher: ShadowBatcher
+  private readonly shadowPipeline: GPURenderPipeline
+  private shadowGeometryDirty = true
 
   private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   // Debug/testing knob: grows (or shrinks, if negative) the culling view rectangle by
@@ -103,11 +110,19 @@ export class SceneRenderer {
     this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
     this.textBatcher = new TextBatcher(device, objectLayout)
 
-    // Ordinary shapes' shadows (Rect/Circle/Polyline/Path - Text softens its own shadow
-    // through the MSDF distance field instead, see text/layout.ts) render through their own
-    // offscreen blur pipeline; see render/ShadowRenderer.ts for why that needs real GPU
-    // passes rather than a shader trick like the text lane's.
-    this.shadowRenderer = new ShadowRenderer(device, frameLayout, format, SAMPLE_COUNT)
+    // Shadow lane: blurred silhouettes are baked once into a shared atlas (see
+    // render/ShadowAtlas.ts), then drawn as one quad each in a single call. Text is not
+    // part of this - it duplicates its glyphs instead (see text/layout.ts).
+    this.shadowAtlas = new ShadowAtlas(device)
+    const shadowObjectLayout = createObjectBindGroupLayout(device)
+    const shadowPipelineLayout = createShadowPipelineLayout(
+      device,
+      frameLayout,
+      shadowObjectLayout,
+      createAtlasBindGroupLayout(device),
+    )
+    this.shadowPipeline = createShadowPipeline(device, format, SAMPLE_COUNT, shadowPipelineLayout)
+    this.shadowBatcher = new ShadowBatcher(device, shadowObjectLayout)
 
     // 2D orthographic camera looking down -Z, parented to the scene root. viewHeight is
     // set from the canvas's CSS height every frame (see draw()), so 1 world unit = 1 CSS
@@ -179,30 +194,17 @@ export class SceneRenderer {
   }
 
   /**
-   * Renders every shadow-casting shape's blurred/dilated shadow into an offscreen
-   * accumulation texture, ready for draw() to composite. Must run on the SAME command
-   * encoder BEFORE the main render pass begins (offscreen work needs its own passes) -
-   * see createSceneRenderer's `onPrePass` wiring below.
+   * Re-bakes any stale shadow silhouette into the shadow atlas. Must run on the SAME
+   * command encoder BEFORE the main render pass opens, since baking needs render passes of
+   * its own - see createSceneRenderer's `onPrePass` wiring below. Costs nothing on a frame
+   * where no shadow-casting geometry changed, which is the common case.
    */
-  prepareShadows(encoder: GPUCommandEncoder, width: number, height: number): void {
-    const camera = this.scene.activeCamera
-    if (!camera) return
-    if (camera instanceof OrthographicCamera) {
-      camera.viewHeight = Math.max(1, this.canvas.clientHeight / this.zoom)
-    }
-    this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
-
+  prepareShadows(encoder: GPUCommandEncoder): void {
     const ordered = collectZOrder(this.scene)
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
-    const viewBounds =
-      camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
-    const onScreen = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
-
-    // 1 world unit = 1 CSS px at zoom 1 (see draw()'s own comment); device pixels are CSS
-    // pixels times the backing store's device pixel ratio, which `width` (device px) over
-    // the canvas's CSS width recovers without needing the DPR directly.
-    const pixelsPerWorldUnit = this.zoom * (width / Math.max(1, this.canvas.clientWidth))
-    this.shadowRenderer.prepare(encoder, this.frameUniforms.bindGroup, onScreen, width, height, pixelsPerWorldUnit)
+    // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
+    // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
+    this.shadowAtlas.update(encoder, meshShapes)
   }
 
   /** Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both lanes. */
@@ -261,11 +263,6 @@ export class SceneRenderer {
     this.visibleMeshShapes = visibleMeshShapes
     this.batcher.updateObjects(visibleMeshShapes, depths)
 
-    // Shadows first - drawn without depth testing, so they sit behind the whole scene
-    // rather than punching through the depth buffer (see ShadowRenderer's file header for
-    // why they aren't depth-interleaved per shape against other content).
-    this.shadowRenderer.composite(pass)
-
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
 
@@ -278,7 +275,26 @@ export class SceneRenderer {
     pass.setPipeline(this.textPipeline)
     this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
 
-    // Last, and without touching depth: the overlay draws over both lanes.
+    // Shadows draw AFTER the content lanes, depth-tested but never depth-writing (see
+    // ShadowPipeline). That ordering is what makes them stack: by the time a shadow is
+    // drawn, every shape has already written its depth, so the test alone decides whether
+    // the shadow lands on top of a given shape or is hidden behind it - including the very
+    // shape casting it. Drawing them first instead would paint every shadow under
+    // everything, which is only correct for a single-layer scene.
+    const shadowCasters = onScreen.filter((s) => s.hasShadow())
+    if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
+      if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
+        this.shadowBatcher.rebuild(shadowCasters, this.shadowAtlas)
+        this.shadowGeometryDirty = false
+      }
+      // Half a depth step behind the caster: far enough to lose the depth test against its
+      // own shape, near enough to stay in front of whatever sits below it.
+      this.shadowBatcher.updateObjects(depths, 0.5 / (ordered.length + 1))
+      pass.setPipeline(this.shadowPipeline)
+      this.shadowBatcher.draw(pass, this.frameUniforms.bindGroup, this.shadowAtlas)
+    }
+
+    // Last, and without touching depth: the overlay draws over every other lane.
     if (overlays.length > 0) {
       pass.setPipeline(this.overlayPipeline)
       this.batcher.draw(
@@ -292,7 +308,8 @@ export class SceneRenderer {
   destroy(): void {
     this.batcher.destroy()
     this.textBatcher.destroy()
-    this.shadowRenderer.destroy()
+    this.shadowAtlas.destroy()
+    this.shadowBatcher.destroy()
     this.fontBook.destroy()
     this.frameUniforms.destroy()
   }
@@ -389,7 +406,7 @@ export async function createSceneRenderer(
       depthFormat: DEPTH_FORMAT,
       // Shadow rendering needs its own offscreen render passes on the same encoder,
       // finished before the main pass (which draws the composited result) begins.
-      onPrePass: (encoder, width, height) => scene.prepareShadows(encoder, width, height),
+      onPrePass: (encoder) => scene.prepareShadows(encoder),
     },
   )
   frameRenderer.start()

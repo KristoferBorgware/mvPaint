@@ -18,6 +18,8 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
+import { shadowQuadBounds, shadowRegion, shadowSigma, shadowSpreadUnits, shadowWorldOffset, worldAxisScale } from './shadowMath'
+import { SHADOW_OBJECT_STRIDE, SHADOW_VERTEX_LAYOUT, SHADOW_VERTEX_STRIDE } from './shadowFormat'
 import { Shape } from '../shapes/Shape'
 import { hitTestShape } from '../scene/picking'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -424,6 +426,84 @@ assert(
   // boundary exactly like any other contour, independent of fill semantics.
   assert(hasVertexNear(verts, -2.1, -2.1), 'outer contour corner offset present')
   assert(hasVertexNear(verts, -1.1, -1.1), 'hole contour corner offset present, same convention')
+}
+
+// --- shadow atlas sizing: driven only by things a transform cannot change ---
+{
+  // Canvas 2D defines shadowBlur as a Gaussian of sigma = blur/2, padded to 3 sigma.
+  assert(shadowSigma(10) === 5, 'shadowBlur maps to sigma = blur/2, the canvas rule')
+  assert(shadowSigma(-4) === 0, 'a negative blur clamps to none')
+  assert(shadowSpreadUnits(10) === 15, 'the blur margin is 3 sigma')
+
+  // A small shape keeps 1 texel per local unit, and the margin lands on both sides.
+  const small = shadowRegion(40, 20, 10, 256)
+  assert(small.texelsPerUnit === 1, 'a small shape bakes at full resolution')
+  assert(small.padTexels === 15, 'the padding is 3 sigma, in texels')
+  assert(small.width === 40 + 30 && small.height === 20 + 30, 'the slot is the silhouette plus a margin on each side')
+
+  // A shape too big for the cap scales down INSTEAD of overflowing - and the padding
+  // scales with it, rather than being added on top of an already-maxed silhouette.
+  const huge = shadowRegion(4000, 4000, 40, 256)
+  assert(huge.texelsPerUnit < 1, 'a huge shape bakes at reduced resolution')
+  assert(huge.width <= 256 && huge.height <= 256, 'and still fits the cap')
+  assert(huge.padTexels >= 1, 'it keeps a blur margin even when scaled down')
+
+  // The slot must NEVER exceed the cap, and the silhouette must never be cropped to make
+  // it fit - the margin is symmetric and the shape whole, at whatever resolution that
+  // takes. Rounding the two parts up separately is what makes this worth asserting over a
+  // spread of awkward sizes rather than one tidy case.
+  for (const [bw, bh, blur] of [
+    [206, 136, 24],
+    [255, 255, 1],
+    [256, 256, 0],
+    [1, 1, 90],
+    [4000, 10, 40],
+    [37, 611, 13],
+  ] as const) {
+    const r = shadowRegion(bw, bh, blur, 256)
+    assert(r.width <= 256 && r.height <= 256, `slot ${bw}x${bh} blur ${blur} fits the cap`)
+    assert(
+      r.width === Math.ceil(bw * r.texelsPerUnit) + 2 * r.padTexels &&
+        r.height === Math.ceil(bh * r.texelsPerUnit) + 2 * r.padTexels,
+      `slot ${bw}x${bh} blur ${blur} keeps the full silhouette and a symmetric margin`,
+    )
+  }
+
+  // Zero blur still yields a usable slot (a hard-edged, offset-only shadow).
+  const crisp = shadowRegion(10, 10, 0, 256)
+  assert(crisp.padTexels === 0 && crisp.width === 10 && crisp.height === 10, 'no blur means no margin')
+
+  // The quad must cover exactly what the slot covers, or the texture would be stretched.
+  const quad = shadowQuadBounds(-20, -10, small)
+  assert(quad.x1 - quad.x0 === small.width / small.texelsPerUnit, 'the quad spans the slot exactly in x')
+  assert(quad.y1 - quad.y0 === small.height / small.texelsPerUnit, 'the quad spans the slot exactly in y')
+  assert(quad.x0 === -35 && quad.y0 === -25, 'the quad starts a full margin before the silhouette')
+
+  // Konva/canvas offset semantics: scaled by absolute scale, downward-positive, and NOT
+  // turned by rotation (that is what worldAxisScale extracts - lengths, not direction).
+  const offset = shadowWorldOffset(4, 6, 2, 3)
+  assert(offset.x === 8, 'offsetX scales with the absolute x scale')
+  assert(offset.y === -18, 'offsetY is downward-positive, so it flips against a y-up scene')
+
+  // A 90-degree rotation matrix: the axes have swapped direction but each is still unit
+  // length, so the offset keeps its magnitude and stays world-axis aligned.
+  const rotated = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+  const scale = worldAxisScale(rotated)
+  assert(Math.abs(scale.x - 1) < 1e-9 && Math.abs(scale.y - 1) < 1e-9, 'pure rotation contributes no scale')
+  const scaled = worldAxisScale([3, 0, 0, 0, 0, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+  assert(scaled.x === 3 && scaled.y === 5, 'axis lengths recover the absolute scale')
+}
+
+// --- shadow vertex/object formats line up with the WGSL structs ---
+{
+  assert(SHADOW_VERTEX_STRIDE === 20, 'shadow vertex is position + uv + objectId')
+  assert(SHADOW_VERTEX_LAYOUT.arrayStride === SHADOW_VERTEX_STRIDE, 'the layout agrees with the stride')
+  const attrs = [...SHADOW_VERTEX_LAYOUT.attributes]
+  assert(attrs.length === 3, 'three vertex attributes')
+  assert(attrs[2].offset === 16 && attrs[2].format === 'uint32', 'the object id trails the two vec2s')
+  // std430: a struct containing a mat4x4/vec4 aligns to 16, so the record must round up.
+  assert(SHADOW_OBJECT_STRIDE % 16 === 0, 'the shadow object record keeps 16-byte alignment')
+  assert(SHADOW_OBJECT_STRIDE >= 64 + 16 + 4, 'it holds a mat4x4, a vec4 tint and a depth')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

@@ -8,7 +8,6 @@
 import { normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
 import { layoutText, type FontProvider, type TextRun } from './layout'
 import type { FontStyle } from './FontAtlas'
-import { shadow } from '../shapes/Shape'
 import regularJson from './fonts/inter-regular.json'
 import boldJson from './fonts/inter-bold.json'
 import italicJson from './fonts/inter-italic.json'
@@ -220,38 +219,37 @@ const finite = (n: number) => Number.isFinite(n)
   const plain = layoutText([run('g', { fontSize: 40 })], {}, fonts)
   assert(plain.quads.filter((q) => q.isGlyph).length === 1, 'a plain glyph emits one quad')
   assert(plain.materials.length === 1, 'a plain run has one material')
+  const plainQuad = plain.quads.find((q) => q.isGlyph)!
 
-  const shadowed = layoutText([run('g', { fontSize: 40, shadow: shadow({ color: [0, 0, 0, 0.5], offsetX: 3, offsetY: 3 }) })], {}, fonts)
+  const shadowed = layoutText([run('g', { fontSize: 40, shadow: { color: [0, 0, 0, 0.5], offsetX: 3, offsetY: 3 } })], {}, fonts)
   assert(shadowed.materials.length === 2, 'a shadow adds a second material')
   assert(shadowed.quads.filter((q) => q.isGlyph).length === 2, 'the shadow adds a second glyph quad')
 
-  const glowed = layoutText([run('g', { fontSize: 40, glow: shadow({ color: [1, 1, 0, 1], spread: 4 }) })], {}, fonts)
+  // Text's shadow is a plain duplicate of the glyphs - no blur, so it adds no coverage
+  // dilation of its own (unlike the glow below). That is the whole point of the text
+  // model: a crisp offset copy, not a rasterized-and-blurred silhouette.
+  const shadowMaterial = shadowed.materials[shadowed.materials.length - 1]
+  assert(shadowMaterial.dilate === 0, "a text shadow doesn't dilate coverage - it's a duplicate, not a blur")
+
+  // offsetY is downward-positive, matching Shape's shadowOffsetY, so it moves the copy to
+  // a LOWER local y in this y-up scene.
+  const shadowQuad = shadowed.quads.find((q) => q.isGlyph && q.material === 1)!
+  assert(Math.abs(shadowQuad.x0 - (plainQuad.x0 + 3)) < 1e-6, 'shadow offsetX shifts the duplicate right')
+  assert(Math.abs(shadowQuad.y0 - (plainQuad.y0 - 3)) < 1e-6, 'shadow offsetY is downward-positive')
+
+  const glowed = layoutText([run('g', { fontSize: 40, glow: { color: [1, 1, 0, 1], radius: 4 } })], {}, fonts)
   assert(glowed.materials.some((m) => m.dilate >= 4), 'the glow material carries the spread radius')
   assert(glowed.quads.filter((q) => q.isGlyph).length === 2, 'the glow adds a second glyph quad')
   // The glow is emitted before the body so it renders behind it.
   assert(!glowed.quads[glowed.quads.length - 1].isGlyph || glowed.quads[0].material !== glowed.quads[glowed.quads.length - 1].material, 'glow precedes body')
 
-  // blur is a distinct field from spread (dilate): it doesn't touch dilate at all.
-  const blurred = layoutText([run('g', { fontSize: 40, shadow: shadow({ color: [0, 0, 0, 1], blur: 5 }) })], {}, fonts)
-  const blurredMaterial = blurred.materials[blurred.materials.length - 1]
-  assert(blurredMaterial.blur === 5, 'blur is carried on the material')
-  assert(blurredMaterial.dilate === 0, 'blur does not add to dilate')
-
   // opacity multiplies the shadow color's own alpha, baked in at shape time (no GPU field).
-  const faded = layoutText([run('g', { fontSize: 40, shadow: shadow({ color: [0, 0, 0, 0.8], opacity: 0.5 }) })], {}, fonts)
+  const faded = layoutText([run('g', { fontSize: 40, shadow: { color: [0, 0, 0, 0.8], offsetX: 2, offsetY: 2, opacity: 0.5 } })], {}, fonts)
   const fadedQuad = faded.quads.find((q) => q.isGlyph && q.material === faded.materials.length - 1)!
   assert(Math.abs(fadedQuad.color[3] - 0.4) < 1e-6, 'shadow opacity multiplies the color alpha (0.8*0.5)')
-
-  // rotation turns the offset vector; a 180 degree rotation flips a +x offset to -x.
-  const rotated = layoutText([run('g', { fontSize: 40, shadow: shadow({ color: [0, 0, 0, 1], offsetX: 10, offsetY: 0, rotation: Math.PI }) })], {}, fonts)
-  const plainQuad = plain.quads.find((q) => q.isGlyph)!
-  const rotatedQuad = rotated.quads.find((q) => q.isGlyph && q.material === rotated.materials.length - 1)!
-  assert(Math.abs(rotatedQuad.x0 - (plainQuad.x0 - 10)) < 1e-6, 'a 180deg rotation flips a +x offset to -x')
-
-  // size scales the shadow copy around its own center - bigger than the plain glyph quad.
-  const sized = layoutText([run('g', { fontSize: 40, shadow: shadow({ color: [0, 0, 0, 1], size: 2 }) })], {}, fonts)
-  const sizedQuad = sized.quads.find((q) => q.isGlyph && q.material === sized.materials.length - 1)!
-  assert(sizedQuad.x1 - sizedQuad.x0 > (plainQuad.x1 - plainQuad.x0) * 1.9, 'shadow size scales the copy up')
+  const opaque = layoutText([run('g', { fontSize: 40, shadow: { color: [0, 0, 0, 0.8], offsetX: 2, offsetY: 2 } })], {}, fonts)
+  const opaqueQuad = opaque.quads.find((q) => q.isGlyph && q.material === opaque.materials.length - 1)!
+  assert(Math.abs(opaqueQuad.color[3] - 0.8) < 1e-6, 'omitting opacity leaves the colour alpha alone')
 }
 
 // --- rtl: right-to-left flow reverses visual glyph order (first char lands rightmost) ---
