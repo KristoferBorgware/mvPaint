@@ -63,7 +63,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'shape-stress',
     title: 'Shape stress test',
     description:
-      '5000 rects, circles, polygons, stars and lines scattered randomly - size, rotation, stroke, colour and opacity all vary, but deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan. Reload scene for a fresh layout.',
+      '10000 rects, circles, polygons, stars and lines scattered randomly - size, rotation, stroke, colour and opacity all vary, but deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan. Reload scene for a fresh layout.',
     disableCulling: true,
     build: buildShapeStressScene,
   },
@@ -78,14 +78,16 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'msdf-text-stress',
     title: 'MSDF text stress test',
     description:
-      'Four pages of randomly styled lorem ipsum, one MSDF Text node per page. Same words and styling as the outline-text stress test, for a direct cost comparison. Zoom out to see all four pages.',
+      'Four pages of randomly styled lorem ipsum, one MSDF Text node per page. Same words and styling as the outline-text stress test, for a direct cost comparison. Viewport culling is off, so every paragraph draws regardless of zoom/pan - zoom out to see all four pages.',
+    disableCulling: true,
     build: buildMsdfStressScene,
   },
   {
     id: 'vector-text-stress',
     title: 'Outline text stress test',
     description:
-      'The identical four pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Fetches the TTFs on first open.',
+      'The identical four pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Viewport culling is off, same as the MSDF version. Fetches the TTFs on first open.',
+    disableCulling: true,
     prepare: prepareVectorTextStressScene,
     build: buildVectorTextStressScene,
   },

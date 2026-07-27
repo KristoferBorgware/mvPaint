@@ -11,6 +11,11 @@
 // Captions and the page chrome stay plain MSDF Text throughout, same as in vectorTextScene -
 // they're UI, not the content being stress-tested, so there's no reason to pay tessellation
 // cost for them.
+//
+// This scene also sets `disableCulling` in the registry (scenes/index.ts): the page grid is
+// taller than the default view, so without it most paragraphs would never reach the mesh
+// batcher at the default zoom - the opposite of what a scene meant to stress-test all of them
+// should do.
 
 import { Text, VectorText, type Scene, type VectorFontBook, loadDefaultVectorFonts } from '@mvpaint/engine'
 import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT, WORDS_PER_PAGE } from './loremStress'
