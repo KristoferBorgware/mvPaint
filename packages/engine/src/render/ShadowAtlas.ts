@@ -55,6 +55,15 @@ export interface ShadowSlot {
   y1: number
 }
 
+/** One shape's bake, decided during planning and recorded afterwards. */
+interface PlannedBake {
+  shape: Shape
+  silhouette: NonNullable<ReturnType<typeof silhouetteOf>>
+  region: ShadowRegion
+  rect: { x: number; y: number }
+  alloc: { width: number; height: number }
+}
+
 interface Entry extends ShadowSlot {
   rectX: number
   rectY: number
@@ -139,6 +148,8 @@ export class ShadowAtlas {
   private cursorX = 0
 
   private scratchBuffers: GPUBuffer[] = []
+  /** True once this frame's bakes are being recorded - see ensureTextures. */
+  private recording = false
 
   constructor(device: GPUDevice) {
     this.device = device
@@ -197,6 +208,15 @@ export class ShadowAtlas {
 
   private ensureTextures(size: number): void {
     if (this.texture && this.atlasSize === size) return
+    // Growing replaces the atlas, which DESTROYS the old texture. Any pass already recorded
+    // into this frame's encoder still points at it, and the whole submit then fails with
+    // "Destroyed texture used in a submit" - a device-level error that a lenient software
+    // backend may never report, so it can survive testing and only break on real hardware.
+    // Planning is ordered ahead of recording precisely to make that impossible; this asserts
+    // the ordering rather than trusting it to survive future edits.
+    if (this.texture && this.recording) {
+      throw new Error('ShadowAtlas: the atlas cannot be resized once bakes have been recorded this frame')
+    }
     this.texture?.destroy()
     this.atlasSize = size
     this.texture = this.device.createTexture({
@@ -292,43 +312,69 @@ export class ShadowAtlas {
 
     this.ensureTextures(this.atlasSize || INITIAL_ATLAS_SIZE)
 
-    // A stale entry's old rectangle isn't reclaimed individually (the shelf packer only
-    // ever moves forward), so once the atlas fills up everything is repacked from scratch
-    // and re-baked. Growing first keeps that from happening every frame on a busy scene.
-    let toBake = stale
-    let attempts = 0
-    while (attempts < 8) {
-      attempts++
-      const baked = this.tryBake(encoder, toBake)
-      if (baked) return
-      if (this.atlasSize < this.maxAtlasSize) {
-        this.ensureTextures(Math.min(this.maxAtlasSize, this.atlasSize * 2))
+    // Decide the entire layout BEFORE recording a single pass. Planning is what may grow the
+    // atlas, and growing replaces (and destroys) the texture - so anything already recorded
+    // into this frame's encoder would then reference a destroyed texture and fail the whole
+    // submit. Keeping every texture decision ahead of every draw makes that impossible by
+    // construction rather than by careful ordering.
+    const plan = this.planBakes(stale, casters)
+    this.recording = true
+    try {
+      for (const item of plan) {
+        this.bakeOne(encoder, item.shape, item.silhouette, item.region, item.rect, item.alloc)
       }
-      // Repack everything: the entries that were fine still hold rectangles in the old
-      // layout, which the new (or newly compacted) atlas no longer matches.
-      this.entries.clear()
-      this.resetPacker()
-      toBake = casters
-      if (this.atlasSize >= this.maxAtlasSize && attempts > 1) {
-        // Out of room even at the largest supported atlas - bake what fits and leave the
-        // rest without a slot, so they simply render no shadow rather than corrupting one.
-        this.tryBake(encoder, toBake)
-        return
-      }
+    } finally {
+      this.recording = false
     }
   }
 
-  /** Bakes each shape; false if the atlas ran out of room partway (caller grows + retries). */
-  private tryBake(encoder: GPUCommandEncoder, shapes: readonly Shape[]): boolean {
+  /**
+   * Works out where every stale shape's silhouette will go, growing and repacking the atlas
+   * as needed. Pure bookkeeping plus texture (re)creation - it records no GPU commands.
+   */
+  private planBakes(stale: readonly Shape[], casters: readonly Shape[]): PlannedBake[] {
+    // A stale entry's old rectangle isn't reclaimed individually (the shelf packer only ever
+    // moves forward), so once the atlas fills up everything is repacked from scratch and
+    // re-baked. Growing first keeps that from happening every frame on a busy scene.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const plan = this.tryPlan(attempt === 0 ? stale : casters, false)
+      if (plan) return plan
+
+      if (this.atlasSize >= this.maxAtlasSize) {
+        // Out of room even at the largest supported atlas - plan what fits and leave the
+        // rest without a slot, so they render no shadow rather than a corrupted one.
+        this.entries.clear()
+        this.resetPacker()
+        return this.tryPlan(casters, true) ?? []
+      }
+      this.ensureTextures(Math.min(this.maxAtlasSize, this.atlasSize * 2))
+      // Repack everything: the entries that were fine still hold rectangles in the old
+      // layout, which the new atlas no longer matches - and its texture is gone besides.
+      this.entries.clear()
+      this.resetPacker()
+    }
+    return []
+  }
+
+  /**
+   * Reserves a rectangle for each shape. Null when the atlas ran out of room, unless
+   * `partial` is set, in which case it returns however much fitted.
+   */
+  private tryPlan(shapes: readonly Shape[], partial: boolean): PlannedBake[] | null {
+    const plan: PlannedBake[] = []
     for (const shape of shapes) {
       const silhouette = silhouetteOf(shape)
       if (!silhouette) {
         this.entries.delete(shape)
         continue
       }
-      const boundsW = silhouette.maxX - silhouette.minX
-      const boundsH = silhouette.maxY - silhouette.minY
-      const region = shadowRegion(boundsW, boundsH, shape.shadowBlur, shape.shadowSpread, MAX_REGION)
+      const region = shadowRegion(
+        silhouette.maxX - silhouette.minX,
+        silhouette.maxY - silhouette.minY,
+        shape.shadowBlur,
+        shape.shadowSpread,
+        MAX_REGION,
+      )
 
       // Re-bake into the rectangle this shape already holds whenever the new region still
       // fits it. The shelf packer only ever moves forward, so without this every re-bake
@@ -348,11 +394,11 @@ export class ShadowAtlas {
         ? { width: existing.allocWidth, height: existing.allocHeight }
         : { width: slotBucket(region.width, MAX_REGION), height: slotBucket(region.height, MAX_REGION) }
       const rect = reusable ? { x: existing.rectX, y: existing.rectY } : this.packSlot(alloc.width, alloc.height)
-      if (!rect) return false
+      if (!rect) return partial ? plan : null
 
-      this.bakeOne(encoder, shape, silhouette, region, rect, alloc)
+      plan.push({ shape, silhouette, region, rect, alloc })
     }
-    return true
+    return plan
   }
 
   private bakeOne(
