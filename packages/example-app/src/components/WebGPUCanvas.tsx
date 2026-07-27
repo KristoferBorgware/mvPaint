@@ -5,15 +5,23 @@ import {
   createSceneRenderer,
   SceneInputController,
   Transformer,
-  type Rect,
+  Vector3,
+  type Node,
+  type Scene,
   type SceneRendererHandle,
   type Shape,
 } from '@mvpaint/engine'
-import { buildDemoScene } from '../webgpu/demoScene'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
 import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
+import type { ExampleScene, SceneContent } from '../scenes'
 
 interface WebGPUCanvasProps {
+  /**
+   * The example scene to show. Changing it unloads the current scene's content and builds
+   * this one in its place, reusing the same GPU device, pipelines and atlases - tearing the
+   * renderer down and back up per switch would cost a visible stall and a fresh font upload.
+   */
+  scene: ExampleScene
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
   speed: number
   /** Camera zoom factor (>1 zooms in). Updated live without recreating the renderer;
@@ -43,7 +51,7 @@ export interface WebGPUCanvasHandle {
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
-  { speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
+  { scene, speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -51,6 +59,14 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const handleRef = useRef<SceneRendererHandle | null>(null)
   const controllerRef = useRef<SceneInputController | null>(null)
   const transformerRef = useRef<Transformer | null>(null)
+  // The live scene graph + what the current scene handed back, so a switch can swap content
+  // without touching anything the renderer owns.
+  const sceneGraphRef = useRef<Scene | null>(null)
+  const contentRef = useRef<SceneContent>({})
+  const sceneDefRef = useRef(scene)
+  // The camera's framing as the renderer set it up, captured so a scene switch can put the
+  // view back where it started instead of stranding the new scene off-screen.
+  const homeCameraRef = useRef<{ eye: Vector3; target: Vector3 } | null>(null)
   const speedRef = useRef(speed)
   const onZoomChangeRef = useRef(onZoomChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
@@ -77,8 +93,6 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     if (!canvas) return
 
     let cancelled = false
-    let angle = 0
-    let spins = new Map<Rect, number>()
     let lastReportedZoom = zoom
     let inputController: SceneInputController | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
@@ -100,20 +114,19 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
     createSceneRenderer(canvas, {
       onDeviceError: (message) => onError?.(message),
-      populate: (scene) => {
-        spins = buildDemoScene(scene)
-        scene.root.addChild(transformer)
+      populate: (sceneGraph) => {
+        sceneGraphRef.current = sceneGraph
+        // The transformer is added ONCE and deliberately outlives every scene switch: it is
+        // editor furniture, not content, so loadScene below skips it when clearing.
+        sceneGraph.root.addChild(transformer)
+        contentRef.current = sceneDefRef.current.build(sceneGraph)
       },
       onFrame: (dt) => {
-        // The spin drives these rects' rotation every frame, which would overwrite
-        // anything the transformer's rotate handle did to them - so at speed 0 the
-        // animation lets go entirely and they can be turned by hand instead.
-        if (speedRef.current > 0) {
-          angle += dt * speedRef.current
-          for (const [rect, spinScale] of spins) {
-            rect.rotation = angle * spinScale
-          }
-        }
+        // A scene's own animation. It would overwrite anything the transformer's rotate
+        // handle did, so at speed 0 the animation lets go entirely and shapes can be turned
+        // by hand instead - which is why the speed reaches the scene rather than being
+        // applied here.
+        contentRef.current.onFrame?.(dt, speedRef.current)
         // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll
         // it back so the zoom slider stays in sync, without a setState on every frame.
         const handle = handleRef.current
@@ -141,6 +154,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           return
         }
         handleRef.current = handle
+        homeCameraRef.current = { eye: handle.camera.eye.clone(), target: handle.camera.target.clone() }
         handle.setZoom(zoom)
         handle.setCullMargin(cullMargin)
         inputController = new SceneInputController(canvas, handle, {
@@ -172,6 +186,40 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Swap the scene's content in place. The renderer, its pipelines, the font atlases and
+  // the transformer all survive; only the scene graph's content is replaced.
+  useEffect(() => {
+    sceneDefRef.current = scene
+    const handle = handleRef.current
+    const sceneGraph = sceneGraphRef.current
+    const transformer = transformerRef.current
+    // Before the first frame the initial scene is built by `populate` instead, so there is
+    // nothing to swap yet.
+    if (!handle || !sceneGraph || !transformer) return
+
+    // Drop the selection first: the transformer holds references to nodes that are about to
+    // leave the graph, and a stale selection would keep re-fitting a frame around them.
+    controllerRef.current?.setSelection([])
+
+    const keep = new Set<Node>([transformer, handle.camera])
+    for (const child of [...sceneGraph.root.children]) {
+      if (!keep.has(child)) sceneGraph.root.removeChild(child)
+    }
+
+    contentRef.current = scene.build(sceneGraph)
+
+    // Re-frame: each scene lays itself out around the origin, so a pan left over from the
+    // previous one would otherwise start the new scene half off-screen.
+    if (homeCameraRef.current) {
+      handle.camera.eye = homeCameraRef.current.eye.clone()
+      handle.camera.target = homeCameraRef.current.target.clone()
+    }
+
+    // Both lanes rebuild from the visible set, which has just changed wholesale.
+    handle.markGeometryDirty()
+    handle.markTextGeometryDirty()
+  }, [scene])
 
   // Push speed changes to the running renderer.
   useEffect(() => {

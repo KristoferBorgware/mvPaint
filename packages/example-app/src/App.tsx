@@ -4,6 +4,7 @@ import {
   Box,
   Chip,
   Collapse,
+  Drawer,
   FormControlLabel,
   IconButton,
   Paper,
@@ -11,6 +12,8 @@ import {
   Stack,
   Switch,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material'
 import SpeedIcon from '@mui/icons-material/Speed'
 import ZoomInIcon from '@mui/icons-material/ZoomIn'
@@ -19,8 +22,13 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
+import CollectionsIcon from '@mui/icons-material/Collections'
 import { Text, type RGBA, type Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
+import { ScenePicker } from './components/ScenePicker'
+import { EXAMPLE_SCENES, type ExampleScene } from './scenes'
+
+const SCENE_PANE_WIDTH = 300
 
 function hexToRgb(hex: string): RGBA {
   const n = parseInt(hex.slice(1), 16)
@@ -41,6 +49,13 @@ const toggleButtonSx = {
 }
 
 export default function App() {
+  const theme = useTheme()
+  // The pane is docked beside the canvas on a wide screen and becomes a drawer below it,
+  // where giving up 300px of a phone's width to a permanent list would leave little canvas.
+  const compact = useMediaQuery(theme.breakpoints.down('md'))
+  const [scene, setScene] = useState<ExampleScene>(EXAMPLE_SCENES[0])
+  const [scenesOpen, setScenesOpen] = useState(false)
+
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [cullMargin, setCullMargin] = useState(0)
@@ -131,11 +146,18 @@ export default function App() {
     if (touchedText) canvasRef.current?.markTextDirty()
   }, [shadowEnabled, shadowConfig])
 
+  const selectScene = (next: ExampleScene) => {
+    setScene(next)
+    setScenesOpen(false)
+  }
+
   return (
-    <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
-      {/* WebGPU render surface fills the window */}
+    <Box sx={{ display: 'flex', width: '100%', height: '100%' }}>
+      {/* Canvas column: the WebGPU surface plus everything that floats over it. */}
+      <Box sx={{ position: 'relative', flex: 1, minWidth: 0, height: '100%' }}>
       <WebGPUCanvas
         ref={canvasRef}
+        scene={scene}
         speed={speed}
         zoom={zoom}
         onZoomChange={setZoom}
@@ -432,8 +454,41 @@ export default function App() {
           >
             <TuneIcon />
           </IconButton>
+          {/* Only when the pane is a drawer - docked, it is already on screen. */}
+          {compact && (
+            <IconButton onClick={() => setScenesOpen(true)} aria-label="Show examples" sx={toggleButtonSx}>
+              <CollectionsIcon />
+            </IconButton>
+          )}
         </Stack>
       </Stack>
+      </Box>
+
+      {/* The example picker: docked beside the canvas on a wide screen, a drawer below it. */}
+      {compact ? (
+        <Drawer
+          anchor="right"
+          open={scenesOpen}
+          onClose={() => setScenesOpen(false)}
+          slotProps={{ paper: { sx: { width: Math.min(SCENE_PANE_WIDTH, 320) } } }}
+        >
+          <ScenePicker scenes={EXAMPLE_SCENES} activeId={scene.id} onSelect={selectScene} />
+        </Drawer>
+      ) : (
+        <Box
+          component="aside"
+          sx={{
+            width: SCENE_PANE_WIDTH,
+            flexShrink: 0,
+            height: '100%',
+            borderLeft: 1,
+            borderColor: 'divider',
+            backgroundColor: 'background.paper',
+          }}
+        >
+          <ScenePicker scenes={EXAMPLE_SCENES} activeId={scene.id} onSelect={selectScene} />
+        </Box>
+      )}
     </Box>
   )
 }

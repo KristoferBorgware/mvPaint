@@ -1,202 +1,18 @@
-// Demo scene content for the example app: gradient-filled and stroked shapes, a stroked
-// polyline, a whole SVG document, and an MSDF text-lane showcase (the four Inter styles,
-// mixed sizes, per-letter stroke, decorations, gradients, and the follow-up features).
-// Kept out of @mvpaint/engine so the engine stays about the renderer, not this content.
+// Text-lane showcase: the four Inter styles, mixed sizes within one node, a gradient-filled
+// run, per-letter outlined glyphs, underline + strikethrough, a highlighted run, wrapped and
+// aligned blocks, baseline shift, faux styles, the glyph-duplicate drop shadow and glow,
+// justification, right-to-left flow and vertical orientation.
+//
+// Positions are in world px (y-up); each Text lays its first line out at its own origin and
+// flows downward.
 
-import {
-  Circle,
-  Polyline,
-  Rect,
-  Scene,
-  Text,
-  loadSvgDocument,
-  type RGBA,
-} from '@mvpaint/engine'
-import { EXAMPLE_SVG } from '../svg/exampleSvg'
-
-const NAVY: RGBA = [0.09, 0.13, 0.28, 1]
-const SLATE: RGBA = [0.27, 0.31, 0.4, 1]
-const DARK: RGBA = [0.1, 0.1, 0.12, 1]
-const TEAL: RGBA = [0.0, 0.48, 0.5, 1]
-const CRIMSON: RGBA = [0.8, 0.12, 0.28, 1]
-const YELLOW: RGBA = [1, 0.86, 0.24, 1]
-const HIGHLIGHT: RGBA = [1, 0.92, 0.4, 1]
+import { Text, type Scene } from '@mvpaint/engine'
+import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL, YELLOW } from './palette'
+import type { SceneContent } from './types'
 
 const LEFT = -440
 
-/** Builds the demo scene into `scene.root` and returns the rects that should spin each frame. */
-export function buildDemoScene(scene: Scene): Map<Rect, number> {
-  const spins = new Map<Rect, number>()
-
-  // Two rects side by side, filled + stroked, spinning about their centers. Sized in
-  // pixel-equivalent world units.
-  const left = scene.root.addChild(
-    new Rect({
-      name: 'rect-left',
-      x: -110,
-      y: 0,
-      width: 160,
-      height: 160,
-      fill: [0.9, 0.28, 0.24, 1],
-      stroke: [0.5, 0.1, 0.08, 1],
-      strokeWidth: 6,
-      // A hard shadow: offset only, no blur - the canvas equivalent of shadowOffset with
-      // shadowBlur left at 0.
-      shadowOffsetX: 10,
-      shadowOffsetY: 14,
-      shadowOpacity: 0.5,
-    }),
-  )
-  // Linear gradient across the rect's own diagonal, in its local (pre-transform)
-  // space - it moves and rotates with the rect.
-  left.fillPriority = 'linear-gradient'
-  left.fillLinearGradientStartPoint = { x: -80, y: -80 }
-  left.fillLinearGradientEndPoint = { x: 80, y: 80 }
-  left.fillLinearGradientColorStops = [
-    { offset: 0, color: [1, 0.9, 0.3, 1] },
-    { offset: 1, color: [0.9, 0.1, 0.2, 1] },
-  ]
-  const right = scene.root.addChild(
-    new Rect({
-      name: 'rect-right',
-      x: 120,
-      y: 0,
-      width: 200,
-      height: 130,
-      fill: [0.2, 0.45, 0.9, 1],
-      stroke: [0.08, 0.18, 0.5, 1],
-      strokeWidth: 6,
-      // A soft shadow: shadowBlur is the canvas blur radius (Gaussian sigma = blur/2),
-      // baked once into the shadow atlas and reused every frame.
-      shadowOffsetX: 8,
-      shadowOffsetY: 20,
-      shadowBlur: 24,
-      shadowOpacity: 0.45,
-    }),
-  )
-  spins.set(left, 1)
-  spins.set(right, -1.4)
-
-  // A circle centered between the rects, drawn last so it layers on top (painter order).
-  const circle = scene.root.addChild(
-    new Circle({
-      name: 'circle',
-      x: 0,
-      y: 0,
-      radius: 90,
-      fill: [0.2, 0.72, 0.36, 1],
-      stroke: [0.1, 0.4, 0.2, 1],
-      strokeWidth: 6,
-      // spread grows the silhouette before the blur softens it (CSS box-shadow's
-      // spread, not part of the canvas model) - a wider, heavier pool of shadow than
-      // blur alone would give.
-      shadowOffsetY: 16,
-      shadowBlur: 16,
-      shadowSpread: 8,
-      shadowOpacity: 0.4,
-    }),
-  )
-  // Radial gradient from the circle's own center out to its own radius, in local
-  // space - a concentric center-to-edge fade.
-  circle.fillPriority = 'radial-gradient'
-  circle.fillRadialGradientStartPoint = { x: 0, y: 0 }
-  circle.fillRadialGradientStartRadius = 0
-  circle.fillRadialGradientEndPoint = { x: 0, y: 0 }
-  circle.fillRadialGradientEndRadius = 90
-  circle.fillRadialGradientColorStops = [
-    { offset: 0, color: [0.9, 1, 0.6, 1] },
-    { offset: 1, color: [0.1, 0.5, 0.2, 1] },
-  ]
-
-  // An open zigzag polyline below the shapes, demonstrating the general contour
-  // stroker on a non-rectangular, non-circular path: round join + round caps
-  // (Canvas2D-style lineJoin/lineCap, both configurable per-instance).
-  scene.root.addChild(
-    new Polyline({
-      name: 'zigzag',
-      points: [
-        { x: -180, y: -180 },
-        { x: -90, y: -120 },
-        { x: 0, y: -180 },
-        { x: 90, y: -120 },
-        { x: 180, y: -180 },
-      ],
-      stroke: [0.55, 0.35, 0.85, 1],
-      strokeWidth: 14,
-      lineJoin: 'round',
-      lineCap: 'round',
-    }),
-  )
-
-  // A whole SVG document loaded through the path pipeline: its shapes (gradient-filled
-  // ring with a hole, radial-filled stroked circle, stroked open curve) become Path
-  // nodes under one container. The root matrix flips Y (SVG is y-down, the scene is
-  // y-up) and lifts the 0..200 artwork into the upper-center of the view.
-  const svgDoc = loadSvgDocument(EXAMPLE_SVG, { rootMatrix: [1, 0, 0, -1, -100, 280] })
-  scene.root.addChild(svgDoc)
-
-  addTextExamples(scene)
-  addZIndexExamples(scene)
-
-  return spins
-}
-
-// zIndex demo: a mesh shape and Text now resolve their stacking order through the same
-// depth buffer, so a shape can sit in FRONT of text (not just always behind it, which is
-// all the two-lane renderer could do before zIndex existed).
-function addZIndexExamples(scene: Scene): void {
-  const root = scene.root
-
-  // Default zIndex (0) on both: a tie falls back to scene order, so the later-added node
-  // (the text) wins - same look as before zIndex existed, but for a different reason.
-  root.addChild(
-    new Circle({
-      name: 'circle-zindex-tie',
-      x: 470 + 40,
-      y: 60 - 8,
-      radius: 34,
-      fill: [0.9, 0.3, 0.5, 0.7],
-    }),
-  )
-  root.addChild(
-    new Text({
-      name: 'text-zindex-tie',
-      x: 470,
-      y: 60,
-      text: 'Text on top (tie)',
-      style: { fontStyle: 'bold', fontSize: 26, color: DARK },
-    }),
-  )
-
-  // A higher zIndex on the circle now correctly brings it in front of the text.
-  root.addChild(
-    new Text({
-      name: 'text-zindex-behind',
-      x: 470,
-      y: -20,
-      text: 'Shape on top (zIndex)',
-      style: { fontStyle: 'bold', fontSize: 26, color: DARK },
-      zIndex: 0,
-    }),
-  )
-  root.addChild(
-    new Circle({
-      name: 'circle-zindex-front',
-      x: 470 + 40,
-      y: -20 - 8,
-      radius: 34,
-      fill: [0.2, 0.55, 0.9, 0.85],
-      zIndex: 1,
-    }),
-  )
-}
-
-// Text-lane showcase: the four Inter styles, mixed sizes within one node, a gradient-filled
-// run, per-letter outlined glyphs, underline + strikethrough, a highlighted run, a
-// word-wrapped + a center-aligned block, and the follow-up features (baseline shift, faux
-// styles, shadow/glow, justify, RTL, vertical). Positions are in world px (y-up); each Text
-// lays its first line out at its own origin and flows downward.
-function addTextExamples(scene: Scene): void {
+export function buildTextScene(scene: Scene): SceneContent {
   const root = scene.root
   // Gradient-filled title (a single run whose fill is a linear gradient across its width).
   root.addChild(
@@ -428,4 +244,6 @@ function addTextExamples(scene: Scene): void {
       style: { fontStyle: 'bold', fontSize: 30, color: TEAL },
     }),
   )
+
+  return {}
 }
