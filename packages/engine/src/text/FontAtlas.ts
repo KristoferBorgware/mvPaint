@@ -4,23 +4,24 @@
 // (and a stable atlas index, used by the batcher to segment draws) to its FontAtlas. Atlases
 // are loaded asynchronously (fetch the PNG -> ImageBitmap -> texture) before the text lane
 // draws; the metrics JSON is bundled, so only the PNG is fetched.
+//
+// The metrics-only half of this - the JSON, the style-fallback ladder, and msdfFontProvider()
+// (a FontProvider needing no device at all) - lives in msdfProvider.ts, re-exported below.
+// It's a separate module specifically so it stays importable under node (no `?url` PNG import
+// only a bundler can resolve), which is what lets the self-test - and any app code that wants
+// to measure text before a device exists - reach it directly.
 
 import { createAtlasBindGroupLayout } from '../render/layouts'
 import { normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
+import { resolveStyle, STYLE_JSON, STYLE_ORDER, type FontStyle } from './msdfProvider'
+
+export type { FontStyle } from './msdfProvider'
+export { msdfFontProvider } from './msdfProvider'
 
 import interRegularPng from './fonts/inter-regular.png?url'
 import interBoldPng from './fonts/inter-bold.png?url'
 import interItalicPng from './fonts/inter-italic.png?url'
 import interBoldItalicPng from './fonts/inter-bold-italic.png?url'
-import interRegularJson from './fonts/inter-regular.json'
-import interBoldJson from './fonts/inter-bold.json'
-import interItalicJson from './fonts/inter-italic.json'
-import interBoldItalicJson from './fonts/inter-bold-italic.json'
-
-export type FontStyle = 'regular' | 'bold' | 'italic' | 'bold-italic'
-
-// Ordered so a style's array index is its stable atlas index (used to segment text draws).
-const STYLE_ORDER: readonly FontStyle[] = ['regular', 'bold', 'italic', 'bold-italic']
 
 interface StyleSource {
   style: FontStyle
@@ -28,12 +29,10 @@ interface StyleSource {
   json: MsdfFontJson
 }
 
-const SOURCES: readonly StyleSource[] = [
-  { style: 'regular', url: interRegularPng, json: interRegularJson as unknown as MsdfFontJson },
-  { style: 'bold', url: interBoldPng, json: interBoldJson as unknown as MsdfFontJson },
-  { style: 'italic', url: interItalicPng, json: interItalicJson as unknown as MsdfFontJson },
-  { style: 'bold-italic', url: interBoldItalicPng, json: interBoldItalicJson as unknown as MsdfFontJson },
-]
+const PNG_URLS: readonly string[] = [interRegularPng, interBoldPng, interItalicPng, interBoldItalicPng]
+// PNG_URLS is ordered to match STYLE_JSON (both list the four styles in STYLE_ORDER), so
+// zipping them index-for-index pairs each style with its own atlas image.
+const SOURCES: readonly StyleSource[] = STYLE_JSON.map((s, i) => ({ style: s.style, url: PNG_URLS[i], json: s.json }))
 
 export class FontAtlas {
   readonly metrics: FontMetrics
@@ -121,21 +120,8 @@ export class FontBook {
    * via shear). With all four Inter styles loaded this always returns the real atlas.
    */
   resolve(style: FontStyle): { metrics: FontMetrics; atlasIndex: number; fauxBold: boolean; fauxItalic: boolean } {
-    const wantBold = style.includes('bold')
-    const wantItalic = style.includes('italic')
-    const candidates: FontStyle[] = [style, wantItalic ? 'italic' : 'regular', wantBold ? 'bold' : 'regular', 'regular']
-    for (const candidate of candidates) {
-      const idx = STYLE_ORDER.indexOf(candidate)
-      if (idx >= 0 && this.atlases[idx]) {
-        return {
-          metrics: this.atlases[idx].metrics,
-          atlasIndex: idx,
-          fauxBold: wantBold && !candidate.includes('bold'),
-          fauxItalic: wantItalic && !candidate.includes('italic'),
-        }
-      }
-    }
-    return { metrics: this.atlases[0].metrics, atlasIndex: 0, fauxBold: wantBold, fauxItalic: wantItalic }
+    const r = resolveStyle(style, (i) => this.atlases[i]?.metrics)
+    return { metrics: r.value, atlasIndex: r.atlasIndex, fauxBold: r.fauxBold, fauxItalic: r.fauxItalic }
   }
 
   atlas(style: FontStyle): FontAtlas {

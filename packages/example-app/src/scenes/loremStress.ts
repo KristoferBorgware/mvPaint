@@ -8,48 +8,70 @@
 // The randomness is seeded and fixed, not reseeded per call: the whole point of putting these
 // two scenes side by side is that the SAME word gets the SAME style in both, so a difference
 // on screen is the rendering technique, never a coincidence of which scene rolled which dice.
-// buildLoremPages() therefore takes no seed argument at all - hardcoding it here is what makes
-// "call this from two files" the only way to reach it, rather than "remember to pass the same
-// seed in both places."
+// loremStressLayout() therefore takes no seed argument at all - hardcoding it here is what
+// makes "call this from two files" the only way to reach it, rather than "remember to pass the
+// same seed in both places."
+//
+// Each paragraph is its own node in the scene (its own pick target, its own object in either
+// lane), not one node per page with embedded line breaks - which is why this module also
+// stacks them: every paragraph is measured with the shared shaper BEFORE either scene builds a
+// single Text or VectorText, using msdfFontProvider() (no device needed - see FontAtlas.ts), so
+// each one's y-offset is its actual wrapped height, not a guess. The same measurement also
+// sizes the page background, which is why a page's height is computed here rather than fixed.
 
-import { Rect, Text, type Container, type RGBA, type TextRun, type TextRunStyle } from '@mvpaint/engine'
+import { layoutText, msdfFontProvider, Rect, Text, type Container, type RGBA, type TextRun, type TextRunStyle } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 
-// --- page grid, shared so both scenes draw identically positioned paper -------------------
+// --- page grid ------------------------------------------------------------------------
 
 export const PAGE_COUNT = 4
 export const PAGE_WIDTH = 460
-// Measured, not guessed: 300 words at FONT_SIZE wrapped to PAGE_WIDTH - 2*PAGE_PADDING run
-// 41-45 lines and 930-1020 units tall (worst case across the four pages' actual random
-// styling, since bold/italic runs and letterSpacing shift line breaks slightly per page).
-// 1120 leaves headroom for both, plus the page label above the body copy.
-export const PAGE_HEIGHT = 1120
 export const PAGE_GAP = 60
 export const PAGE_PADDING = 24
-/** Body copy size, in world px - fixed rather than randomized, so page height stays predictable. */
+/** Body copy size, in world px - fixed rather than randomized, so wrapping stays predictable. */
 export const FONT_SIZE = 15
 /** Words per page - about as much running text as a printed page holds at this size. */
 export const WORDS_PER_PAGE = 300
+/** Line height multiplier for every paragraph - must match between measuring and drawing. */
+export const PARAGRAPH_LINE_HEIGHT = 1.25
+/** Gap between one paragraph's bottom and the next one's top. */
+const PARAGRAPH_GAP = 26
+/** Space at the top of a page reserved for its "Page N" caption, before the body starts. */
+const HEADER_HEIGHT = 40
+// The page background is sized from the MSDF measurement below; VectorText's real font
+// metrics agree with the MSDF atlas's to within about 1%, close enough over a whole page that
+// this margin (plus PARAGRAPH_GAP's slack between paragraphs) absorbs the drift either way.
+const SAFETY_MARGIN = 48
+
+export const BODY_MAX_WIDTH = PAGE_WIDTH - PAGE_PADDING * 2
 
 const GRID_COLS = 2
 const GRID_ROWS = 2
-const TOTAL_WIDTH = GRID_COLS * PAGE_WIDTH + (GRID_COLS - 1) * PAGE_GAP
-const TOTAL_HEIGHT = GRID_ROWS * PAGE_HEIGHT + (GRID_ROWS - 1) * PAGE_GAP
 
-/** The top-left corner of page `index` (0-based, row-major), in world space. */
-export function pageOrigin(index: number): { x: number; y: number } {
-  const col = index % GRID_COLS
-  const row = Math.floor(index / GRID_COLS)
-  return {
-    x: -TOTAL_WIDTH / 2 + col * (PAGE_WIDTH + PAGE_GAP),
-    y: TOTAL_HEIGHT / 2 - row * (PAGE_HEIGHT + PAGE_GAP),
-  }
+/** One paragraph's runs, ready for either Text or VectorText's `runs` option, plus where its
+ * top sits relative to the page's body-start point (0 = first paragraph; more negative =
+ * further down the page, matching this scene's y-up space). */
+export interface LoremParagraph {
+  runs: TextRun[]
+  y: number
 }
 
-/** The whole grid's bounds, for framing a title above it or a note below it. */
-export const GRID_BOUNDS = { width: TOTAL_WIDTH, height: TOTAL_HEIGHT, top: TOTAL_HEIGHT / 2, bottom: -TOTAL_HEIGHT / 2 }
+export interface LoremPage {
+  paragraphs: LoremParagraph[]
+}
 
-// --- deterministic "random" ----------------------------------------------------------------
+export interface LoremLayout {
+  pages: LoremPage[]
+  /** The measured height every page's background is drawn at - see the file header. */
+  pageHeight: number
+  /** The top-left corner of page `index` (0-based, row-major), in world space. */
+  pageOrigin: (index: number) => { x: number; y: number }
+  /** The whole grid's bounds, for framing a title above it or a note below it. */
+  gridTop: number
+  gridBottom: number
+}
+
+// --- deterministic "random" -------------------------------------------------------------
 
 // mulberry32: a small, fast, seeded PRNG - not cryptographic, just needs to be the same
 // sequence every time, which Math.random() cannot promise.
@@ -63,7 +85,7 @@ function mulberry32(seed: number): () => number {
   }
 }
 
-/** Fixed so buildLoremPages() is reproducible without a caller having to supply anything. */
+/** Fixed so loremStressLayout() is reproducible without a caller having to supply anything. */
 const SEED = 0x6c6f7265 // 'lore'
 
 // The classic lorem ipsum word list - words are drawn from this at random rather than the
@@ -73,15 +95,13 @@ const LOREM_WORDS =
     ' ',
   )
 
-/** One page's runs, ready to hand to either Text or VectorText's `runs` option. */
-export interface LoremPage {
-  runs: TextRun[]
-}
-
-// Body text plus punctuation and paragraph breaks, built word-by-word so sentence length and
-// paragraph breaks are randomized the same way the styling is (same rng, same draw order).
-function loremText(rng: () => number, wordCount: number): string {
-  let out = ''
+// Body text for one page, split into separate paragraph strings (no embedded line breaks -
+// a paragraph break ends the current string and starts a new one) - built word-by-word so
+// sentence length and paragraph breaks are randomized the same way the styling is (same rng,
+// same draw order).
+function loremParagraphs(rng: () => number, wordCount: number): string[] {
+  const paragraphs: string[] = []
+  let current = ''
   let sinceSentence = 0
   let sentenceLength = 6 + Math.floor(rng() * 10)
   let capitalizeNext = true
@@ -91,25 +111,31 @@ function loremText(rng: () => number, wordCount: number): string {
       word = word.charAt(0).toUpperCase() + word.slice(1)
       capitalizeNext = false
     }
-    out += word
+    current += word
     sinceSentence++
     if (sinceSentence >= sentenceLength) {
+      current += '.'
       // Roughly one paragraph break every ~5-6 sentences.
-      out += rng() < 0.18 ? '.\n\n' : '. '
+      if (rng() < 0.18) {
+        paragraphs.push(current)
+        current = ''
+      } else {
+        current += ' '
+      }
       capitalizeNext = true
       sinceSentence = 0
       sentenceLength = 6 + Math.floor(rng() * 10)
     } else {
-      if (rng() < 0.12) out += ','
-      out += ' '
+      if (rng() < 0.12) current += ','
+      current += ' '
     }
   }
-  return out.trim()
+  if (current.trim().length > 0) paragraphs.push(current.trim())
+  return paragraphs
 }
 
-// Each token is a word plus whatever whitespace follows it (a single space, or a paragraph
-// break) - splitting this way means a run boundary can never fall inside a word, without
-// having to special-case punctuation or newlines separately.
+// Each token is a word plus whatever whitespace follows it - splitting this way means a run
+// boundary can never fall inside a word, without having to special-case punctuation.
 function tokenize(text: string): string[] {
   return text.match(/\S+\s*/g) ?? []
 }
@@ -136,46 +162,88 @@ function randomStyle(rng: () => number): TextRunStyle {
   return style
 }
 
-/**
- * `PAGE_COUNT` pages of styled lorem ipsum. Deterministic: every call returns the identical
- * pages, words, and styles - see the file header for why that's the point rather than a
- * limitation. Runs are chunked 3-8 words at a time, each with its own randomized style, so a
- * page reads as continuous prose while still exercising per-run materials throughout.
- */
-export function buildLoremPages(): LoremPage[] {
-  const rng = mulberry32(SEED)
-  const pages: LoremPage[] = []
-  for (let p = 0; p < PAGE_COUNT; p++) {
-    const tokens = tokenize(loremText(rng, WORDS_PER_PAGE))
-    const runs: TextRun[] = []
-    let i = 0
-    while (i < tokens.length) {
-      const n = Math.min(tokens.length - i, 3 + Math.floor(rng() * 6))
-      runs.push({ text: tokens.slice(i, i + n).join(''), style: randomStyle(rng) })
-      i += n
-    }
-    pages.push({ runs })
+// A paragraph's tokens, chunked 3-8 words at a time, each chunk with its own randomized style.
+function paragraphRuns(rng: () => number, text: string): TextRun[] {
+  const tokens = tokenize(text)
+  const runs: TextRun[] = []
+  let i = 0
+  while (i < tokens.length) {
+    const n = Math.min(tokens.length - i, 3 + Math.floor(rng() * 6))
+    runs.push({ text: tokens.slice(i, i + n).join(''), style: randomStyle(rng) })
+    i += n
   }
-  return pages
+  return runs
 }
 
-// --- shared page chrome ---------------------------------------------------------------
+// --- layout: generate, measure, and cache (computed once, reused by both scenes) -------
+
+let cachedLayout: LoremLayout | null = null
+
+/**
+ * `PAGE_COUNT` pages of styled lorem ipsum, laid out in a 2x2 grid, each page split into
+ * separately-positioned paragraphs. Deterministic and memoized: every call returns the
+ * identical layout - see the file header for why that's the point rather than a limitation.
+ */
+export function loremStressLayout(): LoremLayout {
+  if (!cachedLayout) cachedLayout = computeLayout()
+  return cachedLayout
+}
+
+function computeLayout(): LoremLayout {
+  const rng = mulberry32(SEED)
+  const provider = msdfFontProvider()
+
+  let tallestBody = 0
+  const pages: LoremPage[] = []
+  for (let p = 0; p < PAGE_COUNT; p++) {
+    const texts = loremParagraphs(rng, WORDS_PER_PAGE)
+    let y = 0
+    const paragraphs: LoremParagraph[] = texts.map((text) => {
+      const runs = paragraphRuns(rng, text)
+      const paragraph: LoremParagraph = { runs, y }
+      const shaped = layoutText(runs, { maxWidth: BODY_MAX_WIDTH, lineHeight: PARAGRAPH_LINE_HEIGHT }, provider)
+      y -= shaped.height + PARAGRAPH_GAP
+      return paragraph
+    })
+    // Back out the trailing gap after the last paragraph - it isn't part of the body.
+    tallestBody = Math.max(tallestBody, -y - PARAGRAPH_GAP)
+    pages.push({ paragraphs })
+  }
+
+  const pageHeight = Math.ceil(HEADER_HEIGHT + tallestBody + PAGE_PADDING + SAFETY_MARGIN)
+  const totalWidth = GRID_COLS * PAGE_WIDTH + (GRID_COLS - 1) * PAGE_GAP
+  const totalHeight = GRID_ROWS * pageHeight + (GRID_ROWS - 1) * PAGE_GAP
+
+  const pageOrigin = (index: number): { x: number; y: number } => {
+    const col = index % GRID_COLS
+    const row = Math.floor(index / GRID_COLS)
+    return {
+      x: -totalWidth / 2 + col * (PAGE_WIDTH + PAGE_GAP),
+      y: totalHeight / 2 - row * (pageHeight + PAGE_GAP),
+    }
+  }
+
+  return { pages, pageHeight, pageOrigin, gridTop: totalHeight / 2, gridBottom: -totalHeight / 2 }
+}
+
+// --- shared page chrome ------------------------------------------------------------------
 
 /**
  * The paper background and "Page N" caption for page `index` - decorative, and identical
  * between the two scenes, so a difference in the actual body text is never a difference in
- * the surrounding chrome. Returns where the body copy should start (inside the padding,
- * below the caption).
+ * the surrounding chrome. Returns where the first paragraph's top should sit (inside the
+ * padding, below the caption); each later paragraph adds its own `y` from the layout to this
+ * same point.
  */
-export function addPageFrame(root: Container, index: number): { x: number; y: number } {
-  const origin = pageOrigin(index)
+export function addPageFrame(root: Container, index: number, layout: LoremLayout): { x: number; y: number } {
+  const origin = layout.pageOrigin(index)
 
   const background = new Rect({
     name: `lorem-page-bg-${index}`,
     x: origin.x + PAGE_WIDTH / 2,
-    y: origin.y - PAGE_HEIGHT / 2,
+    y: origin.y - layout.pageHeight / 2,
     width: PAGE_WIDTH,
-    height: PAGE_HEIGHT,
+    height: layout.pageHeight,
     fill: [0.99, 0.99, 1, 1],
     stroke: SLATE,
     strokeWidth: 1.5,
@@ -194,5 +262,5 @@ export function addPageFrame(root: Container, index: number): { x: number; y: nu
     }),
   )
 
-  return { x: origin.x + PAGE_PADDING, y: origin.y - PAGE_PADDING - 40 }
+  return { x: origin.x + PAGE_PADDING, y: origin.y - PAGE_PADDING - HEADER_HEIGHT }
 }

@@ -1,6 +1,6 @@
 // Outline text stress test: the same four pages of lorem ipsum as msdfStressScene, same
-// words, same random styling (see loremStress.ts), rendered as tessellated glyph outlines
-// through the mesh lane instead of sampled from an MSDF atlas.
+// words, same random styling, same per-paragraph split (see loremStress.ts), rendered as
+// tessellated glyph outlines through the mesh lane instead of sampled from an MSDF atlas.
 //
 // This is the scene that makes the cost of the vector path concrete: a page of body copy here
 // is tens of thousands of real triangles rather than four vertices per glyph, so loading it is
@@ -13,11 +13,9 @@
 // cost for them.
 
 import { Text, VectorText, type Scene, type VectorFontBook, loadDefaultVectorFonts } from '@mvpaint/engine'
-import { addPageFrame, buildLoremPages, PAGE_COUNT, PAGE_WIDTH, PAGE_PADDING, GRID_BOUNDS, WORDS_PER_PAGE } from './loremStress'
+import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT, WORDS_PER_PAGE } from './loremStress'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
-
-const BODY_MAX_WIDTH = PAGE_WIDTH - PAGE_PADDING * 2
 
 // Held here rather than passed through the scene contract, same reasoning as vectorTextScene:
 // parsed outlines own no GPU resources, so there's nothing for the renderer to hand out.
@@ -32,13 +30,13 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
   if (!fonts) throw new Error('Vector fonts are not loaded yet')
   const book = fonts
   const root = scene.root
-  const pages = buildLoremPages()
+  const layout = loremStressLayout()
 
   root.addChild(
     new Text({
       name: 'vector-stress-title',
       x: -PAGE_WIDTH,
-      y: GRID_BOUNDS.top + 70,
+      y: layout.gridTop + 70,
       text: `Outline text: ${PAGE_COUNT} pages, ${PAGE_COUNT * WORDS_PER_PAGE} words, no atlas`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
@@ -47,26 +45,28 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'vector-stress-note',
       x: -PAGE_WIDTH,
-      y: GRID_BOUNDS.top + 34,
+      y: layout.gridTop + 34,
       text: 'Every glyph is a real triangulated outline - tessellated once, cached, and never re-blurred.',
       style: { fontSize: 17, color: SLATE },
     }),
   )
 
-  pages.forEach((page, i) => {
-    const body = addPageFrame(root, i)
-    root.addChild(
-      new VectorText({
-        fonts: book,
-        name: `vector-stress-page-${i}`,
-        x: body.x,
-        y: body.y,
-        runs: page.runs,
-        maxWidth: BODY_MAX_WIDTH,
-        lineHeight: 1.25,
-        align: 'left',
-      }),
-    )
+  layout.pages.forEach((page, i) => {
+    const body = addPageFrame(root, i, layout)
+    page.paragraphs.forEach((paragraph, pi) => {
+      root.addChild(
+        new VectorText({
+          fonts: book,
+          name: `vector-stress-page-${i}-para-${pi}`,
+          x: body.x,
+          y: body.y + paragraph.y,
+          runs: paragraph.runs,
+          maxWidth: BODY_MAX_WIDTH,
+          lineHeight: PARAGRAPH_LINE_HEIGHT,
+          align: 'left',
+        }),
+      )
+    })
   })
 
   return {}

@@ -20,6 +20,9 @@ import { readFileSync } from 'node:fs'
 import { kerningFor, normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
 import { layoutText, type FontProvider, type TextRun } from './layout'
 import type { FontStyle } from './FontAtlas'
+// Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts also pulls in `?url` PNG
+// imports only a bundler can resolve, which would break this file running under plain node.
+import { msdfFontProvider } from './msdfProvider'
 import { contoursFromCommands } from './glyphOutline'
 import { VectorFontBook } from './VectorFont'
 import { VectorText } from '../shapes/VectorText'
@@ -60,6 +63,22 @@ const regularOnly: FontProvider = {
 
 const run = (text: string, style: TextRun['style'] = {}): TextRun => ({ text, style })
 const finite = (n: number) => Number.isFinite(n)
+
+// --- msdfFontProvider: the GPU-free FontProvider a scene can measure text with, with no
+// FontBook/device involved (see FontAtlas.ts) - built off the SAME bundled JSON as `fonts`
+// above, so the two must resolve identically. ---
+{
+  const provider = msdfFontProvider()
+  assert(provider === msdfFontProvider(), 'the provider is built once and cached, not rebuilt per call')
+
+  const bold = provider.resolve('bold')
+  assert(bold.atlasIndex === STYLE_ORDER.indexOf('bold'), "resolving 'bold' returns bold's atlas index")
+  assert(!bold.fauxBold && !bold.fauxItalic, 'an exact style match needs no synthesis (all four are bundled)')
+  assert(bold.metrics.glyphs.size === METRICS.bold.glyphs.size, "msdfFontProvider's metrics match FontBook's own normalization")
+
+  const shaped = layoutText([run('Measured before any device exists', { fontSize: 20 })], { maxWidth: 140 }, provider)
+  assert(shaped.lineCount > 1 && shaped.height > 0, 'the shaper runs against it exactly like any other FontProvider')
+}
 
 // --- metrics: uv rects normalized into [0,1], sane advances, kerning present ---
 {
