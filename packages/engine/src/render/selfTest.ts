@@ -20,7 +20,14 @@ import {
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { blurMarginUnits, shadowMarginUnits, shadowQuadBounds, shadowRegion, shadowSigma, shadowWorldOffset, worldAxisScale } from './shadowMath'
-import { SHADOW_OBJECT_STRIDE, SHADOW_VERTEX_LAYOUT, SHADOW_VERTEX_STRIDE } from './shadowFormat'
+import {
+  SHADOW_OBJECT_DEPTH_OFFSET,
+  SHADOW_OBJECT_QUAD_OFFSET,
+  SHADOW_OBJECT_STRIDE,
+  SHADOW_OBJECT_UV_OFFSET,
+  SHADOW_VERTEX_LAYOUT,
+  SHADOW_VERTEX_STRIDE,
+} from './shadowFormat'
 import { Shape } from '../shapes/Shape'
 import { hitTestShape } from '../scene/picking'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -512,14 +519,25 @@ assert(
 
 // --- shadow vertex/object formats line up with the WGSL structs ---
 {
-  assert(SHADOW_VERTEX_STRIDE === 20, 'shadow vertex is position + uv + objectId')
+  // The vertex carries a unit-square CORNER and an object id, nothing else: the quad's real
+  // bounds and its atlas uv both come from the per-object record, because both describe the
+  // shape's atlas slot and a slot can be re-baked into a different rectangle at any time.
+  // Geometry that cached them would have no moment at which to notice it had gone stale.
+  assert(SHADOW_VERTEX_STRIDE === 12, 'shadow vertex is a corner plus an object id')
   assert(SHADOW_VERTEX_LAYOUT.arrayStride === SHADOW_VERTEX_STRIDE, 'the layout agrees with the stride')
   const attrs = [...SHADOW_VERTEX_LAYOUT.attributes]
-  assert(attrs.length === 3, 'three vertex attributes')
-  assert(attrs[2].offset === 16 && attrs[2].format === 'uint32', 'the object id trails the two vec2s')
+  assert(attrs.length === 2, 'two vertex attributes - no uv among them')
+  assert(attrs[1].offset === 8 && attrs[1].format === 'uint32', 'the object id trails the corner')
   // std430: a struct containing a mat4x4/vec4 aligns to 16, so the record must round up.
   assert(SHADOW_OBJECT_STRIDE % 16 === 0, 'the shadow object record keeps 16-byte alignment')
-  assert(SHADOW_OBJECT_STRIDE >= 64 + 16 + 4, 'it holds a mat4x4, a vec4 tint and a depth')
+  assert(
+    SHADOW_OBJECT_QUAD_OFFSET % 16 === 0 && SHADOW_OBJECT_UV_OFFSET % 16 === 0,
+    'the quad and uv vec4s sit on their required 16-byte boundaries',
+  )
+  assert(
+    SHADOW_OBJECT_STRIDE >= SHADOW_OBJECT_DEPTH_OFFSET + 4,
+    'the record holds a mat4x4, a tint, the slot quad + uv, and a depth',
+  )
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -22,20 +22,15 @@ import CropFreeIcon from '@mui/icons-material/CropFree'
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
-import BlurOnIcon from '@mui/icons-material/BlurOn'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
-import { Text, type RGBA, type Shape } from '@mvpaint/engine'
+import type { Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
+import { ShadowControls } from './components/ShadowControls'
 import { EXAMPLE_SCENES, type ExampleScene } from './scenes'
 
 const SCENE_PANE_WIDTH = 300
-
-function hexToRgb(hex: string): RGBA {
-  const n = parseInt(hex.slice(1), 16)
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1]
-}
 
 const panelSx = {
   p: 2.5,
@@ -73,83 +68,9 @@ export default function App() {
   const [controlsOpen, setControlsOpen] = useState(false)
   const canvasRef = useRef<WebGPUCanvasHandle>(null)
 
-  // Stable identity so the canvas's effect doesn't see a new callback every render.
+  // Stable identities so the child effects don't see a new callback every render.
   const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
-
-  // Shadow controls, mirroring the canvas 2D property names the engine uses (plus spread,
-  // borrowed from CSS box-shadow). Offset, colour and opacity are per-frame quad
-  // parameters, so dragging those sliders costs nothing; blur and spread re-bake the
-  // shape's atlas texture, which is what to watch when judging performance. offsetY is
-  // downward-positive, so a shadow falling down-and-right under upper-left light wants a
-  // positive offsetX AND offsetY.
-  const [shadowEnabled, setShadowEnabled] = useState(false)
-  const [shadowOffsetX, setShadowOffsetX] = useState(12)
-  const [shadowOffsetY, setShadowOffsetY] = useState(16)
-  const [shadowBlur, setShadowBlur] = useState(24)
-  const [shadowSpread, setShadowSpread] = useState(0)
-  const [shadowOpacity, setShadowOpacity] = useState(0.5)
-  const [shadowColor, setShadowColor] = useState('#000000')
-  // Mesh shapes only: Text has no rasterized silhouette to blur or grow, so it ignores
-  // blur/spread/shadowForStroke and just duplicates its glyphs at the offset.
-  const [shadowForStroke, setShadowForStroke] = useState(true)
-
-  const shadowConfig = useMemo(
-    () => ({
-      offsetX: shadowOffsetX,
-      offsetY: shadowOffsetY,
-      blur: shadowBlur,
-      spread: shadowSpread,
-      opacity: shadowOpacity,
-      color: hexToRgb(shadowColor),
-      forStroke: shadowForStroke,
-    }),
-    [shadowOffsetX, shadowOffsetY, shadowBlur, shadowSpread, shadowOpacity, shadowColor, shadowForStroke],
-  )
-
-  // Only touches the CURRENT selection at the moment a control changes - not on every
-  // selection change - so merely clicking a shape never clobbers whatever shadow it
-  // already had (e.g. the demo scene's own hand-tuned shadows).
-  const selectedRef = useRef<readonly Shape[]>(selected)
-  useEffect(() => {
-    selectedRef.current = selected
-  }, [selected])
-  useEffect(() => {
-    let touchedText = false
-    for (const node of selectedRef.current) {
-      if (node instanceof Text) {
-        // Text carries its shadow as per-run styling rather than through the shape-level
-        // shadow* properties, and has no blur of its own - it is an offset duplicate of
-        // the glyphs. This panel applies one shadow across every run at once.
-        node.setRuns(
-          node.runs.map((run) => ({
-            ...run,
-            style: {
-              ...run.style,
-              shadow: shadowEnabled
-                ? {
-                    color: shadowConfig.color,
-                    offsetX: shadowConfig.offsetX,
-                    offsetY: shadowConfig.offsetY,
-                    opacity: shadowConfig.opacity,
-                  }
-                : undefined,
-            },
-          })),
-        )
-        touchedText = true
-      } else {
-        node.shadowEnabled = shadowEnabled
-        node.shadowColor = shadowConfig.color
-        node.shadowOffsetX = shadowConfig.offsetX
-        node.shadowOffsetY = shadowConfig.offsetY
-        node.shadowBlur = shadowConfig.blur
-        node.shadowSpread = shadowConfig.spread
-        node.shadowOpacity = shadowConfig.opacity
-        node.shadowForStrokeEnabled = shadowConfig.forStroke
-      }
-    }
-    if (touchedText) canvasRef.current?.markTextDirty()
-  }, [shadowEnabled, shadowConfig])
+  const handleTextChanged = useCallback(() => canvasRef.current?.markTextDirty(), [])
 
   const selectScene = (next: ExampleScene) => {
     setScene(next)
@@ -291,124 +212,7 @@ export default function App() {
                 </Typography>
               </Stack>
 
-              <Stack spacing={1}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      size="small"
-                      checked={shadowEnabled}
-                      onChange={(e) => setShadowEnabled(e.target.checked)}
-                      disabled={selected.length === 0}
-                    />
-                  }
-                  label={
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <BlurOnIcon fontSize="small" />
-                      <Typography variant="body2">Shadow</Typography>
-                    </Stack>
-                  }
-                />
-                {selected.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">
-                    Select a shape to give it a shadow.
-                  </Typography>
-                ) : (
-                  <Stack spacing={1}>
-                    <Typography variant="caption" color="text.secondary">
-                      Offset: {shadowOffsetX.toFixed(0)}, {shadowOffsetY.toFixed(0)}
-                    </Typography>
-                    <Slider
-                      aria-label="Shadow offset X"
-                      value={shadowOffsetX}
-                      min={-60}
-                      max={60}
-                      step={1}
-                      onChange={(_, v) => setShadowOffsetX(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-                    <Slider
-                      aria-label="Shadow offset Y"
-                      value={shadowOffsetY}
-                      min={-60}
-                      max={60}
-                      step={1}
-                      onChange={(_, v) => setShadowOffsetY(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-
-                    <Typography variant="caption" color="text.secondary">
-                      Blur: {shadowBlur.toFixed(0)} · Spread: {shadowSpread.toFixed(0)}
-                    </Typography>
-                    <Slider
-                      aria-label="Shadow blur"
-                      value={shadowBlur}
-                      min={0}
-                      max={80}
-                      step={1}
-                      onChange={(_, v) => setShadowBlur(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-                    <Slider
-                      aria-label="Shadow spread"
-                      value={shadowSpread}
-                      min={-30}
-                      max={40}
-                      step={1}
-                      onChange={(_, v) => setShadowSpread(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-
-                    <Stack direction="row" spacing={2} alignItems="center">
-                      <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1 }}>
-                        Opacity: {shadowOpacity.toFixed(2)}
-                      </Typography>
-                      <Box
-                        component="input"
-                        type="color"
-                        aria-label="Shadow color"
-                        value={shadowColor}
-                        onChange={(e) => setShadowColor(e.target.value)}
-                        disabled={!shadowEnabled}
-                        sx={{
-                          width: 28,
-                          height: 28,
-                          p: 0,
-                          border: 'none',
-                          borderRadius: 1,
-                          backgroundColor: 'transparent',
-                        }}
-                      />
-                    </Stack>
-                    <Slider
-                      aria-label="Shadow opacity"
-                      value={shadowOpacity}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      onChange={(_, v) => setShadowOpacity(v as number)}
-                      disabled={!shadowEnabled}
-                    />
-
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          size="small"
-                          checked={shadowForStroke}
-                          onChange={(e) => setShadowForStroke(e.target.checked)}
-                          disabled={!shadowEnabled}
-                        />
-                      }
-                      label={<Typography variant="body2">Shadow for stroke</Typography>}
-                    />
-                    <Typography variant="caption" color="text.secondary">
-                      Off casts the shadow from the fill only, skipping the stroke ring - a
-                      thick decorative outline otherwise widens the shadow with it. No
-                      effect on a selected Text, which duplicates its glyphs rather than
-                      blurring a silhouette.
-                    </Typography>
-                  </Stack>
-                )}
-              </Stack>
+              <ShadowControls selected={selected} onTextChanged={handleTextChanged} />
             </Stack>
           </Paper>
         </Collapse>

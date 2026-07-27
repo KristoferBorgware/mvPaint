@@ -284,12 +284,14 @@ export class SceneRenderer {
     const shadowCasters = onScreen.filter((s) => s.hasShadow())
     if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
       if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
-        this.shadowBatcher.rebuild(shadowCasters, this.shadowAtlas)
+        this.shadowBatcher.rebuild(shadowCasters)
         this.shadowGeometryDirty = false
       }
       // Half a depth step behind the caster: far enough to lose the depth test against its
-      // own shape, near enough to stay in front of whatever sits below it.
-      this.shadowBatcher.updateObjects(depths, 0.5 / (ordered.length + 1))
+      // own shape, near enough to stay in front of whatever sits below it. This also
+      // re-reads each shadow's atlas slot, so a silhouette re-baked this frame is picked up
+      // without the geometry above needing to know anything about it.
+      this.shadowBatcher.updateObjects(this.shadowAtlas, depths, 0.5 / (ordered.length + 1))
       pass.setPipeline(this.shadowPipeline)
       this.shadowBatcher.draw(pass, this.frameUniforms.bindGroup, this.shadowAtlas)
     }

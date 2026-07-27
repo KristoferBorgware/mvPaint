@@ -7,7 +7,13 @@
 // skew, parenting, the shadow's own offset and the camera zoom are all applied afterwards
 // to the quad that samples the slot - so dragging, spinning or zooming a shadowed shape
 // never re-bakes anything. A slot is re-baked only when the shape's geometryVersion
-// changes (markGeometryDirty), or its shadowBlur / shadowForStrokeEnabled changes.
+// changes (markGeometryDirty), or its shadowBlur / shadowSpread / shadowForStrokeEnabled
+// changes. A re-bake keeps the rectangle it already holds when the new one still fits, so a
+// slider being dragged does not burn through the atlas a frame at a time.
+//
+// Nothing outside caches a slot: ShadowBatcher reads slotFor() every frame precisely because
+// a re-bake can move a shape to a different rectangle without the set of shadow-casting
+// shapes changing at all.
 //
 // Baking a slot is a handful of small passes: rasterize the silhouette as coverage into a
 // scratch texture, optionally grow/shrink it (shadowSpread, two separable morphology
@@ -54,6 +60,10 @@ interface Entry extends ShadowSlot {
   rectY: number
   width: number
   height: number
+  // The rectangle actually RESERVED, which can be larger than the region currently baked
+  // into it - see the reuse rule in tryBake.
+  allocWidth: number
+  allocHeight: number
   // What the bake was keyed on - any change re-bakes.
   geometryVersion: number
   blur: number
@@ -319,10 +329,22 @@ export class ShadowAtlas {
       const boundsW = silhouette.maxX - silhouette.minX
       const boundsH = silhouette.maxY - silhouette.minY
       const region = shadowRegion(boundsW, boundsH, shape.shadowBlur, shape.shadowSpread, MAX_REGION)
-      const rect = this.packSlot(region.width, region.height)
-      if (!rect) return false
 
-      this.bakeOne(encoder, shape, silhouette, region, rect)
+      // Re-bake into the rectangle this shape already holds whenever the new region still
+      // fits it. The shelf packer only ever moves forward, so without this every re-bake
+      // would abandon its old rectangle - and a blur or spread slider re-bakes on EVERY
+      // frame it is dragged, which would burn through the atlas and force a full repack
+      // several times a second. Leftover texels outside the new region are simply never
+      // sampled, since the uv rect is sized from the region rather than the allocation.
+      const existing = this.entries.get(shape)
+      const reusable = existing && existing.allocWidth >= region.width && existing.allocHeight >= region.height
+      const rect = reusable ? { x: existing.rectX, y: existing.rectY } : this.packSlot(region.width, region.height)
+      if (!rect) return false
+      const alloc = reusable
+        ? { width: existing.allocWidth, height: existing.allocHeight }
+        : { width: region.width, height: region.height }
+
+      this.bakeOne(encoder, shape, silhouette, region, rect, alloc)
     }
     return true
   }
@@ -333,6 +355,7 @@ export class ShadowAtlas {
     silhouette: { positions: number[]; indices: number[]; minX: number; minY: number },
     region: ShadowRegion,
     rect: { x: number; y: number },
+    alloc: { width: number; height: number },
   ): void {
     const quad = shadowQuadBounds(silhouette.minX, silhouette.minY, region)
     const quadW = quad.x1 - quad.x0
@@ -470,6 +493,8 @@ export class ShadowAtlas {
       rectY: rect.y,
       width: region.width,
       height: region.height,
+      allocWidth: alloc.width,
+      allocHeight: alloc.height,
       geometryVersion: shape.geometryVersion,
       blur: shape.shadowBlur,
       spread: shape.shadowSpread,

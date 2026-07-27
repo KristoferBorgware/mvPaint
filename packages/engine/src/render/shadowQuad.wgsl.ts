@@ -1,10 +1,15 @@
 // The shadow lane's draw shader: one textured quad per shadow, all sampling the shared
 // shadow atlas, so any number of shadows is a single draw call.
 //
-// The quad's vertices are in the SHAPE's own local space (the silhouette bounds grown by
-// the blur margin), and the per-object model matrix is the shape's world matrix with the
-// shadow's world-space offset prepended - so scale, rotation, skew, parenting and camera
-// zoom are all applied here, to the quad, never baked into the cached texture.
+// Each vertex is just a corner of a unit square; the local-space bounds it expands to and
+// the atlas rect it samples both come from the per-object record, refreshed every frame.
+// That is deliberate: both are properties of the shape's ATLAS SLOT, which can be re-baked
+// into a different rectangle whenever its blur, spread or geometry changes, and geometry
+// that cached them would keep drawing a stale (by then, someone else's) part of the atlas.
+//
+// The model matrix is the shape's world matrix with the shadow's world-space offset
+// prepended - so scale, rotation, skew, parenting and camera zoom are all applied here, to
+// the quad, never baked into the cached texture.
 //
 // Depth comes from the object record rather than the projected z, exactly as in the mesh
 // and text lanes (every 2D shape sits at z=0): a shadow is given a depth just behind its
@@ -19,6 +24,10 @@ struct Frame {
 struct ShadowObject {
   model : mat4x4<f32>,
   color : vec4<f32>,
+  // Local-space bounds (x0, y0, x1, y1) the unit corner expands to.
+  quad : vec4<f32>,
+  // Atlas rect (u0, v0, u1, v1) this shadow's silhouette occupies.
+  uv : vec4<f32>,
   depth : f32,
 };
 
@@ -28,9 +37,8 @@ struct ShadowObject {
 @group(2) @binding(1) var atlasSampler : sampler;
 
 struct VertexInput {
-  @location(0) position : vec2<f32>,
-  @location(1) uv : vec2<f32>,
-  @location(2) objectId : u32,
+  @location(0) corner : vec2<f32>,
+  @location(1) objectId : u32,
 };
 
 struct VertexOutput {
@@ -42,10 +50,21 @@ struct VertexOutput {
 @vertex
 fn vs_main(input : VertexInput) -> VertexOutput {
   let obj = objects[input.objectId];
+  let position = vec2<f32>(
+    mix(obj.quad.x, obj.quad.z, input.corner.x),
+    mix(obj.quad.y, obj.quad.w, input.corner.y),
+  );
+  // The atlas's first texel row holds the quad's TOP edge (see ShadowAtlas.bakeOne), so v
+  // runs opposite to local y: corner.y of 1 is the top, which is v0.
+  let uv = vec2<f32>(
+    mix(obj.uv.x, obj.uv.z, input.corner.x),
+    mix(obj.uv.w, obj.uv.y, input.corner.y),
+  );
+
   var out : VertexOutput;
-  out.clip = frame.viewProjection * obj.model * vec4<f32>(input.position, 0.0, 1.0);
+  out.clip = frame.viewProjection * obj.model * vec4<f32>(position, 0.0, 1.0);
   out.clip.z = obj.depth * out.clip.w;
-  out.uv = input.uv;
+  out.uv = uv;
   out.objectId = input.objectId;
   return out;
 }

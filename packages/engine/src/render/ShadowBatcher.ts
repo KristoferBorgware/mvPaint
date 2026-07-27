@@ -1,11 +1,18 @@
-// ShadowBatcher - packs every visible shadow into one vertex/index buffer of textured
-// quads plus one per-object storage buffer, so N shadows cost ONE draw call with one atlas
-// bound, regardless of N.
+// ShadowBatcher - packs every visible shadow into one vertex/index buffer of quads plus one
+// per-object storage buffer, so N shadows cost ONE draw call with one atlas bound,
+// regardless of N.
 //
-// Geometry here is trivial (four vertices per shadow, in the shape's local space) and is
-// rebuilt only when the set of shadow-casting shapes or their atlas slots change. The
-// per-object records - world matrix, tint, depth - refresh every frame like the mesh lane's
-// do, so moving, recolouring or fading a shadow never touches geometry or the atlas.
+// The geometry is deliberately contentless: four unit-square corners per shadow, carrying
+// nothing but an object id. Everything that describes a particular shadow - world matrix,
+// tint, depth, and its ATLAS SLOT (the local-space bounds and uv rect) - lives in the
+// per-object record, rewritten every frame.
+//
+// Keeping the slot out of the vertex buffer is the point. A slot is re-baked into a
+// different rectangle whenever a shape's blur, spread or geometry changes, and the set of
+// casting shapes does not change when that happens - so geometry holding a uv rect would
+// have no reliable moment to notice it had gone stale, and would keep sampling a rectangle
+// the atlas had since handed to a different shape. Reading the slot per frame removes the
+// possibility rather than adding a second thing to remember to invalidate.
 
 import type { Shape } from '../shapes/Shape'
 import type { ShadowAtlas } from './ShadowAtlas'
@@ -13,10 +20,20 @@ import { shadowWorldOffset, worldAxisScale } from './shadowMath'
 import {
   SHADOW_OBJECT_COLOR_OFFSET,
   SHADOW_OBJECT_DEPTH_OFFSET,
+  SHADOW_OBJECT_QUAD_OFFSET,
   SHADOW_OBJECT_STRIDE,
+  SHADOW_OBJECT_UV_OFFSET,
   SHADOW_VERTEX_FLOATS,
   SHADOW_VERTEX_STRIDE,
 } from './shadowFormat'
+
+/** The four corners of a unit square, in the winding the index buffer below expects. */
+const CORNERS: readonly [number, number][] = [
+  [0, 1],
+  [1, 1],
+  [1, 0],
+  [0, 0],
+]
 
 export class ShadowBatcher {
   private readonly device: GPUDevice
@@ -41,35 +58,27 @@ export class ShadowBatcher {
   }
 
   /**
-   * Packs a quad per shadow-casting shape that has a baked atlas slot. Shapes without a
-   * slot (nothing to cast from, or the atlas was full) are skipped entirely rather than
-   * drawn with garbage uvs.
+   * Packs one unit quad per shadow-casting shape. Deliberately does NOT consult the atlas:
+   * a shape whose slot is missing (nothing to cast from, or the atlas was full) still gets
+   * a quad, which updateObjects collapses to zero size for that frame - so a slot appearing
+   * or moving later needs no rebuild at all.
    */
-  rebuild(shapes: readonly Shape[], atlas: ShadowAtlas): void {
-    const vertices: number[] = [] // x, y, u, v per vertex
+  rebuild(shapes: readonly Shape[]): void {
+    const corners: number[] = []
     const objectIds: number[] = []
     const indices: number[] = []
     this.casters = []
 
     for (const shape of shapes) {
       if (!shape.visible || !shape.hasShadow()) continue
-      const slot = atlas.slotFor(shape)
-      if (!slot) continue
-
       const objectId = this.casters.length
       this.casters.push(shape)
 
       const base = objectIds.length
-      const push = (x: number, y: number, u: number, v: number): void => {
-        vertices.push(x, y, u, v)
+      for (const [cx, cy] of CORNERS) {
+        corners.push(cx, cy)
         objectIds.push(objectId)
       }
-      // The atlas's first texel row holds the quad's TOP edge (see ShadowAtlas.bakeOne),
-      // so v runs with decreasing local y.
-      push(slot.x0, slot.y1, slot.u0, slot.v0)
-      push(slot.x1, slot.y1, slot.u1, slot.v0)
-      push(slot.x1, slot.y0, slot.u1, slot.v1)
-      push(slot.x0, slot.y0, slot.u0, slot.v1)
       indices.push(base, base + 1, base + 2, base, base + 2, base + 3)
     }
 
@@ -79,11 +88,9 @@ export class ShadowBatcher {
     const u32 = new Uint32Array(vtx)
     for (let i = 0; i < vertexCount; i++) {
       const b = i * SHADOW_VERTEX_FLOATS
-      f32[b + 0] = vertices[i * 4 + 0]
-      f32[b + 1] = vertices[i * 4 + 1]
-      f32[b + 2] = vertices[i * 4 + 2]
-      f32[b + 3] = vertices[i * 4 + 3]
-      u32[b + 4] = objectIds[i]
+      f32[b + 0] = corners[i * 2 + 0]
+      f32[b + 1] = corners[i * 2 + 1]
+      u32[b + 2] = objectIds[i]
     }
     const idx = new Uint32Array(indices)
     this.indexCount = idx.length
@@ -120,11 +127,13 @@ export class ShadowBatcher {
   }
 
   /**
-   * Refreshes each shadow's transform, tint and depth (cheap, per frame). `depths` maps a
-   * shape to its own NDC depth; the shadow is placed just BEHIND that by `depthNudge`, so
-   * it sits under its caster while still resolving correctly against everything else.
+   * Refreshes each shadow's transform, tint, atlas slot and depth (cheap, per frame).
+   * `depths` maps a shape to its own NDC depth; the shadow is placed just BEHIND that by
+   * `depthNudge`, so it sits under its caster while still resolving correctly against
+   * everything else. Re-reading the slot here is what keeps a re-baked shadow correct
+   * without any geometry rebuild.
    */
-  updateObjects(depths: ReadonlyMap<Shape, number>, depthNudge: number): void {
+  updateObjects(atlas: ShadowAtlas, depths: ReadonlyMap<Shape, number>, depthNudge: number): void {
     if (!this.objectBuffer || this.casters.length === 0) return
     const buf = new ArrayBuffer(this.casters.length * SHADOW_OBJECT_STRIDE)
     const f32 = new Float32Array(buf)
@@ -149,6 +158,23 @@ export class ShadowBatcher {
       f32[colorBase + 1] = c[1]
       f32[colorBase + 2] = c[2]
       f32[colorBase + 3] = c[3] * shape.shadowOpacity
+
+      // The slot, read fresh: a shape still waiting on its first bake (or one the atlas had
+      // no room for) gets a zero-size quad, which rasterizes nothing, rather than sampling
+      // whatever happens to sit at uv 0.
+      const slot = atlas.slotFor(shape)
+      const quadBase = base + SHADOW_OBJECT_QUAD_OFFSET / 4
+      const uvBase = base + SHADOW_OBJECT_UV_OFFSET / 4
+      if (slot) {
+        f32[quadBase + 0] = slot.x0
+        f32[quadBase + 1] = slot.y0
+        f32[quadBase + 2] = slot.x1
+        f32[quadBase + 3] = slot.y1
+        f32[uvBase + 0] = slot.u0
+        f32[uvBase + 1] = slot.v0
+        f32[uvBase + 2] = slot.u1
+        f32[uvBase + 3] = slot.v1
+      }
 
       f32[base + SHADOW_OBJECT_DEPTH_OFFSET / 4] = (depths.get(shape) ?? 0.5) + depthNudge
     })
