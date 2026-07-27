@@ -4,6 +4,7 @@
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
+import { buildShapeStressScene } from './shapeStressScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
 import { buildTextScene } from './textScene'
@@ -57,6 +58,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Mesh shapes and text share one depth buffer, so zIndex can put a shape in front of text instead of the text lane always winning.',
     build: buildZIndexScene,
+  },
+  {
+    id: 'shape-stress',
+    title: 'Shape stress test',
+    description:
+      '500 rects, circles, polygons, stars and lines scattered randomly - size, rotation, stroke, colour and opacity all vary, but deliberately no shadows. Reload scene for a fresh layout.',
+    build: buildShapeStressScene,
   },
   {
     id: 'stress',
