@@ -58,11 +58,11 @@ export default function App() {
 
   // Shadow controls: edit the selected shape(s)' `.shadow` directly (a plain data field -
   // no engine API needed to push it, and no geometry rebuild since it's read fresh every
-  // frame). Positive Y is "up" in this scene, so a shadow that falls down-and-right under
-  // top-left light wants a positive offsetX and a NEGATIVE offsetY.
+  // frame). offsetY is downward-positive (see Shadow's doc comment), so a shadow that
+  // falls down-and-right under top-left light wants a positive offsetX AND offsetY.
   const [shadowEnabled, setShadowEnabled] = useState(false)
   const [shadowOffsetX, setShadowOffsetX] = useState(12)
-  const [shadowOffsetY, setShadowOffsetY] = useState(-16)
+  const [shadowOffsetY, setShadowOffsetY] = useState(16)
   const [shadowRotationDeg, setShadowRotationDeg] = useState(0)
   const [shadowSize, setShadowSize] = useState(1)
   const [shadowBlur, setShadowBlur] = useState(12)

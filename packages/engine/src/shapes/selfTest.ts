@@ -600,6 +600,13 @@ function TWO_PI_PLUS(a: number): number {
   const p = rotated.shadowMatrix()!.transformPoint(new Vector3(0, 0, 0))
   assert(near(p.x, 5) && near(p.y, 17), 'the shadow offset rotates with the shape (90deg: +x offset -> +y world)')
 
+  // offsetY is downward-positive (matching Text's shadow/glow convention, see
+  // text/layout.ts), even though the scene itself is y-up - so a positive offsetY moves
+  // the copy to a LOWER world y, not a higher one.
+  const down = new Rect({ shadow: shadow({ offsetY: 10 }) })
+  const downPoint = down.shadowMatrix()!.transformPoint(new Vector3(0, 0, 0))
+  assert(near(downPoint.y, -10), 'a positive offsetY moves the shadow DOWN (negative world y), matching Text')
+
   // size scales the copy; rotation on the Shadow itself adds on top of the shape's rotation.
   const sized = new Rect({ shadow: shadow({ size: 2 }) })
   const corner = sized.shadowMatrix()!.transformPoint(new Vector3(1, 0, 0))

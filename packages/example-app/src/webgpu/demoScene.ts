@@ -42,7 +42,7 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       stroke: [0.5, 0.1, 0.08, 1],
       strokeWidth: 6,
       // A hard shadow (no blur): just an offset, darker, semi-transparent copy.
-      shadow: shadow({ offsetX: 10, offsetY: -14, opacity: 0.5 }),
+      shadow: shadow({ offsetX: 10, offsetY: 14, opacity: 0.5 }),
     }),
   )
   // Linear gradient across the rect's own diagonal, in its local (pre-transform)
@@ -67,7 +67,7 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       // A soft shadow: spread grows the silhouette outward before blur softens its edge -
       // rendered through ShadowRenderer's offscreen dilate+gaussian passes (see there),
       // since this Rect has no distance field to soften analytically the way Text does.
-      shadow: shadow({ offsetX: 8, offsetY: -20, spread: 6, blur: 14, opacity: 0.45 }),
+      shadow: shadow({ offsetX: 8, offsetY: 20, spread: 6, blur: 14, opacity: 0.45 }),
     }),
   )
   spins.set(left, 1)
@@ -83,7 +83,7 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       fill: [0.2, 0.72, 0.36, 1],
       stroke: [0.1, 0.4, 0.2, 1],
       strokeWidth: 6,
-      shadow: shadow({ offsetY: -16, blur: 8, opacity: 0.4 }),
+      shadow: shadow({ offsetY: 16, blur: 8, opacity: 0.4 }),
     }),
   )
   // Radial gradient from the circle's own center out to its own radius, in local

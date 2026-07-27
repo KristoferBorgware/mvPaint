@@ -79,6 +79,12 @@ export interface ShapeTransform {
  * and - for ordinary shapes - the copy itself; Text only rotates the offset, see
  * text/layout.ts). `size` scales the copy. `spread` grows its silhouette outward before
  * blurring; `blur` softens the result. `opacity` multiplies `color`'s own alpha.
+ *
+ * `offsetY` is downward-positive (matching the everyday "shadow falls down and to the
+ * right" mental model), even though the scene itself is y-up - both Shape.shadowMatrix()
+ * and Text's shadow/glow quads negate it internally to land in the right direction. So a
+ * shadow under light from the upper-left wants a POSITIVE offsetX and a POSITIVE offsetY,
+ * for a Shape exactly as it would for a Text.
  */
 export interface Shadow {
   offsetX: number
@@ -293,7 +299,8 @@ export abstract class Shape extends Node {
     const s = this.shadow
     let m = this.coreMatrix()
     if (s.offsetX !== 0 || s.offsetY !== 0) {
-      m = m.mul(Matrix4x4.translation(new Vector3(s.offsetX, s.offsetY, 0)))
+      // offsetY is downward-positive (see Shadow) - the scene is y-up, so negate it.
+      m = m.mul(Matrix4x4.translation(new Vector3(s.offsetX, -s.offsetY, 0)))
     }
     if (s.rotation !== 0) {
       m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), s.rotation)))
