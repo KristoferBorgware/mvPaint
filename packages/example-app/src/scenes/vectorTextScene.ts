@@ -2,11 +2,13 @@
 // through the mesh lane, where MSDF Text samples a distance-field atlas in a lane of its own.
 // The engine keeps both; this scene is here to make the difference visible side by side.
 //
-// The whole left column is styling the two implementations share - they run the same shaper,
-// so runs, sizes, gradients, outlines, decorations, wrapping and justification look the same
-// on either. The right column is what only this path can do: a real blurred shadow cast from
-// the letterforms (Text has no silhouette to blur, so it duplicates its glyphs instead), and
-// glyph-accurate picking, since the letters ARE the geometry the hit test walks.
+// The left column is styling the two implementations share - they run the same shaper, so
+// runs, sizes, gradients, outlines, decorations and wrapping look the same on either. So do
+// the block-layout features along the bottom and right: every alignment mode, per-run
+// baseline shift, and vertical flow. The middle column is what only this path can do: a real
+// blurred shadow cast from the letterforms (Text has no silhouette to blur, so it duplicates
+// its glyphs instead), and glyph-accurate picking, since the letters ARE the geometry the hit
+// test walks.
 //
 // The four Inter TTFs are fetched the first time this scene opens - about 1.6MB, which is why
 // they aren't loaded at startup like the atlases.
@@ -17,6 +19,8 @@ import type { SceneContent } from './types'
 
 const LEFT = -470
 const RIGHT = 60
+// The vertical block hangs down the right edge; its columns advance leftward from here.
+const VERTICAL = 520
 
 // Held here rather than passed through the scene contract: parsed outlines own no GPU
 // resources, so nothing about them has to be handed out by the renderer.
@@ -141,7 +145,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       style: { fontSize: 38, color: NAVY },
     }),
   )
-  root.addChild(label(LEFT + 400, -152, 'outlines'))
+  root.addChild(label(LEFT + 430, -152, 'outlines'))
   root.addChild(
     new Text({
       name: 'vt-compare-msdf',
@@ -151,7 +155,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       style: { fontSize: 38, color: NAVY },
     }),
   )
-  root.addChild(label(LEFT + 400, -212, 'MSDF atlas'))
+  root.addChild(label(LEFT + 430, -212, 'MSDF atlas'))
 
   // --- right column: what geometry buys ---------------------------------------------
 
@@ -187,7 +191,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       shadowOpacity: 0.55,
     }),
   )
-  root.addChild(label(RIGHT, 210, 'Shape.shadowBlur / spread, cast from the letterforms themselves.'))
+  root.addChild(label(RIGHT, 190, 'shadowBlur and spread, cast from the letterforms.'))
 
   // Faux bold and a glow, both of which are dilations of the outline here - a ring stroked
   // around the glyph's own contours rather than a distance-field threshold shift.
@@ -216,21 +220,85 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       style: { fontStyle: 'bold', fontSize: 88, color: NAVY },
     }),
   )
-  root.addChild(label(RIGHT, -10, "Picking is per-glyph: the O's counter is a hole, not a hit."))
+  root.addChild(label(RIGHT, -45, "Picking is per-glyph: the O's counter is a hole, not a hit."))
 
   // Turning and growing under the animation - geometry, so it stays exact at any size.
   const spun = new VectorText({
     fonts: book,
     name: 'vt-spun',
     x: RIGHT + 190,
-    y: -160,
+    y: -140,
     offsetX: 95,
     offsetY: 0,
     text: 'zoom in',
     style: { fontStyle: 'bold-italic', fontSize: 46, color: [0.38, 0.22, 0.86, 1] },
   })
   root.addChild(spun)
-  root.addChild(label(RIGHT, -230, 'Scroll to zoom: outlines have no resolution to run out of.'))
+  root.addChild(label(RIGHT, -208, 'Scroll to zoom: outlines have no resolution to run out of.'))
+
+  // Baseline shift, per run: the shaper moves the pen origin, and the outline follows it, so
+  // a superscript is a real raised glyph rather than a smaller one nudged by eye.
+  root.addChild(
+    new VectorText({
+      fonts: book,
+      name: 'vt-baseline',
+      x: RIGHT,
+      y: -240,
+      runs: [
+        { text: 'E = mc', style: { fontSize: 34, color: NAVY } },
+        { text: '2', style: { fontSize: 20, color: CRIMSON, baselineShift: 15 } },
+        { text: '   H', style: { fontSize: 34, color: NAVY } },
+        { text: '2', style: { fontSize: 20, color: CRIMSON, baselineShift: -6 } },
+        { text: 'O', style: { fontSize: 34, color: NAVY } },
+        { text: '   x', style: { fontSize: 34, color: NAVY } },
+        { text: '-1', style: { fontSize: 20, color: TEAL, baselineShift: 15 } },
+      ],
+    }),
+  )
+  root.addChild(label(RIGHT, -285, 'baselineShift, in world px: + raises a run, - lowers it.'))
+
+  // --- vertical flow: glyphs stack downward, columns advance right-to-left ------------
+  // A pragmatic subset, the same one the MSDF path implements: no wrapping, justification or
+  // decorations in this orientation, but faux styles, shadows and glows all still apply.
+  root.addChild(label(VERTICAL - 150, 372, 'orientation: vertical'))
+  root.addChild(
+    new VectorText({
+      fonts: book,
+      name: 'vt-vertical',
+      x: VERTICAL,
+      y: 340,
+      text: 'VERTICAL\nFLOW',
+      orientation: 'vertical',
+      lineHeight: 1.05,
+      style: { fontStyle: 'bold', fontSize: 30, color: NAVY },
+    }),
+  )
+
+  // --- alignment: one wrapped block per mode, side by side -----------------------------
+  root.addChild(label(LEFT, -320, 'align, over a 220px wrap width:'))
+  const ALIGNMENTS = [
+    { align: 'left', color: NAVY },
+    { align: 'center', color: TEAL },
+    { align: 'right', color: CRIMSON },
+    { align: 'justify', color: SLATE },
+  ] as const
+  ALIGNMENTS.forEach(({ align, color }, i) => {
+    const x = LEFT + i * 255
+    root.addChild(label(x, -350, align))
+    root.addChild(
+      new VectorText({
+        fonts: book,
+        name: `vt-align-${align}`,
+        x,
+        y: -375,
+        maxWidth: 220,
+        align,
+        lineHeight: 1.2,
+        text: 'The shaper decides alignment; the outlines follow it.',
+        style: { fontSize: 17, color },
+      }),
+    )
+  })
 
   let angle = 0
   return {

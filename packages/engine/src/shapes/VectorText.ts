@@ -73,6 +73,13 @@ export class VectorText extends TextBlock {
   constructor(options: VectorTextOptions) {
     super(options)
     this.fonts = options.fonts
+    // Round joins by default, unlike every other shape. A letterform has far sharper corners
+    // than a rectangle or a hand-drawn path does - the apex of an A, the two of a W - and
+    // Shape's default miter (limit 10) grows a spike out of each one. Measured on Inter at
+    // 60px: 'AWM' outlined at width 8 is 51.7 units tall with round joins and 78.9 with
+    // miter, all of that difference being spikes above the cap height. Nothing stops a
+    // caller asking for miter explicitly.
+    this.lineJoin = options.lineJoin ?? 'round'
   }
 
   /** Shape the runs into quads + materials, cached until the content or layout changes. */

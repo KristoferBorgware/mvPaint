@@ -529,6 +529,17 @@ const recordGeometry = (shape: VectorText) => {
   assert(outlinedVerts.some((v) => !v.isFill), 'the outline emits stroke vertices')
   assert(recordGeometry(plain).verts.every((v) => v.isFill), 'an unoutlined run emits only fill vertices')
 
+  // Round joins are VectorText's default because letterforms have far sharper corners than
+  // the shapes the miter default was chosen for - the apexes of A and W grow spikes well
+  // above the cap height at any appreciable stroke width.
+  const spiky = { text: 'AWM', style: { fontSize: 60, strokeColor: [0, 0, 0, 1] as RGBA, strokeWidth: 8 } }
+  const round = new VectorText({ fonts: vectorFonts, ...spiky })
+  const mitred = new VectorText({ fonts: vectorFonts, lineJoin: 'miter', ...spiky })
+  assert(round.lineJoin === 'round', 'VectorText defaults to round joins')
+  const height = (shape: VectorText) => shape.localBounds().max.y - shape.localBounds().min.y
+  assert(height(mitred) > height(round) * 1.3, 'miter joins spike far past the letterforms')
+  assert(new VectorText({ fonts: vectorFonts, lineJoin: 'bevel', ...spiky }).lineJoin === 'bevel', 'an explicit join still wins')
+
   // Faux bold thickens the letterform, so its ring must take the FILL colour (and any
   // gradient), not the stroke slot - which a real outline may be using at the same time.
   const bolded = new VectorText({ fonts: vectorFonts, text: 'Hi', style: { fontSize: 40, fauxBold: true } })
@@ -568,6 +579,73 @@ const recordGeometry = (shape: VectorText) => {
   const kinds = gradient.materials().map((m) => m.fillPriority)
   assert(kinds.includes('linear-gradient'), 'the glyph body keeps the run gradient')
   assert(kinds.includes('color'), 'the underline is painted flat')
+}
+
+// --- block layout reaches the GEOMETRY, not just the shaped quads ---
+// Alignment, baseline shift and vertical flow are all the shared shaper's work, and the
+// blocks above already check them there. What is new on this path is that the outlines
+// follow: a glyph is placed from the pen origin the shaper recorded, and vertical text in
+// particular reaches makeGlyphQuad by a different route than horizontal text does. These
+// assertions therefore measure tessellated vertices, not quads.
+{
+  const boundsOf = (shape: VectorText) => {
+    const { verts } = recordGeometry(shape)
+    const xs = verts.map((v) => v.x)
+    const ys = verts.map((v) => v.y)
+    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }
+  }
+
+  // Baseline shift moves a run's outline by exactly the shift, and nothing else with it.
+  const plain = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40 } }] })
+  const raised = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: 15 } }] })
+  const lowered = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: -15 } }] })
+  assert(Math.abs(boundsOf(raised).y0 - (boundsOf(plain).y0 + 15)) < 1e-6, 'a positive baseline shift lifts the outline by exactly that much')
+  assert(Math.abs(boundsOf(lowered).y0 - (boundsOf(plain).y0 - 15)) < 1e-6, 'a negative baseline shift drops it')
+  assert(Math.abs(boundsOf(raised).x0 - boundsOf(plain).x0) < 1e-6, 'and moves it vertically only')
+
+  // A superscript run rides above its neighbour without disturbing the pen.
+  const superscript = new VectorText({
+    fonts: vectorFonts,
+    runs: [
+      { text: 'x', style: { fontSize: 40 } },
+      { text: '2', style: { fontSize: 24, baselineShift: 16 } },
+    ],
+  })
+  const glyphs = superscript.shaped().quads.filter((q) => q.isGlyph)
+  assert(glyphs.length === 2, 'both runs contribute a glyph')
+  assert(glyphs[1].originY > glyphs[0].originY, 'the shifted run sits above the baseline of the one before it')
+  assert(glyphs[1].originX > glyphs[0].originX, 'and after it, so the shift is vertical only')
+
+  // Alignment offsets the geometry within the block; justify stretches to fill it.
+  const wrapped = 'align this text so it wraps'
+  const aligned = (align: 'left' | 'center' | 'right' | 'justify') =>
+    boundsOf(new VectorText({ fonts: vectorFonts, text: wrapped, style: { fontSize: 20 }, maxWidth: 200, align }))
+  const left = aligned('left')
+  const center = aligned('center')
+  const right = aligned('right')
+  const justify = aligned('justify')
+  assert(left.x0 < center.x0 && center.x0 < right.x0, 'left < center < right, measured on the tessellated glyphs')
+  assert(right.x1 - left.x1 > 20, 'right alignment pushes the ink to the far edge of the block')
+  assert(justify.x1 - justify.x0 > left.x1 - left.x0, 'justification widens the block by spreading the spaces')
+  assert(justify.x1 <= 200 + 1e-6, 'and stops at the wrap width')
+
+  // Vertical flow: glyphs stack downward, and columns advance to the LEFT.
+  const vertical = new VectorText({ fonts: vectorFonts, text: 'AB\nCD', style: { fontSize: 40 }, orientation: 'vertical' })
+  const horizontal = new VectorText({ fonts: vectorFonts, text: 'AB\nCD', style: { fontSize: 40 } })
+  assert(vertical.shaped().lineCount === 2, 'a newline starts a second column')
+  assert(recordGeometry(vertical).verts.length === recordGeometry(horizontal).verts.length, 'the same four glyphs are tessellated either way')
+  const columnQuads = vertical.shaped().quads.filter((q) => q.isGlyph)
+  assert(columnQuads[1].originY < columnQuads[0].originY, 'glyphs stack top-to-bottom within a column')
+  assert(columnQuads[2].originX < columnQuads[0].originX, 'the second column sits to the left of the first')
+  assert(boundsOf(vertical).x1 <= 0, 'the block extends leftward from its origin')
+
+  // One run, one column: set vertically it is a tall narrow strip, set horizontally a wide
+  // short one. (The two-column node above is NOT the comparison to make - two columns of two
+  // glyphs and two lines of two glyphs happen to occupy almost the same box.)
+  const strip = boundsOf(new VectorText({ fonts: vectorFonts, text: 'ABCD', style: { fontSize: 40 }, orientation: 'vertical' }))
+  const line = boundsOf(new VectorText({ fonts: vectorFonts, text: 'ABCD', style: { fontSize: 40 } }))
+  assert(strip.y1 - strip.y0 > 2 * (line.y1 - line.y0), 'a single column is far taller than the same text on a line')
+  assert(strip.x1 - strip.x0 < line.x1 - line.x0, 'and far narrower')
 }
 
 console.log(`[text] self-test passed (${count} assertions)`)
