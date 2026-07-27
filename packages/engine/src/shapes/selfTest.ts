@@ -633,6 +633,8 @@ function TWO_PI_PLUS(a: number): number {
   const s = shadow({ opacity: 0.4, blur: 5, spread: 2, color: [1, 0, 0, 0.5] })
   assert(s.opacity === 0.4 && s.blur === 5 && s.spread === 2 && s.color[3] === 0.5, 'shadow() carries every override through')
   assert(s.offsetX === 0 && s.rotation === 0 && s.size === 1, 'shadow() defaults the fields it was not given')
+  assert(s.includeStroke === true, 'shadow() defaults includeStroke to true (unchanged behavior)')
+  assert(shadow({ includeStroke: false }).includeStroke === false, 'includeStroke can be overridden')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

@@ -260,17 +260,26 @@ export class ShadowRenderer {
 
     for (const shape of shapes) {
       if (!shape.visible || !shape.shadow) continue
+      const s = shape.shadow
       const model = shape.shadowWorldMatrix()
       if (!model) continue
 
+      // isFill mirrors the mesh lane's own fill/stroke distinction (see meshFormat.ts's
+      // MeshSink) - recorded per vertex so a triangle can be excluded at the point it's
+      // emitted when the shadow is configured to skip the stroke ring entirely.
       const positions: number[] = []
+      const isFill: boolean[] = []
       const indices: number[] = []
       shape.tessellate({
-        vertex: (x, y) => {
+        vertex: (x, y, fill) => {
           positions.push(x, y)
+          isFill.push(fill)
           return positions.length / 2 - 1
         },
-        triangle: (a, b, c) => indices.push(a, b, c),
+        triangle: (a, b, c) => {
+          if (!s.includeStroke && !(isFill[a] && isFill[b] && isFill[c])) return
+          indices.push(a, b, c)
+        },
       })
       if (indices.length === 0) continue
 
@@ -293,7 +302,6 @@ export class ShadowRenderer {
       // Written STRAIGHT (not premultiplied) - CASTER_BLEND multiplies by alpha itself on
       // the way into the (transparent-cleared) texture, same as MeshPipeline's blend does
       // for every ordinary shape's fillColor.
-      const s = shape.shadow
       const objectBuffer = makeUniformBuffer(this.device, SHADOW_OBJECT_STRIDE, (f32) => {
         f32.set(model.toGPU(), 0)
         f32[16] = s.color[0]

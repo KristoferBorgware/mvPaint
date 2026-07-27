@@ -85,6 +85,12 @@ export interface ShapeTransform {
  * and Text's shadow/glow quads negate it internally to land in the right direction. So a
  * shadow under light from the upper-left wants a POSITIVE offsetX and a POSITIVE offsetY,
  * for a Shape exactly as it would for a Text.
+ *
+ * `includeStroke` (default true) controls whether a mesh shape's stroke ring is part of
+ * the silhouette the shadow is cast from, or only its fill - e.g. a thin decorative
+ * outline that would otherwise widen the shadow more than the fill shape itself warrants
+ * (see webgpu/ShadowRenderer). Text has no mesh geometry to filter this way; its shadow
+ * copy never includes the per-letter outline regardless of this flag.
  */
 export interface Shadow {
   offsetX: number
@@ -95,9 +101,10 @@ export interface Shadow {
   spread: number
   opacity: number
   color: RGBA
+  includeStroke: boolean
 }
 
-/** `shadow(partial)` fills in the rest with sensible defaults (no offset/blur/spread, opaque black). */
+/** `shadow(partial)` fills in the rest with sensible defaults (no offset/blur/spread, opaque black, stroke included). */
 export function shadow(overrides: Partial<Shadow> = {}): Shadow {
   return {
     offsetX: 0,
@@ -107,6 +114,7 @@ export function shadow(overrides: Partial<Shadow> = {}): Shadow {
     blur: 0,
     spread: 0,
     opacity: 1,
+    includeStroke: true,
     color: [0, 0, 0, 1],
     ...overrides,
   }

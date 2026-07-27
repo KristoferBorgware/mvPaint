@@ -34,6 +34,12 @@ interface WebGPUCanvasProps {
 export interface WebGPUCanvasHandle {
   /** Clears the current selection (and its transformer) the same way Escape does. */
   clearSelection: () => void
+  /**
+   * Force a text-lane rebuild on the next frame - call after mutating a Text node's runs
+   * (e.g. its shadow/glow style) in place, since the renderer only rebuilds when the
+   * visible SET of Text nodes changes, not when one's own content does.
+   */
+  markTextDirty: () => void
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
@@ -60,6 +66,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     ref,
     () => ({
       clearSelection: () => controllerRef.current?.setSelection([]),
+      markTextDirty: () => handleRef.current?.markTextGeometryDirty(),
     }),
     [],
   )

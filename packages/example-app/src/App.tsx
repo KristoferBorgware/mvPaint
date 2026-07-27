@@ -19,7 +19,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'
 import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
-import { shadow, type RGBA, type Shape } from '@mvpaint/engine'
+import { shadow, Text, type RGBA, type Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 
 function hexToRgb(hex: string): RGBA {
@@ -69,6 +69,9 @@ export default function App() {
   const [shadowSpread, setShadowSpread] = useState(4)
   const [shadowOpacity, setShadowOpacity] = useState(0.5)
   const [shadowColor, setShadowColor] = useState('#000000')
+  // Mesh shapes only - a Text's shadow copy never includes its per-letter outline
+  // regardless (see Shadow's doc comment), so this is a no-op for a selected Text.
+  const [shadowIncludeStroke, setShadowIncludeStroke] = useState(true)
 
   const shadowConfig = useMemo(
     () => ({
@@ -80,8 +83,19 @@ export default function App() {
       spread: shadowSpread,
       opacity: shadowOpacity,
       color: hexToRgb(shadowColor),
+      includeStroke: shadowIncludeStroke,
     }),
-    [shadowOffsetX, shadowOffsetY, shadowRotationDeg, shadowSize, shadowBlur, shadowSpread, shadowOpacity, shadowColor],
+    [
+      shadowOffsetX,
+      shadowOffsetY,
+      shadowRotationDeg,
+      shadowSize,
+      shadowBlur,
+      shadowSpread,
+      shadowOpacity,
+      shadowColor,
+      shadowIncludeStroke,
+    ],
   )
 
   // Only touches the CURRENT selection at the moment a control changes - not on every
@@ -92,9 +106,19 @@ export default function App() {
     selectedRef.current = selected
   }, [selected])
   useEffect(() => {
+    let touchedText = false
     for (const node of selectedRef.current) {
-      node.shadow = shadowEnabled ? shadow(shadowConfig) : undefined
+      if (node instanceof Text) {
+        // Text has no `.shadow` field of its own - its shadow is per-run styling (so a
+        // rich-text node with several runs could in principle carry different shadows;
+        // this panel just applies one shadow to every run at once).
+        node.setRuns(node.runs.map((run) => ({ ...run, style: { ...run.style, shadow: shadowEnabled ? shadow(shadowConfig) : undefined } })))
+        touchedText = true
+      } else {
+        node.shadow = shadowEnabled ? shadow(shadowConfig) : undefined
+      }
     }
+    if (touchedText) canvasRef.current?.markTextDirty()
   }, [shadowEnabled, shadowConfig])
 
   return (
@@ -120,7 +144,10 @@ export default function App() {
       {/* Floating panels - collapsed by default, shown via the toggle row at the bottom. */}
       <Stack spacing={1.5} sx={{ position: 'absolute', left: 16, bottom: 16, right: 16, maxWidth: 420 }}>
         <Collapse in={controlsOpen}>
-          <Paper elevation={6} sx={panelSx}>
+          {/* Capped + scrollable: the panel is anchored to the bottom of the screen and
+              grows upward, so without a cap its top edge runs off-screen on a short mobile
+              viewport - there is no page scroll to reach it, only the panel's own. */}
+          <Paper elevation={6} sx={{ ...panelSx, maxHeight: '70vh', overflowY: 'auto' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
               <Typography variant="subtitle1">Controls</Typography>
               <IconButton size="small" onClick={() => setControlsOpen(false)} aria-label="Hide controls">
@@ -325,6 +352,24 @@ export default function App() {
                       onChange={(_, v) => setShadowOpacity(v as number)}
                       disabled={!shadowEnabled}
                     />
+
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          size="small"
+                          checked={shadowIncludeStroke}
+                          onChange={(e) => setShadowIncludeStroke(e.target.checked)}
+                          disabled={!shadowEnabled}
+                        />
+                      }
+                      label={<Typography variant="body2">Include stroke in shadow</Typography>}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      Off casts the shadow from the fill only, skipping the stroke ring - a
+                      thick decorative outline otherwise widens the shadow with it. No
+                      effect on a selected Text (its shadow never includes the per-letter
+                      outline).
+                    </Typography>
                   </Stack>
                 )}
               </Stack>
