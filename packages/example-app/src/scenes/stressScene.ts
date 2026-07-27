@@ -1,17 +1,21 @@
-// Stress test: several hundred independently shadowed shapes, all drifting.
+// Stress test: over a thousand independently shadowed shapes, all drifting.
 //
 // This is the scene that justifies the shadow atlas. Every shadow here has its own baked
 // silhouette (the blur radius varies per shape, so they cannot share one), yet the whole
 // field draws in a single call and re-bakes nothing while it animates - the drift only
 // moves the quads. Zoom out to bring the whole grid on screen; the culling still applies,
 // so what you see is what is actually being drawn.
+//
+// At this size the silhouettes no longer fit a 4096-texel atlas, so loading the scene also
+// exercises the grow-and-repack path a couple of times over - which is worth having a scene
+// for, since that path is otherwise hard to reach by hand.
 
 import { Circle, Rect, Text, type Scene } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
-const COLUMNS = 24
-const ROWS = 14
+const COLUMNS = 48
+const ROWS = 28
 const SPACING = 78
 
 export function buildStressScene(scene: Scene): SceneContent {

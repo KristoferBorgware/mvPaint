@@ -51,7 +51,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'stress',
     title: 'Shadow stress test',
     description:
-      'A few hundred independently shadowed, drifting shapes - every shadow cached in the shared atlas and drawn in a single call. Zoom out to see the whole field.',
+      'Over a thousand independently shadowed, drifting shapes - every shadow cached in the shared atlas and drawn in a single call. Zoom out to see the whole field.',
     build: buildStressScene,
   },
 ]
