@@ -22,6 +22,12 @@ interface WebGPUCanvasProps {
    * renderer down and back up per switch would cost a visible stall and a fresh font upload.
    */
   scene: ExampleScene
+  /**
+   * Bump to rebuild the CURRENT scene from scratch. Scene switching keys on `scene`'s
+   * identity, so re-selecting the one already showing is deliberately a no-op; this is the
+   * separate "start it over" signal, and it takes the same path a switch does.
+   */
+  reloadToken: number
   /** Spin speed in radians/second. Updated live without recreating the renderer. */
   speed: number
   /** Camera zoom factor (>1 zooms in). Updated live without recreating the renderer;
@@ -51,7 +57,7 @@ export interface WebGPUCanvasHandle {
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
-  { scene, speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
+  { scene, reloadToken, speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -187,8 +193,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Swap the scene's content in place. The renderer, its pipelines, the font atlases and
-  // the transformer all survive; only the scene graph's content is replaced.
+  // Swap the scene's content in place - on a scene change, or on an explicit reload of the
+  // same one. The renderer, its pipelines, the font atlases and the transformer all
+  // survive; only the scene graph's content is replaced.
   useEffect(() => {
     sceneDefRef.current = scene
     const handle = handleRef.current
@@ -219,7 +226,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     // Both lanes rebuild from the visible set, which has just changed wholesale.
     handle.markGeometryDirty()
     handle.markTextGeometryDirty()
-  }, [scene])
+  }, [scene, reloadToken])
 
   // Push speed changes to the running renderer.
   useEffect(() => {

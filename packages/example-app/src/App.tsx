@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
+  Button,
   Chip,
   Collapse,
   Drawer,
@@ -23,6 +24,7 @@ import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
 import CollectionsIcon from '@mui/icons-material/Collections'
+import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import { Text, type RGBA, type Shape } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
@@ -55,6 +57,9 @@ export default function App() {
   const compact = useMediaQuery(theme.breakpoints.down('md'))
   const [scene, setScene] = useState<ExampleScene>(EXAMPLE_SCENES[0])
   const [scenesOpen, setScenesOpen] = useState(false)
+  // Re-picking the scene already showing is a no-op by design, so an explicit reload needs
+  // its own signal rather than riding on the scene identity.
+  const [reloadToken, setReloadToken] = useState(0)
 
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
@@ -158,6 +163,7 @@ export default function App() {
       <WebGPUCanvas
         ref={canvasRef}
         scene={scene}
+        reloadToken={reloadToken}
         speed={speed}
         zoom={zoom}
         onZoomChange={setZoom}
@@ -188,6 +194,26 @@ export default function App() {
             </Stack>
 
             <Stack spacing={1.5}>
+              <Stack spacing={0.5}>
+                <Typography variant="body2" color="text.secondary">
+                  Scene: {scene.title}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RestartAltIcon />}
+                  onClick={() => setReloadToken((t) => t + 1)}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Reload scene
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  Rebuilds the current scene from scratch and re-centres the view, undoing
+                  anything dragged, scaled or restyled. The camera zoom is left alone - it's
+                  yours, not the scene's.
+                </Typography>
+              </Stack>
+
               <Stack spacing={0.5}>
                 <Typography variant="body2" color="text.secondary">
                   Rotation speed: {speed.toFixed(2)}×
