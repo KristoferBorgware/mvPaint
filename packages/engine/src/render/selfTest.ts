@@ -1,8 +1,9 @@
 // Self-test for the mesh-lane data path (no GPU). Tessellates shapes through a
 // capturing MeshSink and asserts the vertex/index/isFill layout, the format constants,
 // the fill-type encoding, and the general contour stroker (joins/caps/multi-contour).
-// WGSL fragment-shader math (gradient evaluation) cannot run without a GPU and is not
-// covered here - it's checked by numeric reference calculations instead.
+// WGSL fragment-shader math (gradient evaluation, and the shadow atlas's silhouette /
+// morphology / Gaussian passes) cannot run without a GPU and is not covered here - what IS
+// covered is the CPU-side sizing and placement those passes are driven by.
 // Run with: npx tsx src/render/selfTest.ts
 
 import { Rect } from '../shapes/Rect'
@@ -18,7 +19,7 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { shadowQuadBounds, shadowRegion, shadowSigma, shadowSpreadUnits, shadowWorldOffset, worldAxisScale } from './shadowMath'
+import { blurMarginUnits, shadowMarginUnits, shadowQuadBounds, shadowRegion, shadowSigma, shadowWorldOffset, worldAxisScale } from './shadowMath'
 import { SHADOW_OBJECT_STRIDE, SHADOW_VERTEX_LAYOUT, SHADOW_VERTEX_STRIDE } from './shadowFormat'
 import { Shape } from '../shapes/Shape'
 import { hitTestShape } from '../scene/picking'
@@ -433,17 +434,17 @@ assert(
   // Canvas 2D defines shadowBlur as a Gaussian of sigma = blur/2, padded to 3 sigma.
   assert(shadowSigma(10) === 5, 'shadowBlur maps to sigma = blur/2, the canvas rule')
   assert(shadowSigma(-4) === 0, 'a negative blur clamps to none')
-  assert(shadowSpreadUnits(10) === 15, 'the blur margin is 3 sigma')
+  assert(blurMarginUnits(10) === 15, 'the blur margin is 3 sigma')
 
   // A small shape keeps 1 texel per local unit, and the margin lands on both sides.
-  const small = shadowRegion(40, 20, 10, 256)
+  const small = shadowRegion(40, 20, 10, 0, 256)
   assert(small.texelsPerUnit === 1, 'a small shape bakes at full resolution')
   assert(small.padTexels === 15, 'the padding is 3 sigma, in texels')
   assert(small.width === 40 + 30 && small.height === 20 + 30, 'the slot is the silhouette plus a margin on each side')
 
   // A shape too big for the cap scales down INSTEAD of overflowing - and the padding
   // scales with it, rather than being added on top of an already-maxed silhouette.
-  const huge = shadowRegion(4000, 4000, 40, 256)
+  const huge = shadowRegion(4000, 4000, 40, 0, 256)
   assert(huge.texelsPerUnit < 1, 'a huge shape bakes at reduced resolution')
   assert(huge.width <= 256 && huge.height <= 256, 'and still fits the cap')
   assert(huge.padTexels >= 1, 'it keeps a blur margin even when scaled down')
@@ -452,25 +453,40 @@ assert(
   // it fit - the margin is symmetric and the shape whole, at whatever resolution that
   // takes. Rounding the two parts up separately is what makes this worth asserting over a
   // spread of awkward sizes rather than one tidy case.
-  for (const [bw, bh, blur] of [
-    [206, 136, 24],
-    [255, 255, 1],
-    [256, 256, 0],
-    [1, 1, 90],
-    [4000, 10, 40],
-    [37, 611, 13],
+  for (const [bw, bh, blur, spread] of [
+    [206, 136, 24, 0],
+    [255, 255, 1, 0],
+    [256, 256, 0, 0],
+    [1, 1, 90, 0],
+    [4000, 10, 40, 0],
+    [37, 611, 13, 0],
+    [206, 136, 24, 30],
+    [40, 40, 0, 100],
+    [200, 200, 20, -15],
+    [4000, 4000, 40, 200],
   ] as const) {
-    const r = shadowRegion(bw, bh, blur, 256)
-    assert(r.width <= 256 && r.height <= 256, `slot ${bw}x${bh} blur ${blur} fits the cap`)
+    const r = shadowRegion(bw, bh, blur, spread, 256)
+    assert(r.width <= 256 && r.height <= 256, `slot ${bw}x${bh} blur ${blur} spread ${spread} fits the cap`)
     assert(
       r.width === Math.ceil(bw * r.texelsPerUnit) + 2 * r.padTexels &&
         r.height === Math.ceil(bh * r.texelsPerUnit) + 2 * r.padTexels,
-      `slot ${bw}x${bh} blur ${blur} keeps the full silhouette and a symmetric margin`,
+      `slot ${bw}x${bh} blur ${blur} spread ${spread} keeps the full silhouette and a symmetric margin`,
     )
   }
 
+  // --- spread (the CSS box-shadow extension) reserves its own room, outward only ---
+  assert(shadowMarginUnits(10, 0) === 15, 'with no spread the margin is just the blur reach')
+  assert(shadowMarginUnits(10, 6) === 21, 'a positive spread adds to the margin')
+  assert(shadowMarginUnits(10, -6) === 15, 'a negative spread never grows the margin - it erodes inward')
+  assert(shadowMarginUnits(0, 8) === 8, 'spread alone still reserves room, so a crisp halo is not clipped')
+
+  const spreadOut = shadowRegion(40, 20, 0, 8, 256)
+  assert(spreadOut.padTexels === 8 && spreadOut.width === 40 + 16, 'a pure spread grows the slot by itself')
+  const spreadIn = shadowRegion(40, 20, 0, -8, 256)
+  assert(spreadIn.padTexels === 0 && spreadIn.width === 40, 'an inward spread leaves the slot at the silhouette size')
+
   // Zero blur still yields a usable slot (a hard-edged, offset-only shadow).
-  const crisp = shadowRegion(10, 10, 0, 256)
+  const crisp = shadowRegion(10, 10, 0, 0, 256)
   assert(crisp.padTexels === 0 && crisp.width === 10 && crisp.height === 10, 'no blur means no margin')
 
   // The quad must cover exactly what the slot covers, or the texture would be stretched.

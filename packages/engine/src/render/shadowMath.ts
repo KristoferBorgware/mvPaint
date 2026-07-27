@@ -2,14 +2,16 @@
 // self-tested without a GPU.
 //
 // The whole point of these numbers is that they depend ONLY on things a transform cannot
-// change: the shape's own local-space bounds and its shadowBlur. A shadow's offset,
-// the shape's position/rotation/scale, and the camera zoom are all applied later, to the
-// textured quad that samples the atlas - so moving, spinning, scaling or zooming a
-// shadowed shape never invalidates its cached texture.
+// change: the shape's own local-space bounds, its shadowBlur and its shadowSpread. A
+// shadow's offset, the shape's position/rotation/scale, and the camera zoom are all
+// applied later, to the textured quad that samples the atlas - so moving, spinning,
+// scaling or zooming a shadowed shape never invalidates its cached texture.
 //
 // Blur follows the canvas 2D shadow model: shadowBlur maps to a Gaussian standard
 // deviation of blur/2, and a Gaussian is numerically dead beyond ~3 sigma, so the
 // silhouette is padded by 3 sigma on every side to leave room for the blur to spread into.
+// A positive shadowSpread grows the silhouette before that blur, so it needs its own room
+// on top; a negative one only ever shrinks it, so it needs none.
 
 /** Canvas 2D's shadowBlur -> Gaussian sigma: "half the value of shadowBlur". */
 export function shadowSigma(blur: number): number {
@@ -17,44 +19,60 @@ export function shadowSigma(blur: number): number {
 }
 
 /**
- * How far the blur visibly spreads past the silhouette, in the same units as `blur`.
+ * How far the blur visibly reaches past the silhouette, in the same units as `blur`.
  * Three sigma covers 99.7% of a Gaussian; past that the contribution is below one 8-bit
  * level and padding further would just waste atlas space.
  */
-export function shadowSpreadUnits(blur: number): number {
+export function blurMarginUnits(blur: number): number {
   return 3 * shadowSigma(blur)
+}
+
+/**
+ * Total room to leave around the silhouette: the blur's reach plus however far a positive
+ * spread pushes the edge outward first. A negative spread erodes the silhouette inward and
+ * so never needs extra room - clamping it at 0 here is what keeps the slot from growing for
+ * an inset shadow.
+ */
+export function shadowMarginUnits(blur: number, spread: number): number {
+  return blurMarginUnits(blur) + Math.max(0, spread)
 }
 
 /** A shadow's slot in the atlas, in texels, plus the local-space mapping to reach it. */
 export interface ShadowRegion {
   /** Atlas texels per unit of the shape's LOCAL space (<= 1; shrinks for large shapes). */
   texelsPerUnit: number
-  /** Blur margin on every side, in texels. */
+  /** Margin on every side (blur reach plus any outward spread), in texels. */
   padTexels: number
   width: number
   height: number
 }
 
 /**
- * Sizes the atlas slot for a silhouette of `boundsW` x `boundsH` local units blurred by
- * `blur`, capped at `maxRegion` texels on a side.
+ * Sizes the atlas slot for a silhouette of `boundsW` x `boundsH` local units grown by
+ * `spread` and blurred by `blur`, capped at `maxRegion` texels on a side.
  *
  * Resolution is 1 texel per local unit until the padded silhouette would exceed the cap,
  * at which point it scales down to fit - so a small shape keeps full detail and a huge one
  * degrades gracefully into a soft blob rather than blowing out the atlas. Solving
- * `tpu * (inner + 6*sigma) <= maxRegion` for tpu is what makes the padding fit inside the
+ * `tpu * (inner + 2*margin) <= maxRegion` for tpu is what makes the padding fit inside the
  * cap too, instead of being added on top of an already-maxed-out silhouette.
  */
-export function shadowRegion(boundsW: number, boundsH: number, blur: number, maxRegion: number): ShadowRegion {
+export function shadowRegion(
+  boundsW: number,
+  boundsH: number,
+  blur: number,
+  spread: number,
+  maxRegion: number,
+): ShadowRegion {
   const w = Math.max(0, boundsW)
   const h = Math.max(0, boundsH)
   const inner = Math.max(w, h)
-  const spread = shadowSpreadUnits(blur)
-  const total = inner + 2 * spread
+  const margin = shadowMarginUnits(blur, spread)
+  const total = inner + 2 * margin
 
   let texelsPerUnit = total > 0 ? Math.min(1, maxRegion / total) : 1
   const measure = (tpu: number) => {
-    const padTexels = Math.ceil(spread * tpu)
+    const padTexels = Math.ceil(margin * tpu)
     return {
       texelsPerUnit: tpu,
       padTexels,

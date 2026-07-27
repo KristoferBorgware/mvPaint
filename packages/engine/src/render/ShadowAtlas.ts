@@ -9,8 +9,9 @@
 // never re-bakes anything. A slot is re-baked only when the shape's geometryVersion
 // changes (markGeometryDirty), or its shadowBlur / shadowForStrokeEnabled changes.
 //
-// Baking a slot is three small passes: rasterize the silhouette as coverage into a scratch
-// texture, blur it horizontally into a second scratch, then blur it vertically straight
+// Baking a slot is a handful of small passes: rasterize the silhouette as coverage into a
+// scratch texture, optionally grow/shrink it (shadowSpread, two separable morphology
+// passes), blur it horizontally into a second scratch, then blur it vertically straight
 // into the slot's rectangle of the atlas. Every pass is bounded by the slot's size (at most
 // MAX_REGION on a side), never the canvas - which is the whole difference from rendering
 // each shadow through a full-screen pass.
@@ -21,7 +22,7 @@
 import type { Shape } from '../shapes/Shape'
 import type { MeshSink } from './meshFormat'
 import { createFilterTextureBindGroupLayout, createShadowBakeProjectLayout } from './layouts'
-import { shadowBlurShaderCode, shadowSilhouetteShaderCode } from './shadowBake.wgsl'
+import { shadowBlurShaderCode, shadowMorphologyShaderCode, shadowSilhouetteShaderCode } from './shadowBake.wgsl'
 import { shadowRegion, shadowSigma, shadowQuadBounds, type ShadowRegion } from './shadowMath'
 
 const ATLAS_FORMAT: GPUTextureFormat = 'r8unorm'
@@ -30,6 +31,7 @@ export const MAX_REGION = 256
 const INITIAL_ATLAS_SIZE = 1024
 const PROJECT_UNIFORM_SIZE = 16 // vec2 scale + vec2 offset
 const BLUR_UNIFORM_SIZE = 32 // vec2 step + vec2 sourceScale + f32 sigma + f32 radius (padded)
+const MORPH_UNIFORM_SIZE = 32 // vec2 step + vec2 sourceScale + f32 radius + padding
 /** Slots are padded apart so a neighbour's texels can never bleed in under linear filtering. */
 const SLOT_GUTTER = 1
 
@@ -55,6 +57,7 @@ interface Entry extends ShadowSlot {
   // What the bake was keyed on - any change re-bakes.
   geometryVersion: number
   blur: number
+  spread: number
   forStroke: boolean
 }
 
@@ -108,6 +111,7 @@ export class ShadowAtlas {
   private readonly textureLayout: GPUBindGroupLayout
   private readonly silhouettePipeline: GPURenderPipeline
   private readonly blurPipeline: GPURenderPipeline
+  private readonly morphologyPipeline: GPURenderPipeline
 
   private texture: GPUTexture | null = null
   private view: GPUTextureView | null = null
@@ -152,11 +156,21 @@ export class ShadowAtlas {
       primitive: { topology: 'triangle-list', cullMode: 'none' },
     })
 
+    const filterLayout = device.createPipelineLayout({
+      bindGroupLayouts: [this.blurParamsLayout, this.textureLayout],
+    })
     const blurModule = device.createShaderModule({ code: shadowBlurShaderCode })
     this.blurPipeline = device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [this.blurParamsLayout, this.textureLayout] }),
+      layout: filterLayout,
       vertex: { module: blurModule, entryPoint: 'vs_fullscreen' },
       fragment: { module: blurModule, entryPoint: 'fs_blur', targets: [{ format: ATLAS_FORMAT }] },
+      primitive: { topology: 'triangle-list' },
+    })
+    const morphModule = device.createShaderModule({ code: shadowMorphologyShaderCode })
+    this.morphologyPipeline = device.createRenderPipeline({
+      layout: filterLayout,
+      vertex: { module: morphModule, entryPoint: 'vs_fullscreen' },
+      fragment: { module: morphModule, entryPoint: 'fs_morphology', targets: [{ format: ATLAS_FORMAT }] },
       primitive: { topology: 'triangle-list' },
     })
   }
@@ -260,6 +274,7 @@ export class ShadowAtlas {
         !entry ||
         entry.geometryVersion !== shape.geometryVersion ||
         entry.blur !== shape.shadowBlur ||
+        entry.spread !== shape.shadowSpread ||
         entry.forStroke !== shape.shadowForStrokeEnabled
       )
     })
@@ -303,7 +318,7 @@ export class ShadowAtlas {
       }
       const boundsW = silhouette.maxX - silhouette.minX
       const boundsH = silhouette.maxY - silhouette.minY
-      const region = shadowRegion(boundsW, boundsH, shape.shadowBlur, MAX_REGION)
+      const region = shadowRegion(boundsW, boundsH, shape.shadowBlur, shape.shadowSpread, MAX_REGION)
       const rect = this.packSlot(region.width, region.height)
       if (!rect) return false
 
@@ -366,26 +381,23 @@ export class ShadowAtlas {
     silhouettePass.drawIndexed(indexData.length)
     silhouettePass.end()
 
-    // --- 2/3. separable Gaussian: scratchA -> scratchB -> the atlas slot -------------
+    // --- 2. spread, then blur: scratchA -> ... -> the atlas slot ---------------------
     const sigmaTexels = shadowSigma(shape.shadowBlur) * region.texelsPerUnit
-    const radius = Math.min(region.padTexels, Math.ceil(3 * sigmaTexels))
+    const blurRadius = Math.min(region.padTexels, Math.ceil(3 * sigmaTexels))
+    const spreadRadius = Math.round(shape.shadowSpread * region.texelsPerUnit)
     const sourceScale: [number, number] = [region.width / MAX_REGION, region.height / MAX_REGION]
 
-    const blurPass = (
+    // Every filter step is the same shape of pass - fullscreen triangle, viewport clipped to
+    // the region, one uniform plus one source texture - so they share a runner and differ
+    // only in pipeline and parameters.
+    const filterPass = (
+      pipeline: GPURenderPipeline,
+      params: GPUBuffer,
       source: GPUTextureView,
       target: GPUTextureView,
-      step: [number, number],
       viewport: { x: number; y: number },
       load: GPULoadOp,
     ): void => {
-      const params = this.uniformBuffer(BLUR_UNIFORM_SIZE, (f32) => {
-        f32[0] = step[0]
-        f32[1] = step[1]
-        f32[2] = sourceScale[0]
-        f32[3] = sourceScale[1]
-        f32[4] = Math.max(sigmaTexels, 1e-4)
-        f32[5] = radius
-      })
       const paramsBindGroup = this.device.createBindGroup({
         layout: this.blurParamsLayout,
         entries: [{ binding: 0, resource: { buffer: params } }],
@@ -405,7 +417,7 @@ export class ShadowAtlas {
         ],
       })
       pass.setViewport(viewport.x, viewport.y, region.width, region.height, 0, 1)
-      pass.setPipeline(this.blurPipeline)
+      pass.setPipeline(pipeline)
       pass.setBindGroup(0, paramsBindGroup)
       pass.setBindGroup(1, textureBindGroup)
       pass.draw(3)
@@ -413,10 +425,44 @@ export class ShadowAtlas {
     }
 
     const texel = 1 / MAX_REGION
-    blurPass(this.scratchA!.createView(), this.scratchB!.createView(), [texel, 0], { x: 0, y: 0 }, 'clear')
+    const ORIGIN = { x: 0, y: 0 }
+    const viewA = this.scratchA!.createView()
+    const viewB = this.scratchB!.createView()
+
+    // Ping-pong between the two scratch textures; `source` tracks which one currently holds
+    // the working image, so the number of steps can vary with the shadow's parameters.
+    let source = viewA
+    let target = viewB
+
+    if (spreadRadius !== 0) {
+      const morphParams = (step: [number, number]): GPUBuffer =>
+        this.uniformBuffer(MORPH_UNIFORM_SIZE, (f32) => {
+          f32[0] = step[0]
+          f32[1] = step[1]
+          f32[2] = sourceScale[0]
+          f32[3] = sourceScale[1]
+          f32[4] = spreadRadius
+        })
+      filterPass(this.morphologyPipeline, morphParams([texel, 0]), source, target, ORIGIN, 'clear')
+      ;[source, target] = [target, source]
+      filterPass(this.morphologyPipeline, morphParams([0, texel]), source, target, ORIGIN, 'clear')
+      ;[source, target] = [target, source]
+    }
+
+    const blurParams = (step: [number, number]): GPUBuffer =>
+      this.uniformBuffer(BLUR_UNIFORM_SIZE, (f32) => {
+        f32[0] = step[0]
+        f32[1] = step[1]
+        f32[2] = sourceScale[0]
+        f32[3] = sourceScale[1]
+        f32[4] = Math.max(sigmaTexels, 1e-4)
+        f32[5] = blurRadius
+      })
+    filterPass(this.blurPipeline, blurParams([texel, 0]), source, target, ORIGIN, 'clear')
+    ;[source, target] = [target, source]
     // The vertical pass writes straight into the slot, so the atlas is loaded (not cleared)
     // to leave every other shape's baked texture intact.
-    blurPass(this.scratchB!.createView(), this.view!, [0, texel], { x: rect.x, y: rect.y }, 'load')
+    filterPass(this.blurPipeline, blurParams([0, texel]), source, this.view!, { x: rect.x, y: rect.y }, 'load')
 
     const size = this.atlasSize
     this.entries.set(shape, {
@@ -426,6 +472,7 @@ export class ShadowAtlas {
       height: region.height,
       geometryVersion: shape.geometryVersion,
       blur: shape.shadowBlur,
+      spread: shape.shadowSpread,
       forStroke: shape.shadowForStrokeEnabled,
       u0: rect.x / size,
       v0: rect.y / size,

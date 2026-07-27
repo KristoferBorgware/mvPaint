@@ -597,7 +597,8 @@ function TWO_PI_PLUS(a: number): number {
   // exactly behind the shape and never be visible, so it does not count.
   assert(new Rect({ shadowBlur: 4 }).hasShadow(), 'blur alone casts a shadow')
   assert(new Rect({ shadowOffsetY: 3 }).hasShadow(), 'offset alone casts a shadow')
-  assert(!new Rect({ shadowColor: [0, 0, 0, 1] }).hasShadow(), 'colour alone, with no blur or offset, casts nothing')
+  assert(new Rect({ shadowSpread: 5 }).hasShadow(), 'spread alone casts a shadow (a crisp halo)')
+  assert(!new Rect({ shadowColor: [0, 0, 0, 1] }).hasShadow(), 'colour alone, with no blur, spread or offset, casts nothing')
 
   assert(!new Rect({ shadowBlur: 4, shadowEnabled: false }).hasShadow(), 'shadowEnabled=false suppresses it')
   assert(!new Rect({ shadowBlur: 4, shadowOpacity: 0 }).hasShadow(), 'zero opacity suppresses it')
@@ -606,6 +607,8 @@ function TWO_PI_PLUS(a: number): number {
   // geometryVersion is what the shadow atlas keys its baked silhouette on: it must move
   // when the geometry does, and stay put when only the transform does - otherwise every
   // drag would re-bake every shadow.
+  assert(new Rect({}).shadowSpread === 0, 'spread defaults to none, so the canvas model is what you get unless you ask')
+
   const shape = new Rect({ width: 10, height: 10, shadowBlur: 3 })
   const v0 = shape.geometryVersion
   shape.x = 500

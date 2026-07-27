@@ -42,15 +42,16 @@
 //
 // The shadow* properties mirror the canvas 2D shadow model (and the same names a
 // well-known 2D canvas library uses): shadowColor, shadowBlur, shadowOffsetX/Y,
-// shadowOpacity, shadowEnabled, shadowForStrokeEnabled. shadowBlur is a canvas blur
-// radius - a Gaussian of sigma = blur/2 - authored in the shape's own local units, so it
-// scales with the shape the way the rest of its geometry does. shadowOffsetX/Y are
+// shadowOpacity, shadowEnabled, shadowForStrokeEnabled - plus shadowSpread, which canvas
+// has no equivalent for and which is borrowed from CSS box-shadow instead. shadowBlur is a
+// canvas blur radius - a Gaussian of sigma = blur/2 - authored in the shape's own local
+// units, so it scales with the shape the way the rest of its geometry does. shadowOffsetX/Y are
 // downward-positive and scale with the shape's absolute scale but are NOT turned by its
 // rotation, matching how a canvas shadow's offset is applied outside the current
 // transform (see render/shadowMath.ts).
 //
-// Mesh shapes render the shadow by baking a blurred silhouette into a shared atlas keyed
-// on local-space geometry + blur, then drawing one textured quad per shadow (see
+// Mesh shapes render the shadow by baking a spread-and-blurred silhouette into a shared
+// atlas keyed on local-space geometry + blur + spread, then drawing one textured quad per shadow (see
 // render/ShadowAtlas.ts and render/ShadowBatcher.ts) - so a shadow costs no per-frame GPU
 // work once its texture is cached, and moving/scaling/spinning a shape never re-bakes it.
 // Text ignores these fields: it carries its own per-run shadow styling instead (an offset
@@ -110,6 +111,8 @@ export interface ShapeOptions {
   shadowColor?: RGBA
   /** Canvas-style blur radius in local units (Gaussian sigma = blur/2). Default 0. */
   shadowBlur?: number
+  /** CSS box-shadow-style spread in local units: grows (or, if negative, shrinks) the silhouette. Default 0. */
+  shadowSpread?: number
   /** Shadow offset, downward-positive, in local units. Default 0. */
   shadowOffsetX?: number
   shadowOffsetY?: number
@@ -177,6 +180,16 @@ export abstract class Shape extends Node {
    * shadow field that isn't free to animate; the rest are per-frame quad parameters.
    */
   shadowBlur = 0
+  /**
+   * Grows the silhouette outward by this many local units before blurring it - or erodes it
+   * inward when negative. Not part of the canvas 2D shadow model; this is CSS box-shadow's
+   * spread, kept as a documented extension because it is genuinely useful and costs nothing
+   * at draw time (it is baked into the atlas texture alongside the blur).
+   *
+   * The grow/shrink uses a square structuring element, so a large spread squares off corners
+   * a touch - see render/shadowBake.wgsl.ts. Like shadowBlur, changing it re-bakes.
+   */
+  shadowSpread = 0
   /**
    * Offset in local units, downward-positive. Scales with the shape's absolute scale but
    * is not turned by its rotation - see render/shadowMath.ts's shadowWorldOffset.
@@ -257,6 +270,7 @@ export abstract class Shape extends Node {
     this.draggable = options.draggable ?? true
     this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]
     this.shadowBlur = options.shadowBlur ?? 0
+    this.shadowSpread = options.shadowSpread ?? 0
     this.shadowOffsetX = options.shadowOffsetX ?? 0
     this.shadowOffsetY = options.shadowOffsetY ?? 0
     this.shadowOpacity = options.shadowOpacity ?? 1
@@ -305,7 +319,7 @@ export abstract class Shape extends Node {
       this.shadowEnabled &&
       this.shadowOpacity !== 0 &&
       this.shadowColor[3] !== 0 &&
-      (this.shadowBlur !== 0 || this.shadowOffsetX !== 0 || this.shadowOffsetY !== 0)
+      (this.shadowBlur !== 0 || this.shadowSpread !== 0 || this.shadowOffsetX !== 0 || this.shadowOffsetY !== 0)
     )
   }
 

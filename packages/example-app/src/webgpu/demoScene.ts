@@ -87,8 +87,12 @@ export function buildDemoScene(scene: Scene): Map<Rect, number> {
       fill: [0.2, 0.72, 0.36, 1],
       stroke: [0.1, 0.4, 0.2, 1],
       strokeWidth: 6,
+      // spread grows the silhouette before the blur softens it (CSS box-shadow's
+      // spread, not part of the canvas model) - a wider, heavier pool of shadow than
+      // blur alone would give.
       shadowOffsetY: 16,
       shadowBlur: 16,
+      shadowSpread: 8,
       shadowOpacity: 0.4,
     }),
   )

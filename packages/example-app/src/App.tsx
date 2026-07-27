@@ -56,19 +56,21 @@ export default function App() {
   // Stable identity so the canvas's effect doesn't see a new callback every render.
   const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
 
-  // Shadow controls, mirroring the canvas 2D property names the engine uses. Everything
-  // except blur is a per-frame quad parameter, so dragging those sliders costs nothing;
-  // blur re-bakes the shape's atlas texture, which is why it is the one to watch when
-  // judging performance. offsetY is downward-positive, so a shadow falling down-and-right
-  // under upper-left light wants a positive offsetX AND offsetY.
+  // Shadow controls, mirroring the canvas 2D property names the engine uses (plus spread,
+  // borrowed from CSS box-shadow). Offset, colour and opacity are per-frame quad
+  // parameters, so dragging those sliders costs nothing; blur and spread re-bake the
+  // shape's atlas texture, which is what to watch when judging performance. offsetY is
+  // downward-positive, so a shadow falling down-and-right under upper-left light wants a
+  // positive offsetX AND offsetY.
   const [shadowEnabled, setShadowEnabled] = useState(false)
   const [shadowOffsetX, setShadowOffsetX] = useState(12)
   const [shadowOffsetY, setShadowOffsetY] = useState(16)
   const [shadowBlur, setShadowBlur] = useState(24)
+  const [shadowSpread, setShadowSpread] = useState(0)
   const [shadowOpacity, setShadowOpacity] = useState(0.5)
   const [shadowColor, setShadowColor] = useState('#000000')
-  // Mesh shapes only: Text has no rasterized silhouette to blur, so it ignores blur and
-  // shadowForStroke entirely and just duplicates its glyphs at the offset.
+  // Mesh shapes only: Text has no rasterized silhouette to blur or grow, so it ignores
+  // blur/spread/shadowForStroke and just duplicates its glyphs at the offset.
   const [shadowForStroke, setShadowForStroke] = useState(true)
 
   const shadowConfig = useMemo(
@@ -76,11 +78,12 @@ export default function App() {
       offsetX: shadowOffsetX,
       offsetY: shadowOffsetY,
       blur: shadowBlur,
+      spread: shadowSpread,
       opacity: shadowOpacity,
       color: hexToRgb(shadowColor),
       forStroke: shadowForStroke,
     }),
-    [shadowOffsetX, shadowOffsetY, shadowBlur, shadowOpacity, shadowColor, shadowForStroke],
+    [shadowOffsetX, shadowOffsetY, shadowBlur, shadowSpread, shadowOpacity, shadowColor, shadowForStroke],
   )
 
   // Only touches the CURRENT selection at the moment a control changes - not on every
@@ -120,6 +123,7 @@ export default function App() {
         node.shadowOffsetX = shadowConfig.offsetX
         node.shadowOffsetY = shadowConfig.offsetY
         node.shadowBlur = shadowConfig.blur
+        node.shadowSpread = shadowConfig.spread
         node.shadowOpacity = shadowConfig.opacity
         node.shadowForStrokeEnabled = shadowConfig.forStroke
       }
@@ -285,7 +289,7 @@ export default function App() {
                     />
 
                     <Typography variant="caption" color="text.secondary">
-                      Blur: {shadowBlur.toFixed(0)}
+                      Blur: {shadowBlur.toFixed(0)} · Spread: {shadowSpread.toFixed(0)}
                     </Typography>
                     <Slider
                       aria-label="Shadow blur"
@@ -294,6 +298,15 @@ export default function App() {
                       max={80}
                       step={1}
                       onChange={(_, v) => setShadowBlur(v as number)}
+                      disabled={!shadowEnabled}
+                    />
+                    <Slider
+                      aria-label="Shadow spread"
+                      value={shadowSpread}
+                      min={-30}
+                      max={40}
+                      step={1}
+                      onChange={(_, v) => setShadowSpread(v as number)}
                       disabled={!shadowEnabled}
                     />
 
