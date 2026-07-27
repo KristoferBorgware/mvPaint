@@ -1,12 +1,14 @@
 // The example-scene registry. The picker lists whatever is in here, in this order, and the
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
+import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
 import { buildTextScene } from './textScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
+import { buildVectorTextStressScene, prepareVectorTextStressScene } from './vectorTextStressScene'
 import { buildZIndexScene } from './zIndexScene'
 import type { ExampleScene } from './types'
 
@@ -62,6 +64,21 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Over a thousand independently shadowed, drifting shapes - every shadow cached in the shared atlas and drawn in a single call. Zoom out to see the whole field.',
     build: buildStressScene,
+  },
+  {
+    id: 'msdf-text-stress',
+    title: 'MSDF text stress test',
+    description:
+      'Four pages of randomly styled lorem ipsum, one MSDF Text node per page. Same words and styling as the outline-text stress test, for a direct cost comparison. Zoom out to see all four pages.',
+    build: buildMsdfStressScene,
+  },
+  {
+    id: 'vector-text-stress',
+    title: 'Outline text stress test',
+    description:
+      'The identical four pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Fetches the TTFs on first open.',
+    prepare: prepareVectorTextStressScene,
+    build: buildVectorTextStressScene,
   },
 ]
 
