@@ -1,4 +1,4 @@
-// Shape stress test: 500 shapes - rects, circles, regular polygons, stars and stroked lines -
+// Shape stress test: 5000 shapes - rects, circles, regular polygons, stars and stroked lines -
 // scattered randomly across the field with random size, rotation, stroke (or none), stroke
 // width, fill colour (solid or gradient), and opacity. Deliberately NO shadows: this is a
 // mesh-lane volume-and-variety test, not the shadow atlas's - see stressScene.ts for that one.
@@ -7,14 +7,18 @@
 // so it rerolls from scratch on every build() (plain Math.random(), not seeded) - which means
 // "Reload scene" in the options pane genuinely reshuffles the field instead of reproducing an
 // identical layout.
+//
+// The field grows with the count (same aspect ratio, ~10x the area for ~10x the shapes) so
+// the field reads as the same density of scattered, overlapping shapes at any scale rather
+// than thinning out or packing solid - zoom out to see the whole thing.
 
 import { Circle, Path, Polyline, Rect, Text, type Point2, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
-const COUNT = 500
-const FIELD_HALF_WIDTH = 480
-const FIELD_HALF_HEIGHT = 340
+const COUNT = 5000
+const FIELD_HALF_WIDTH = 1500
+const FIELD_HALF_HEIGHT = 1080
 
 type Kind = 'rect' | 'circle' | 'polygon' | 'star' | 'line'
 const KINDS: readonly Kind[] = ['rect', 'circle', 'polygon', 'star', 'line']
