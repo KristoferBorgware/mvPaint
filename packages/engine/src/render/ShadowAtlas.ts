@@ -29,7 +29,7 @@ import type { Shape } from '../shapes/Shape'
 import type { MeshSink } from './meshFormat'
 import { createFilterTextureBindGroupLayout, createShadowBakeProjectLayout } from './layouts'
 import { shadowBlurShaderCode, shadowMorphologyShaderCode, shadowSilhouetteShaderCode } from './shadowBake.wgsl'
-import { shadowRegion, shadowSigma, shadowQuadBounds, type ShadowRegion } from './shadowMath'
+import { shadowRegion, shadowSigma, shadowQuadBounds, slotBucket, type ShadowRegion } from './shadowMath'
 
 const ATLAS_FORMAT: GPUTextureFormat = 'r8unorm'
 /** Cap on a single shadow's slot; bigger shapes bake at reduced resolution (see shadowRegion). */
@@ -336,13 +336,19 @@ export class ShadowAtlas {
       // frame it is dragged, which would burn through the atlas and force a full repack
       // several times a second. Leftover texels outside the new region are simply never
       // sampled, since the uv rect is sized from the region rather than the allocation.
+      //
+      // Reservations are rounded up to a coarse grid (slotBucket) rather than fitted exactly
+      // to the region. Region sizes wobble by a texel or two near the cap, so an exact fit
+      // would make reuse turn on rounding noise - a slightly smaller blur could miss its own
+      // rectangle by one texel and reallocate. On the grid, an allocation only ever grows,
+      // so a slider swept back and forth settles instead of churning.
       const existing = this.entries.get(shape)
       const reusable = existing && existing.allocWidth >= region.width && existing.allocHeight >= region.height
-      const rect = reusable ? { x: existing.rectX, y: existing.rectY } : this.packSlot(region.width, region.height)
-      if (!rect) return false
       const alloc = reusable
         ? { width: existing.allocWidth, height: existing.allocHeight }
-        : { width: region.width, height: region.height }
+        : { width: slotBucket(region.width, MAX_REGION), height: slotBucket(region.height, MAX_REGION) }
+      const rect = reusable ? { x: existing.rectX, y: existing.rectY } : this.packSlot(alloc.width, alloc.height)
+      if (!rect) return false
 
       this.bakeOne(encoder, shape, silhouette, region, rect, alloc)
     }

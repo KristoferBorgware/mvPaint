@@ -19,7 +19,17 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { blurMarginUnits, shadowMarginUnits, shadowQuadBounds, shadowRegion, shadowSigma, shadowWorldOffset, worldAxisScale } from './shadowMath'
+import {
+  SLOT_GRANULARITY,
+  blurMarginUnits,
+  shadowMarginUnits,
+  shadowQuadBounds,
+  shadowRegion,
+  shadowSigma,
+  shadowWorldOffset,
+  slotBucket,
+  worldAxisScale,
+} from './shadowMath'
 import {
   SHADOW_OBJECT_DEPTH_OFFSET,
   SHADOW_OBJECT_QUAD_OFFSET,
@@ -515,6 +525,73 @@ assert(
   assert(Math.abs(scale.x - 1) < 1e-9 && Math.abs(scale.y - 1) < 1e-9, 'pure rotation contributes no scale')
   const scaled = worldAxisScale([3, 0, 0, 0, 0, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
   assert(scaled.x === 3 && scaled.y === 5, 'axis lengths recover the absolute scale')
+}
+
+// --- slot reuse is deterministic: a swept parameter must reach a steady state ---
+{
+  assert(slotBucket(1, 256) === SLOT_GRANULARITY, 'a tiny region still reserves a whole grid cell')
+  assert(slotBucket(32, 256) === 32, 'an exact multiple reserves itself')
+  assert(slotBucket(33, 256) === 64, 'anything over rounds up to the next cell')
+  assert(slotBucket(250, 256) === 256 && slotBucket(256, 256) === 256, 'the top cell is the cap, not past it')
+  for (const n of [1, 7, 31, 32, 33, 100, 200, 255, 256]) {
+    assert(slotBucket(n, 256) >= n, `a reservation is never smaller than the region (${n})`)
+  }
+
+  // Replay the atlas's own reuse rule over a blur sweep. The shape is card-sized, which puts
+  // it right in the range where the region size wobbles against the cap - the case that used
+  // to reallocate on a SHRINKING blur, because an exact-fit reservation could be missed by a
+  // single texel of rounding noise.
+  const sweepReallocations = (sizes: readonly number[], granular: boolean) => {
+    let allocW = 0
+    let allocH = 0
+    let count = 0
+    for (const blur of sizes) {
+      const region = shadowRegion(260, 180, blur, 0, 256)
+      if (allocW >= region.width && allocH >= region.height) continue
+      allocW = granular ? slotBucket(region.width, 256) : region.width
+      allocH = granular ? slotBucket(region.height, 256) : region.height
+      count++
+    }
+    return count
+  }
+
+  const up = Array.from({ length: 41 }, (_, i) => i * 2) // 0..80
+  const down = [...up].reverse()
+  const sweep = [...up, ...down]
+
+  // The property that matters: reallocation count is bounded by how many distinct grid cells
+  // the region passes through, NOT by how many steps the slider takes. Without the grid, an
+  // exact fit reallocates far more often over the same sweep.
+  const granular = sweepReallocations(sweep, true)
+  const exact = sweepReallocations(sweep, false)
+  assert(granular < exact, 'reserving on a grid reallocates less often than fitting exactly')
+  assert(granular <= 256 / SLOT_GRANULARITY, 'and never more often than there are grid cells to climb')
+
+  // Steady state: once swept, sweeping again must reallocate NOTHING. This is the
+  // determinism the reuse rule is for - a slider dragged back and forth stops churning.
+  let allocW = 0
+  let allocH = 0
+  const run = (blurs: readonly number[]) => {
+    let count = 0
+    for (const blur of blurs) {
+      const region = shadowRegion(260, 180, blur, 0, 256)
+      if (allocW >= region.width && allocH >= region.height) continue
+      allocW = slotBucket(region.width, 256)
+      allocH = slotBucket(region.height, 256)
+      count++
+    }
+    return count
+  }
+  run(sweep)
+  assert(run(sweep) === 0, 'a second identical sweep reallocates nothing at all')
+  assert(run([...sweep].reverse()) === 0, 'nor does sweeping it in the opposite order')
+
+  // Specifically the reported case: blur 60 then 55 must keep the same reservation, even
+  // though 55 asks for a marginally WIDER region than 60 did.
+  const wide = shadowRegion(260, 180, 60, 0, 256)
+  const narrower = shadowRegion(260, 180, 55, 0, 256)
+  const reserved = slotBucket(wide.width, 256)
+  assert(reserved >= narrower.width, 'a reservation made at blur 60 still holds blur 55')
 }
 
 // --- shadow vertex/object formats line up with the WGSL structs ---

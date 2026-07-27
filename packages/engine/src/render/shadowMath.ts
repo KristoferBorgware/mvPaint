@@ -96,6 +96,30 @@ export function shadowRegion(
 }
 
 /**
+ * Atlas allocations are rounded up to this many texels on each side. Slot sizes wobble by a
+ * texel or two near the cap - `shadowRegion` rounds the silhouette and the margin up
+ * separately and then shrinks the whole thing to fit, so a SMALLER blur can occasionally ask
+ * for a slightly WIDER region. Reserving on a coarse grid absorbs that, which is what makes
+ * slot reuse predictable: see slotBucket.
+ */
+export const SLOT_GRANULARITY = 32
+
+/**
+ * The rectangle actually reserved for a region `size` texels wide (or tall): rounded up to
+ * SLOT_GRANULARITY, and never past `maxRegion`, which every region is already capped to.
+ *
+ * Reserving coarsely and then re-baking into a sub-rectangle of the reservation is what
+ * gives the atlas a property worth relying on: a shape's allocation only ever grows, so a
+ * parameter swept back and forth settles after a handful of reallocations instead of
+ * abandoning a rectangle on every step. The uv rect is still sized from the exact region,
+ * so the slack is simply never sampled.
+ */
+export function slotBucket(size: number, maxRegion: number): number {
+  const bucket = Math.ceil(Math.max(1, size) / SLOT_GRANULARITY) * SLOT_GRANULARITY
+  return Math.min(maxRegion, Math.max(bucket, size))
+}
+
+/**
  * The local-space rectangle the atlas slot covers: the shape's bounds grown by the blur
  * margin. This is the quad the shadow is drawn on, so it must match the region exactly or
  * the texture would be stretched.
