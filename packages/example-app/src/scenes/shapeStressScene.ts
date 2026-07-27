@@ -11,6 +11,11 @@
 // The field grows with the count (same aspect ratio, ~10x the area for ~10x the shapes) so
 // the field reads as the same density of scattered, overlapping shapes at any scale rather
 // than thinning out or packing solid - zoom out to see the whole thing.
+//
+// This scene also sets `disableCulling` in the registry (scenes/index.ts): the point is to
+// stress-test drawing every one of the 5000 shapes, and viewport culling would otherwise
+// mean only whatever the camera happens to be framing actually reaches the mesh batcher -
+// true even at the default zoom, since the field is larger than the default view.
 
 import { Circle, Path, Polyline, Rect, Text, type Point2, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'

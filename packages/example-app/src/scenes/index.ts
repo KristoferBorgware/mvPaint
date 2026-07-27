@@ -63,7 +63,8 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'shape-stress',
     title: 'Shape stress test',
     description:
-      '5000 rects, circles, polygons, stars and lines scattered randomly - size, rotation, stroke, colour and opacity all vary, but deliberately no shadows. Zoom out to see the whole field; Reload scene for a fresh layout.',
+      '5000 rects, circles, polygons, stars and lines scattered randomly - size, rotation, stroke, colour and opacity all vary, but deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan. Reload scene for a fresh layout.',
+    disableCulling: true,
     build: buildShapeStressScene,
   },
   {

@@ -5,10 +5,12 @@
 // of "whichever lane draws last always wins". Shapes/text outside the camera's current
 // view rectangle are culled before reaching either batcher (see scene/culling.ts) - a
 // rebuild only re-runs when the visible SET changes (content added/removed, or something
-// crossing the view boundary), not on every frame just because something moved. It does
-// NOT own the GPU context, resize observer, frame loop, or any scene content - those are
-// wired by createSceneRenderer() below, with content supplied by the caller through the
-// `populate` option.
+// crossing the view boundary), not on every frame just because something moved. Culling
+// itself can be switched off (setCullingEnabled) for a scene that specifically wants to
+// stress-test "everything, always" rather than benefit from - or be masked by - culling.
+// It does NOT own the GPU context, resize observer, frame loop, or any scene content -
+// those are wired by createSceneRenderer() below, with content supplied by the caller
+// through the `populate` option.
 
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
@@ -82,6 +84,11 @@ export class SceneRenderer {
   // this many world units on every side, so popping at the view edge - or the cull
   // itself - can be seen and tuned live. 0 = cull exactly at the camera's view rectangle.
   private cullMargin = 0
+  // Whether viewport culling runs at all. Every shape/text is tested against the view
+  // rectangle every frame regardless of margin - a linear scan, not free at thousands of
+  // objects - so a scene specifically stress-testing "how many objects can this draw",
+  // rather than culling itself, can turn that scan off and submit everything unconditionally.
+  private cullingEnabled = true
   private geometryDirty = true
   private textGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
@@ -150,6 +157,15 @@ export class SceneRenderer {
 
   getCullMargin(): number {
     return this.cullMargin
+  }
+
+  /** See `cullingEnabled`. Disabling also clears the debug cull-bounds overlay's rectangle. */
+  setCullingEnabled(enabled: boolean): void {
+    this.cullingEnabled = enabled
+  }
+
+  getCullingEnabled(): boolean {
+    return this.cullingEnabled
   }
 
   /** The last frame's (margin-expanded) cull rectangle, world space - for a debug overlay. */
@@ -238,9 +254,12 @@ export class SceneRenderer {
 
     // Viewport cull: skip anything whose bounds don't overlap the camera's current view
     // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
-    // non-orthographic camera, since only OrthographicCamera has a rectangular frustum.
+    // non-orthographic camera (only OrthographicCamera has a rectangular frustum) or when
+    // cullingEnabled is off, which also skips the per-object test itself, not just its effect.
     const viewBounds =
-      camera instanceof OrthographicCamera ? camera.viewBounds(width / height).expanded(this.cullMargin) : null
+      this.cullingEnabled && camera instanceof OrthographicCamera
+        ? camera.viewBounds(width / height).expanded(this.cullMargin)
+        : null
     this.lastCullBounds = viewBounds
     const onScreen = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
     const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
@@ -328,6 +347,9 @@ export interface SceneRendererHandle {
   /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
   setCullMargin: (margin: number) => void
   getCullMargin: () => number
+  /** Turns viewport culling on/off entirely - see SceneRenderer's `cullingEnabled`. */
+  setCullingEnabled: (enabled: boolean) => void
+  getCullingEnabled: () => boolean
   /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
   getCullBounds: () => AABB | null
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
@@ -429,6 +451,12 @@ export async function createSceneRenderer(
     },
     getCullMargin() {
       return scene.getCullMargin()
+    },
+    setCullingEnabled(enabled: boolean) {
+      scene.setCullingEnabled(enabled)
+    },
+    getCullingEnabled() {
+      return scene.getCullingEnabled()
     },
     getCullBounds() {
       return scene.getCullBounds()

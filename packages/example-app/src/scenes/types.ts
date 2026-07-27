@@ -28,6 +28,14 @@ export interface ExampleScene {
    * The canvas keeps the previous scene on screen while this runs.
    */
   prepare?: () => Promise<void>
+  /**
+   * Skip viewport culling entirely for this scene (every shape is tested and drawn every
+   * frame, regardless of the camera's current view) - for a scene specifically stress-testing
+   * "how much can this draw", where culling would otherwise hide most of the point unless the
+   * camera happened to be zoomed out over everything. Default false (culling on, as normal);
+   * the canvas restores it on switching to any scene that doesn't set this.
+   */
+  disableCulling?: boolean
   /** Populates `scene.root`. The root is already emptied of the previous scene's content. */
   build: (scene: Scene) => SceneContent
 }

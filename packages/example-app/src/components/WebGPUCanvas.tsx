@@ -122,6 +122,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         handle.camera.target = homeCameraRef.current.target.clone()
       }
 
+      // Every scene switch sets this from the new scene's own preference (default false, i.e.
+      // culling on) - not just when disabling it - so leaving a scene that turned it off always
+      // restores normal culling for whatever comes next, with no special-cased "on the way out".
+      handle?.setCullingEnabled(!def.disableCulling)
+
       // Both lanes rebuild from the visible set, which has just changed wholesale.
       handle?.markGeometryDirty()
       handle?.markTextGeometryDirty()
