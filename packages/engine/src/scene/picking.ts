@@ -86,9 +86,20 @@ function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean)
  * Every visible Shape (mesh shape or Text) in the scene, ascending by zIndex (ties keep
  * scene order) - rank 0 is furthest back. Includes non-pickable shapes (e.g. a
  * selection-highlight overlay still needs a correct depth to render at).
+ *
+ * `sorted = false` skips the zIndex sort and returns plain traversal order instead - an
+ * O(n log n) cost that's pure waste for a scene that never sets zIndex (every comparison
+ * ties, so the stable sort reproduces traversal order anyway) or that doesn't care which
+ * of its shapes ends up in front. The renderer exposes this as a per-scene opt-out (see
+ * SceneRenderer.setZSortEnabled); pickNode always sorts, since picking still needs a
+ * correct top-to-bottom order regardless of what depth the renderer is assigning.
  */
-export function collectZOrder(scene: Scene): Shape[] {
-  return collectSortedShapes(scene, (shape) => shape.visible)
+export function collectZOrder(scene: Scene, sorted = true): Shape[] {
+  const all: Shape[] = []
+  scene.root.traversePreOrder((node) => {
+    if (node instanceof Shape && node.visible) all.push(node)
+  })
+  return sorted ? all.sort((a, b) => a.zIndex - b.zIndex) : all
 }
 
 /** Maps a zIndex rank (0 = furthest back) to an NDC depth strictly inside (0,1) - smaller wins under 'less-equal'. */

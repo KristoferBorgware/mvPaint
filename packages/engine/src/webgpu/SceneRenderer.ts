@@ -89,6 +89,11 @@ export class SceneRenderer {
   // objects - so a scene specifically stress-testing "how many objects can this draw",
   // rather than culling itself, can turn that scan off and submit everything unconditionally.
   private cullingEnabled = true
+  // Whether the depth-rank pass sorts by zIndex at all. Every shape is still collected and
+  // depth-ranked every frame either way - only the O(n log n) sort itself is skippable, for
+  // a scene that never sets zIndex (every comparison ties, so the stable sort reproduces
+  // traversal order anyway) or that doesn't care which shape ends up in front.
+  private zSortEnabled = true
   private geometryDirty = true
   private textGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
@@ -168,6 +173,15 @@ export class SceneRenderer {
     return this.cullingEnabled
   }
 
+  /** See `zSortEnabled`. */
+  setZSortEnabled(enabled: boolean): void {
+    this.zSortEnabled = enabled
+  }
+
+  getZSortEnabled(): boolean {
+    return this.zSortEnabled
+  }
+
   /** The last frame's (margin-expanded) cull rectangle, world space - for a debug overlay. */
   getCullBounds(): AABB | null {
     return this.lastCullBounds
@@ -216,7 +230,7 @@ export class SceneRenderer {
    * where no shadow-casting geometry changed, which is the common case.
    */
   prepareShadows(encoder: GPUCommandEncoder): void {
-    const ordered = collectZOrder(this.scene)
+    const ordered = collectZOrder(this.scene, this.zSortEnabled)
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
     // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
     // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
@@ -242,7 +256,7 @@ export class SceneRenderer {
     // a Text can interleave correctly under the depth test regardless of which lane's
     // draw call runs first (see scene/picking.ts). Depth ranks are scene-wide (based on
     // EVERY shape), not affected by culling below.
-    const ordered = collectZOrder(this.scene)
+    const ordered = collectZOrder(this.scene, this.zSortEnabled)
     const depths = new Map<Shape, number>()
     ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
     // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
@@ -350,6 +364,9 @@ export interface SceneRendererHandle {
   /** Turns viewport culling on/off entirely - see SceneRenderer's `cullingEnabled`. */
   setCullingEnabled: (enabled: boolean) => void
   getCullingEnabled: () => boolean
+  /** Turns the zIndex depth-sort on/off - see SceneRenderer's `zSortEnabled`. */
+  setZSortEnabled: (enabled: boolean) => void
+  getZSortEnabled: () => boolean
   /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
   getCullBounds: () => AABB | null
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
@@ -457,6 +474,12 @@ export async function createSceneRenderer(
     },
     getCullingEnabled() {
       return scene.getCullingEnabled()
+    },
+    setZSortEnabled(enabled: boolean) {
+      scene.setZSortEnabled(enabled)
+    },
+    getZSortEnabled() {
+      return scene.getZSortEnabled()
     },
     getCullBounds() {
       return scene.getCullBounds()

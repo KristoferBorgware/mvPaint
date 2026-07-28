@@ -36,6 +36,14 @@ export interface ExampleScene {
    * the canvas restores it on switching to any scene that doesn't set this.
    */
   disableCulling?: boolean
+  /**
+   * Skip the zIndex depth-sort for this scene: shapes still get a depth rank every frame,
+   * just in scene-traversal order rather than sorted by zIndex - free for a scene that
+   * never sets zIndex (every comparison would tie, so the sort reproduces traversal order
+   * anyway) and where stacking order genuinely doesn't matter. Default false (sorted, as
+   * normal); the canvas restores it on switching to any scene that doesn't set this.
+   */
+  disableZSort?: boolean
   /** Populates `scene.root`. The root is already emptied of the previous scene's content. */
   build: (scene: Scene) => SceneContent
 }

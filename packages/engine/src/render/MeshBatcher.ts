@@ -28,8 +28,135 @@ import {
   OBJECT_STOP_POSITIONS_OFFSET,
   OBJECT_STRIDE,
   OBJECT_STROKE_COLOR_OFFSET,
+  type GradientStop,
+  type MeshMaterial,
   type MeshSink,
 } from './meshFormat'
+
+const EMPTY_STOPS: readonly GradientStop[] = []
+// 5 numbers per gradient stop, flattened: offset, r, g, b, a.
+const STOP_FIELDS = 5
+
+/**
+ * What was last written into one object slot - everything updateObjects() reads off a
+ * material, snapshotted so a slot whose paint hasn't changed since last frame can skip
+ * the whole re-pack (materials()/gradient-stop reads, FILL_TYPE_CODE lookup, the f32/u32
+ * writes) instead of redoing it every frame regardless. `model` is compared by reference,
+ * not value: Matrix4x4 instances are never mutated after being returned (see Node.ts), so
+ * an unchanged reference already proves an unchanged transform.
+ */
+class ObjectCache {
+  model: Float32Array | null = null
+  depth = NaN
+  fillType = -1
+  fillR = NaN
+  fillG = NaN
+  fillB = NaN
+  fillA = NaN
+  strokeR = NaN
+  strokeG = NaN
+  strokeB = NaN
+  strokeA = NaN
+  gradStartX = NaN
+  gradStartY = NaN
+  gradStartRadius = NaN
+  gradEndX = NaN
+  gradEndY = NaN
+  gradEndRadius = NaN
+  stopCount = -1
+  readonly stops = new Float64Array(MAX_GRADIENT_STOPS * STOP_FIELDS)
+
+  matches(model: Float32Array, depth: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): boolean {
+    if (
+      this.model !== model ||
+      this.depth !== depth ||
+      this.fillType !== fillType ||
+      this.fillR !== material.fill[0] ||
+      this.fillG !== material.fill[1] ||
+      this.fillB !== material.fill[2] ||
+      this.fillA !== material.fill[3] ||
+      this.strokeR !== material.stroke[0] ||
+      this.strokeG !== material.stroke[1] ||
+      this.strokeB !== material.stroke[2] ||
+      this.strokeA !== material.stroke[3] ||
+      this.stopCount !== stopCount
+    ) {
+      return false
+    }
+    if (fillType === FILL_TYPE_CODE['linear-gradient']) {
+      if (
+        this.gradStartX !== material.fillLinearGradientStartPoint.x ||
+        this.gradStartY !== material.fillLinearGradientStartPoint.y ||
+        this.gradEndX !== material.fillLinearGradientEndPoint.x ||
+        this.gradEndY !== material.fillLinearGradientEndPoint.y
+      ) {
+        return false
+      }
+    } else if (fillType === FILL_TYPE_CODE['radial-gradient']) {
+      if (
+        this.gradStartX !== material.fillRadialGradientStartPoint.x ||
+        this.gradStartY !== material.fillRadialGradientStartPoint.y ||
+        this.gradStartRadius !== material.fillRadialGradientStartRadius ||
+        this.gradEndX !== material.fillRadialGradientEndPoint.x ||
+        this.gradEndY !== material.fillRadialGradientEndPoint.y ||
+        this.gradEndRadius !== material.fillRadialGradientEndRadius
+      ) {
+        return false
+      }
+    }
+    for (let s = 0; s < stopCount; s++) {
+      const base = s * STOP_FIELDS
+      const [r, g, b, a] = stops[s].color
+      if (
+        this.stops[base] !== stops[s].offset ||
+        this.stops[base + 1] !== r ||
+        this.stops[base + 2] !== g ||
+        this.stops[base + 3] !== b ||
+        this.stops[base + 4] !== a
+      ) {
+        return false
+      }
+    }
+    return true
+  }
+
+  remember(model: Float32Array, depth: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): void {
+    this.model = model
+    this.depth = depth
+    this.fillType = fillType
+    this.fillR = material.fill[0]
+    this.fillG = material.fill[1]
+    this.fillB = material.fill[2]
+    this.fillA = material.fill[3]
+    this.strokeR = material.stroke[0]
+    this.strokeG = material.stroke[1]
+    this.strokeB = material.stroke[2]
+    this.strokeA = material.stroke[3]
+    this.stopCount = stopCount
+    if (fillType === FILL_TYPE_CODE['linear-gradient']) {
+      this.gradStartX = material.fillLinearGradientStartPoint.x
+      this.gradStartY = material.fillLinearGradientStartPoint.y
+      this.gradEndX = material.fillLinearGradientEndPoint.x
+      this.gradEndY = material.fillLinearGradientEndPoint.y
+    } else if (fillType === FILL_TYPE_CODE['radial-gradient']) {
+      this.gradStartX = material.fillRadialGradientStartPoint.x
+      this.gradStartY = material.fillRadialGradientStartPoint.y
+      this.gradStartRadius = material.fillRadialGradientStartRadius
+      this.gradEndX = material.fillRadialGradientEndPoint.x
+      this.gradEndY = material.fillRadialGradientEndPoint.y
+      this.gradEndRadius = material.fillRadialGradientEndRadius
+    }
+    for (let s = 0; s < stopCount; s++) {
+      const base = s * STOP_FIELDS
+      const [r, g, b, a] = stops[s].color
+      this.stops[base] = stops[s].offset
+      this.stops[base + 1] = r
+      this.stops[base + 2] = g
+      this.stops[base + 3] = b
+      this.stops[base + 4] = a
+    }
+  }
+}
 
 export class MeshBatcher {
   private readonly device: GPUDevice
@@ -53,6 +180,16 @@ export class MeshBatcher {
    * rebuild that makes the change real.
    */
   private objectCounts: number[] = []
+
+  // The CPU-side mirror of the object storage buffer, persisted across frames (allocated
+  // fresh only on rebuild, when objectCount changes) so updateObjects() can leave an
+  // unchanged object's bytes untouched instead of reconstructing and reuploading every
+  // object every frame. objectCache holds what was last written to each slot - see
+  // ObjectCache.matches().
+  private objectData: ArrayBuffer | null = null
+  private objectF32: Float32Array | null = null
+  private objectU32: Uint32Array | null = null
+  private objectCache: ObjectCache[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
@@ -146,6 +283,14 @@ export class MeshBatcher {
       layout: this.objectLayout,
       entries: [{ binding: 0, resource: { buffer: this.objectBuffer } }],
     })
+
+    // The CPU mirror and its per-slot cache are rebuilt from scratch here too: slot
+    // numbering just changed (a different shape may now own any given slot), so nothing
+    // about what was last written to a slot number is still meaningful.
+    this.objectData = new ArrayBuffer(Math.max(1, this.objectCount) * OBJECT_STRIDE)
+    this.objectF32 = new Float32Array(this.objectData)
+    this.objectU32 = new Uint32Array(this.objectData)
+    this.objectCache = Array.from({ length: this.objectCount }, () => new ObjectCache())
   }
 
   /**
@@ -160,16 +305,19 @@ export class MeshBatcher {
    * shape and a Text can interleave correctly regardless of draw order.
    */
   updateObjects(shapes: readonly Shape[], depths: ReadonlyMap<Shape, number>): void {
-    if (!this.objectBuffer || this.objectCount === 0) return
+    if (!this.objectBuffer || this.objectCount === 0 || !this.objectData || !this.objectF32 || !this.objectU32) return
     const n = Math.min(this.objectCounts.length, shapes.length)
-    const buf = new ArrayBuffer(this.objectCount * OBJECT_STRIDE)
-    const f32 = new Float32Array(buf)
-    const u32 = new Uint32Array(buf)
+    const f32 = this.objectF32
+    const u32 = this.objectU32
+    let anyChanged = false
 
     let object = 0
     for (let i = 0; i < n; i++) {
       const shape = shapes[i]
       // The shape's whole block shares one transform and one depth; only the paint differs.
+      // model is the SAME Float32Array reference across frames when the shape hasn't
+      // actually moved (see Node.worldMatrix()'s cache), which is what lets the slot-level
+      // cache below skip a static shape's re-pack instead of just its worldMatrix compute.
       const model = shape.worldMatrix().toGPU()
       const depth = depths.get(shape) ?? 0.5
       const materials = shape.materials()
@@ -178,20 +326,25 @@ export class MeshBatcher {
         // Clamped, not trusted: a material list that shrank since the rebuild would
         // otherwise leave holes the geometry still points at (see objectCounts).
         const material = materials[Math.min(m, materials.length - 1)] ?? shape
-        const floatBase = (object * OBJECT_STRIDE) / 4
-
-        f32.set(model, floatBase)
-        f32[floatBase + OBJECT_DEPTH_OFFSET / 4] = depth
-
-        u32[floatBase + OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[material.fillPriority]
-
+        const fillType = FILL_TYPE_CODE[material.fillPriority]
         const stops =
           material.fillPriority === 'linear-gradient'
             ? material.fillLinearGradientColorStops
             : material.fillPriority === 'radial-gradient'
               ? material.fillRadialGradientColorStops
-              : []
+              : EMPTY_STOPS
         const stopCount = Math.min(stops.length, MAX_GRADIENT_STOPS)
+
+        const cache = this.objectCache[object]
+        if (cache.matches(model, depth, fillType, material, stopCount, stops)) {
+          continue // Buffer already holds these exact bytes from a previous frame.
+        }
+        anyChanged = true
+
+        const floatBase = (object * OBJECT_STRIDE) / 4
+        f32.set(model, floatBase)
+        f32[floatBase + OBJECT_DEPTH_OFFSET / 4] = depth
+        u32[floatBase + OBJECT_FILL_TYPE_OFFSET / 4] = fillType
         u32[floatBase + OBJECT_STOP_COUNT_OFFSET / 4] = stopCount
 
         if (material.fillPriority === 'linear-gradient') {
@@ -220,10 +373,17 @@ export class MeshBatcher {
 
         f32.set(material.fill, floatBase + OBJECT_FILL_COLOR_OFFSET / 4)
         f32.set(material.stroke, floatBase + OBJECT_STROKE_COLOR_OFFSET / 4)
+
+        cache.remember(model, depth, fillType, material, stopCount, stops)
       }
     }
 
-    this.device.queue.writeBuffer(this.objectBuffer, 0, buf)
+    // Skipping the upload when nothing changed matters less for its own bandwidth (it was
+    // already cheap - see the investigation numbers) than for what it signals: the whole
+    // per-object CPU loop above just short-circuited to cache comparisons for every slot.
+    if (anyChanged) {
+      this.device.queue.writeBuffer(this.objectBuffer, 0, this.objectData)
+    }
   }
 
   /**

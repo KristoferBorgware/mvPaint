@@ -126,6 +126,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       // culling on) - not just when disabling it - so leaving a scene that turned it off always
       // restores normal culling for whatever comes next, with no special-cased "on the way out".
       handle?.setCullingEnabled(!def.disableCulling)
+      handle?.setZSortEnabled(!def.disableZSort)
 
       // Both lanes rebuild from the visible set, which has just changed wholesale.
       handle?.markGeometryDirty()
