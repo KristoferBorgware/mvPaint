@@ -10,8 +10,15 @@
 // for an opt-in debug view over a small scene, not fine at all over a scene of thousands of
 // shapes. A pure transform change costs nothing extra however large the scene is, so there's
 // no longer a tradeoff to accept.
+//
+// Also like Transformer, the four edges are PERMANENT: added once (a Container, added to the
+// scene root exactly once by the caller) and hidden by scaling to zero rather than by
+// leaving/re-entering the scene graph - toggling the debug slider back to 0 used to remove
+// them and call markGeometryDirty(), forcing a full MeshBatcher.rebuild() of the whole scene
+// just to hide four quads.
 
-import { Rect, type SceneRendererHandle } from '@mvpaint/engine'
+import { Container, Rect } from '@mvpaint/engine'
+import type { AABB } from '@mvpaint/engine'
 
 const OUTLINE_COLOR = [1, 0.45, 0, 1] as const
 const OUTLINE_STROKE_WIDTH = 3
@@ -20,25 +27,21 @@ const Z_INDEX = 10_000
 type EdgeName = 'top' | 'bottom' | 'left' | 'right'
 const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
 
-export class CullBoundsOverlay {
+export class CullBoundsOverlay extends Container {
   private readonly edges = new Map<EdgeName, Rect>()
 
-  /**
-   * Shows (or updates) the outline when `margin` is non-zero and the renderer has a
-   * cull rectangle to show; removes it otherwise (margin back to 0, or bounds invalid -
-   * e.g. a margin so negative the rectangle inverted).
-   */
-  update(handle: SceneRendererHandle, margin: number): void {
-    const bounds = margin !== 0 ? handle.getCullBounds() : null
+  constructor() {
+    super('__cull-bounds-overlay')
+    for (const edge of EDGES) this.edges.set(edge, this.makePart(`__cull-bounds-${edge}`))
+  }
 
+  /**
+   * Shows (or updates) the outline when `bounds` is non-null and valid; hides it otherwise
+   * (margin back to 0, or bounds invalid - e.g. a margin so negative the rectangle inverted).
+   */
+  update(bounds: AABB | null): void {
     if (!bounds || !bounds.valid()) {
-      if (this.edges.size > 0) {
-        for (const edge of this.edges.values()) handle.scene.root.removeChild(edge)
-        this.edges.clear()
-        // Membership changed (four shapes just left the scene) - rare (only when the
-        // debug slider is toggled back to 0), unlike the per-frame move below.
-        handle.markGeometryDirty()
-      }
+      this.hideAll()
       return
     }
 
@@ -47,13 +50,6 @@ export class CullBoundsOverlay {
     const width = bounds.max.x - bounds.min.x
     const height = bounds.max.y - bounds.min.y
 
-    if (this.edges.size === 0) {
-      for (const edge of EDGES) this.edges.set(edge, this.makePart(handle, `__cull-bounds-${edge}`))
-      handle.markGeometryDirty()
-    }
-
-    // Edges overlap at the corners by the outline's own thickness, which is what closes
-    // the frame cleanly there - same technique as Transformer's border.
     const halfW = width / 2
     const halfH = height / 2
     this.placeEdge('top', cx, cy + halfH, width + OUTLINE_STROKE_WIDTH, OUTLINE_STROKE_WIDTH)
@@ -63,11 +59,10 @@ export class CullBoundsOverlay {
   }
 
   /** A unit quad: fill only, never stroked or resized by width/height, so it costs no geometry rebuilds. */
-  private makePart(handle: SceneRendererHandle, name: string): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, fill: [...OUTLINE_COLOR], strokeWidth: 0, zIndex: Z_INDEX })
+  private makePart(name: string): Rect {
+    const rect = new Rect({ name, width: 1, height: 1, fill: [...OUTLINE_COLOR], strokeWidth: 0, zIndex: Z_INDEX, scaleX: 0, scaleY: 0 })
     rect.pickable = false
-    rect.overlay = true
-    handle.scene.root.addChild(rect)
+    this.addChild(rect)
     return rect
   }
 
@@ -78,5 +73,14 @@ export class CullBoundsOverlay {
     rect.y = y
     rect.scaleX = width
     rect.scaleY = height
+  }
+
+  /** Collapses every edge to zero scale - invisible without dropping out of the mesh
+   * batcher's shape set (see the class comment on why that distinction matters). */
+  private hideAll(): void {
+    for (const rect of this.edges.values()) {
+      rect.scaleX = 0
+      rect.scaleY = 0
+    }
   }
 }

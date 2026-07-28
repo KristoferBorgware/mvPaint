@@ -10,8 +10,18 @@
 // MeshBatcher), so on a scene of thousands of shapes that meant redoing the entire scene's
 // geometry on every mouse move during a drag. A pure transform change costs nothing extra
 // however large the scene is.
+//
+// Also like Transformer, the five parts are PERMANENT: added once (a Container, added to
+// the scene root exactly once by the caller) and hidden between gestures by scaling to
+// zero rather than by leaving/re-entering the scene graph. This used to add/remove the
+// parts per gesture and call markGeometryDirty() on each end, which - on a scene of
+// thousands of shapes - meant every marquee drag (including a plain empty-space click,
+// which begins and instantly ends a zero-size one) forced a full MeshBatcher.rebuild() of
+// the ENTIRE shared mesh-lane buffer, twice. A permanent, zero-scale slot avoids that
+// entirely: the mesh batcher's shape SET never changes, so pulling out - or just starting
+// and releasing - a marquee costs nothing beyond these five quads.
 
-import { Rect, type SceneRendererHandle } from '@mvpaint/engine'
+import { Container, Rect } from '@mvpaint/engine'
 
 const FILL = [0.16, 0.62, 1, 0.14] as const
 const STROKE = [0.16, 0.62, 1, 0.9] as const
@@ -22,22 +32,21 @@ const Z_INDEX = 999_000
 type EdgeName = 'top' | 'bottom' | 'left' | 'right'
 const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
 
-export class MarqueeOverlay {
-  private fill: Rect | null = null
+export class MarqueeOverlay extends Container {
+  private readonly fill: Rect
   private readonly edges = new Map<EdgeName, Rect>()
 
-  /** Draws (or moves) the box between two world-space corners; null removes it. */
-  update(handle: SceneRendererHandle, corners: { from: { x: number; y: number }; to: { x: number; y: number } } | null): void {
+  constructor() {
+    super('__marquee-overlay')
+    this.fill = this.makePart('__marquee-fill', FILL)
+    for (const edge of EDGES) this.edges.set(edge, this.makePart(`__marquee-${edge}`, STROKE))
+  }
+
+  /** Draws (or moves) the box between two world-space corners, at the given camera zoom
+   * (for a constant on-screen border weight); null hides it. */
+  update(corners: { from: { x: number; y: number }; to: { x: number; y: number } } | null, zoom: number): void {
     if (!corners) {
-      if (this.fill) {
-        handle.scene.root.removeChild(this.fill)
-        for (const edge of this.edges.values()) handle.scene.root.removeChild(edge)
-        this.fill = null
-        this.edges.clear()
-        // Membership changed (five shapes just left the scene) - rare (once per gesture),
-        // unlike the per-frame resize below, which needs no rebuild at all now.
-        handle.markGeometryDirty()
-      }
+      this.hideAll()
       return
     }
 
@@ -47,12 +56,6 @@ export class MarqueeOverlay {
     const cx = (from.x + to.x) / 2
     const cy = (from.y + to.y) / 2
 
-    if (!this.fill) {
-      this.fill = this.makePart(handle, '__marquee-fill', FILL)
-      for (const edge of EDGES) this.edges.set(edge, this.makePart(handle, `__marquee-${edge}`, STROKE))
-      handle.markGeometryDirty()
-    }
-
     this.fill.x = cx
     this.fill.y = cy
     this.fill.scaleX = width
@@ -61,7 +64,7 @@ export class MarqueeOverlay {
     // Keep the border a constant weight on screen however far the view is zoomed - same
     // reasoning as Transformer's own border. Edges overlap at the corners by the border's
     // own thickness, which is what closes the frame cleanly there.
-    const thickness = STROKE_WIDTH_PX / handle.getZoom()
+    const thickness = STROKE_WIDTH_PX / (zoom > 0 ? zoom : 1)
     const halfW = width / 2
     const halfH = height / 2
     this.placeEdge('top', cx, cy + halfH, width + thickness, thickness)
@@ -71,12 +74,12 @@ export class MarqueeOverlay {
   }
 
   /** A unit quad: fill only, never stroked or resized by width/height, so it costs no geometry rebuilds. */
-  private makePart(handle: SceneRendererHandle, name: string, fill: readonly [number, number, number, number]): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex: Z_INDEX })
+  private makePart(name: string, fill: readonly [number, number, number, number]): Rect {
+    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex: Z_INDEX, scaleX: 0, scaleY: 0 })
     rect.pickable = false
     rect.draggable = false
     rect.overlay = true
-    handle.scene.root.addChild(rect)
+    this.addChild(rect)
     return rect
   }
 
@@ -87,5 +90,16 @@ export class MarqueeOverlay {
     rect.y = y
     rect.scaleX = width
     rect.scaleY = height
+  }
+
+  /** Collapses every part to zero scale - invisible without dropping out of the mesh
+   * batcher's shape set (see the class comment on why that distinction matters). */
+  private hideAll(): void {
+    this.fill.scaleX = 0
+    this.fill.scaleY = 0
+    for (const rect of this.edges.values()) {
+      rect.scaleX = 0
+      rect.scaleY = 0
+    }
   }
 }

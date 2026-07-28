@@ -70,6 +70,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const handleRef = useRef<SceneRendererHandle | null>(null)
   const controllerRef = useRef<SceneInputController | null>(null)
   const transformerRef = useRef<Transformer | null>(null)
+  const cullBoundsOverlayRef = useRef<CullBoundsOverlay | null>(null)
+  const marqueeOverlayRef = useRef<MarqueeOverlay | null>(null)
   // The live scene graph + what the current scene handed back, so a switch can swap content
   // without touching anything the renderer owns.
   const sceneGraphRef = useRef<Scene | null>(null)
@@ -112,7 +114,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // Drop the selection first: the transformer holds references to nodes that are about
         // to leave the graph, and a stale selection would keep re-fitting a frame around them.
         controllerRef.current?.setSelection([])
-        const keep = new Set<Node>([transformer, handle.camera])
+        const furniture: (Node | null)[] = [transformer, cullBoundsOverlayRef.current, marqueeOverlayRef.current, handle.camera]
+        const keep = new Set<Node>(furniture.filter((n): n is Node => n !== null))
         for (const child of [...sceneGraph.root.children]) {
           if (!keep.has(child)) sceneGraph.root.removeChild(child)
         }
@@ -173,7 +176,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let lastZoomReportTime = 0
     let inputController: SceneInputController | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
+    cullBoundsOverlayRef.current = cullBoundsOverlay
     const marqueeOverlay = new MarqueeOverlay()
+    marqueeOverlayRef.current = marqueeOverlay
 
     // The selection frame: eight resize anchors plus a rotate handle. It lives in the
     // scene like any other content, and is re-fitted to the selection every frame below.
@@ -193,9 +198,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       onDeviceError: (message) => onError?.(message),
       populate: (sceneGraph) => {
         sceneGraphRef.current = sceneGraph
-        // The transformer is added ONCE and deliberately outlives every scene switch: it is
-        // editor furniture, not content, so loadScene below skips it when clearing.
+        // The transformer and both debug/gesture overlays are added ONCE and deliberately
+        // outlive every scene switch: they are editor furniture, not content, so loadScene
+        // below skips them when clearing (see the `keep` set above).
         sceneGraph.root.addChild(transformer)
+        sceneGraph.root.addChild(cullBoundsOverlay)
+        sceneGraph.root.addChild(marqueeOverlay)
         applyScene(sceneDefRef.current, false)
       },
       onFrame: (dt) => {
@@ -225,7 +233,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
         // updated every frame since it tracks the camera as it pans/zooms.
         if (handle) {
-          cullBoundsOverlay.update(handle, handle.getCullMargin())
+          cullBoundsOverlay.update(handle.getCullMargin() !== 0 ? handle.getCullBounds() : null)
           // Re-fit the frame to whatever is selected: the selection may be moving under
           // a drag, spinning with the animation above, or unchanged - all one code path.
           const selection = transformer.selection
@@ -255,7 +263,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Forcing one here would re-tessellate and re-upload EVERY shape sharing the
           // batch on every selection change, not just the handful of quads that moved.
           onSelectionChange: (nodes) => onSelectionChangeRef.current?.(nodes),
-          onMarquee: (corners) => marqueeOverlay.update(handle, corners),
+          // No markGeometryDirty() here either, for the same reason as the transformer
+          // above: every marquee part is now a permanent, unit-quad slot too (see
+          // MarqueeOverlay's class comment) - pulling out a selection box, or even just a
+          // plain empty-space click (which begins and instantly ends a zero-size one),
+          // never changes the batcher's shape set.
+          onMarquee: (corners) => marqueeOverlay.update(corners, handle.getZoom()),
         })
         controllerRef.current = inputController
       })
@@ -269,6 +282,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       inputController?.destroy()
       controllerRef.current = null
       transformerRef.current = null
+      cullBoundsOverlayRef.current = null
+      marqueeOverlayRef.current = null
       handleRef.current?.destroy()
       handleRef.current = null
       stats.dom.remove()
