@@ -258,13 +258,19 @@ export class SceneRenderer {
     // EVERY shape), not affected by culling below.
     const ordered = collectZOrder(this.scene, this.zSortEnabled)
     const depths = new Map<Shape, number>()
-    ordered.forEach((shape, rank) => depths.set(shape, depthForRank(rank, ordered.length)))
     // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
     // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher,
     // VectorText very much included: it is text drawn AS mesh geometry, so it wants the
-    // mesh lane, not this filter's other side.
-    const texts = ordered.filter((s): s is Text => s instanceof Text)
-    const meshShapes = ordered.filter((s) => !(s instanceof Text))
+    // mesh lane, not this filter's other side. One pass buckets both instead of filtering
+    // `ordered` twice - same result, half the iteration.
+    const texts: Text[] = []
+    const meshShapes: Shape[] = []
+    for (let rank = 0; rank < ordered.length; rank++) {
+      const shape = ordered[rank]
+      depths.set(shape, depthForRank(rank, ordered.length))
+      if (shape instanceof Text) texts.push(shape)
+      else meshShapes.push(shape)
+    }
 
     // Viewport cull: skip anything whose bounds don't overlap the camera's current view
     // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
@@ -280,10 +286,16 @@ export class SceneRenderer {
 
     // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
     // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
-    // the overlay with depth off, so editor furniture sits on top without occluding.
-    const normal = onScreen.filter((s) => !s.overlay)
-    const overlays = onScreen.filter((s) => s.overlay)
-    const visibleMeshShapes = [...normal, ...overlays]
+    // the overlay with depth off, so editor furniture sits on top without occluding. Same
+    // one-pass bucketing as above; the overlay tail is only appended (a second, usually
+    // empty array) when there's actually one to append.
+    const normal: Shape[] = []
+    const overlays: Shape[] = []
+    for (const shape of onScreen) {
+      if (shape.overlay) overlays.push(shape)
+      else normal.push(shape)
+    }
+    const visibleMeshShapes = overlays.length > 0 ? normal.concat(overlays) : normal
     const overlayStart = normal.length
 
     // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
