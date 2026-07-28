@@ -38,6 +38,8 @@ export interface CircleOptions extends ShapeOptions {
 }
 
 export class Circle extends Shape {
+  override readonly className: string = 'Circle'
+
   radius: number
   segments?: number
 

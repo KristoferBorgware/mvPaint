@@ -623,4 +623,61 @@ function TWO_PI_PLUS(a: number): number {
   assert(shape.geometryVersion !== v0, 'a real geometry change does invalidate it')
 }
 
+// --- Node identity: id, name (a space-separated tag list), className/nodeType, and
+// the '#id' / '.name' / Type selector syntax used by matches()/find()/findOne()/
+// findAncestor(s)() ---
+{
+  const root = new Container('root')
+  const group = root.addChild(new Container('group'))
+  const a = group.addChild(new Rect({ name: 'box selected', id: 'a' }))
+  const b = group.addChild(new Rect({ name: 'box', id: 'b' }))
+  const nested = group.addChild(new Container('nested'))
+  const c = nested.addChild(new Rect({ id: 'c' }))
+  const asSortedIds = (nodes: { id: string }[]) =>
+    nodes
+      .map((n) => n.id)
+      .sort()
+      .join(',')
+
+  assert(a.className === 'Rect' && a.nodeType === 'Shape', 'className is the concrete class, nodeType is the scene-graph tier')
+  assert(group.className === 'Container' && group.nodeType === 'Container', 'a plain group is its own className and tier')
+
+  assert(a.hasName('box') && a.hasName('selected'), 'name holds multiple space-separated tags')
+  assert(!a.hasName('missing'), 'hasName misses a tag that is not present')
+  a.addName('extra')
+  assert(a.hasName('extra') && a.name === 'box selected extra', 'addName appends a tag')
+  a.addName('extra')
+  assert(a.name === 'box selected extra', 'addName is a no-op if the tag is already present')
+  a.removeName('selected')
+  assert(!a.hasName('selected') && a.name === 'box extra', 'removeName drops just that tag')
+  a.addName('selected') // restore for the selector checks below
+
+  assert(root.findOne('#a') === a, "'#id' selects by id")
+  assert(root.findOne('#b') === b, "'#id' distinguishes between two nodes of the same class")
+  assert(root.findOne('#missing') === null, "'#id' misses an absent id")
+  assert(asSortedIds(root.find('.box')) === 'a,b', "'.name' selects every node carrying that tag")
+  assert(asSortedIds(root.find('.selected')) === 'a', "'.name' only matches nodes carrying that exact tag")
+  assert(asSortedIds(root.find('Rect')) === 'a,b,c', "a bare word selects by className")
+  assert(asSortedIds(root.find('Shape')) === 'a,b,c', "a bare word also selects by nodeType, matching every concrete subclass")
+  assert(root.find('Container').length === 2, "nodeType 'Container' matches every group, including nested ones")
+  assert(asSortedIds(root.find('#a, #b')) === 'a,b', 'comma-separated clauses are OR-ed together')
+  assert(asSortedIds(root.find((n) => n.id === 'b' || n.id === 'c')) === 'b,c', 'a function selector is called directly with the node')
+  assert(root.find('.box').every((n) => n !== root), 'find() only returns descendants, never the node itself')
+  assert(!root.matches('.box'), 'matches() checks the node itself, not its descendants')
+  assert(group.matches('.box') === false && a.matches('.box'), 'matches() is a leaf-level check')
+
+  assert(c.findAncestor('.group') === group, "findAncestor matches an ancestor's name too")
+  assert(c.findAncestor('.absent') === null, 'findAncestor with no matching ancestor returns null')
+  assert(c.findAncestor('Container') === nested, 'findAncestor returns the nearest match')
+  assert(
+    c
+      .findAncestors('Container')
+      .map((n) => n.name)
+      .join(',') === 'nested,group,root',
+    'findAncestors walks up to the root, nearest first',
+  )
+  assert(nested.findAncestor('Container') === group, 'includeSelf defaults to false, so the starting node itself is skipped')
+  assert(nested.findAncestor('Container', true) === nested, 'includeSelf=true checks the starting node first')
+}
+
 console.log(`[shapes] self-test passed (${count} assertions)`)

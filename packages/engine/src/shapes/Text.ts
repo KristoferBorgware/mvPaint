@@ -17,6 +17,8 @@ import { layoutText, type ShapedText } from '../text/layout'
 export type TextOptions = TextBlockOptions
 
 export class Text extends TextBlock {
+  override readonly className: string = 'Text'
+
   private shapedCache: ShapedText | null = null
 
   /** Shape the runs into quads + materials, cached until the content or layout changes. */

@@ -66,6 +66,8 @@ interface ShapingResult {
 }
 
 export class VectorText extends TextBlock {
+  override readonly className: string = 'VectorText'
+
   readonly fonts: VectorFontBook
 
   private shapingCache: ShapingResult | null = null

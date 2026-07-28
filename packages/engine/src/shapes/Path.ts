@@ -22,6 +22,8 @@ export interface PathOptions extends ShapeOptions {
 }
 
 export class Path extends Shape {
+  override readonly className: string = 'Path'
+
   readonly contours: Contour[]
   private readonly groups: ContourGroup[]
   /** When false, fill triangles are skipped (e.g. SVG fill="none"). */

@@ -14,6 +14,8 @@ import { Vector4 } from '../math/Vector4'
 import { Node } from '../shapes/Node'
 
 export class Camera extends Node {
+  override readonly className: string = 'Camera'
+
   /** The scene renders through the camera whose flag is set. */
   active = false
 

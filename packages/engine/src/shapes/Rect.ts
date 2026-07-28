@@ -14,6 +14,8 @@ import { strokePolyline } from '../render/stroke'
 export type RectOptions = ShapeOptions
 
 export class Rect extends Shape {
+  override readonly className: string = 'Rect'
+
   constructor(options: RectOptions = {}) {
     super({ ...options, width: options.width ?? 1, height: options.height ?? 1 })
   }

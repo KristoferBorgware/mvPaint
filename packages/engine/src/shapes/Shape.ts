@@ -2,9 +2,8 @@
 // Text, VectorText). Carries the full common vocabulary every drawable shares: transform
 // (position, scale, rotation, pivot offset), visibility/pickability, stacking order (zIndex), a
 // settable size (width/height), and the complete fill/stroke styling API (flat color or
-// gradient fill; stroke color/width/join/cap/miter limit) - mirroring how a well-known
-// 2D canvas library's Shape class puts all of this in one place rather than splitting it
-// by "how the shape happens to be drawn". Concrete shapes only add what's genuinely
+// gradient fill; stroke color/width/join/cap/miter limit), all in one place rather than
+// split by how a shape happens to be drawn. Concrete shapes only add what's genuinely
 // specific to them (Rect: nothing beyond a default size; Circle: radius; Polyline:
 // points; Path: contours; Text/VectorText: runs and block layout).
 //
@@ -42,10 +41,10 @@
 // first, to the shape's local geometry) before skew/scale/rotation are applied about
 // that pivot, then the result is placed at (x, y).
 //
-// The shadow* properties mirror the canvas 2D shadow model (and the same names a
-// well-known 2D canvas library uses): shadowColor, shadowBlur, shadowOffsetX/Y,
-// shadowOpacity, shadowEnabled, shadowForStrokeEnabled - plus shadowSpread, which canvas
-// has no equivalent for and which is borrowed from CSS box-shadow instead. shadowBlur is a
+// The shadow* properties mirror the canvas 2D shadow model: shadowColor, shadowBlur,
+// shadowOffsetX/Y, shadowOpacity, shadowEnabled, shadowForStrokeEnabled - plus
+// shadowSpread, which canvas has no equivalent for and which is borrowed from CSS
+// box-shadow instead. shadowBlur is a
 // canvas blur radius - a Gaussian of sigma = blur/2 - authored in the shape's own local
 // units, so it scales with the shape the way the rest of its geometry does. shadowOffsetX/Y are
 // downward-positive and scale with the shape's absolute scale but are NOT turned by its
@@ -84,6 +83,7 @@ export interface ShapeTransform {
 
 export interface ShapeOptions {
   name?: string
+  id?: string
   x?: number
   y?: number
   width?: number
@@ -136,6 +136,8 @@ export interface ShapeOptions {
 }
 
 export abstract class Shape extends Node {
+  override readonly nodeType: string = 'Shape'
+
   /** Skipped by the renderer when false. */
   visible = true
   /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
@@ -260,7 +262,7 @@ export abstract class Shape extends Node {
   private geometryVersionCounter = 0
 
   constructor(options: ShapeOptions = {}) {
-    super(options.name)
+    super(options.name, options.id)
     this.x = options.x ?? 0
     this.y = options.y ?? 0
     this.width = options.width ?? 0

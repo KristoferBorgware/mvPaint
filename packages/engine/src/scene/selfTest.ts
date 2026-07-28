@@ -77,9 +77,9 @@ class TransformGroup extends Container {
   assert(eq(names('traversePostOrder'), ['a1', 'a2', 'a', 'b', 'root']), 'post-order')
   assert(eq(names('traverseBreadthFirst'), ['root', 'a', 'b', 'a1', 'a2']), 'breadth-first')
 
-  const found = root.findByName('a2')
-  assert(found !== null && found.name === 'a2', 'findByName hit')
-  assert(root.findByName('missing') === null, 'findByName miss')
+  const found = root.findOne('.a2')
+  assert(found !== null && found.name === 'a2', 'findOne(.name) hit')
+  assert(root.findOne('.missing') === null, 'findOne(.name) miss')
 
   assert(root.removeChild(a) && root.children.length === 1, 'removeChild detaches')
   assert(a.parent === null, 'removeChild clears parent')
