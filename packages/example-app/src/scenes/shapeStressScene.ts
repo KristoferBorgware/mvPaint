@@ -1,4 +1,4 @@
-// Shape stress test: 30000 shapes - rects, circles, regular polygons and stars - scattered
+// Shape stress test: 100000 shapes - rects, circles, regular polygons and stars - scattered
 // randomly across the field with random size and rotation, each a single opaque solid fill
 // colour. No stroke, no alpha, no gradients: every triangle is one flat, fully-opaque colour,
 // which isolates the mesh lane's raw vertex/fill-rate cost from the extra per-object material
@@ -16,7 +16,7 @@
 // thinning out or packing solid - zoom out to see the whole thing.
 //
 // This scene also sets `disableCulling` in the registry (scenes/index.ts): the point is to
-// stress-test drawing every one of the 30000 shapes, and viewport culling would otherwise
+// stress-test drawing every one of the 100000 shapes, and viewport culling would otherwise
 // mean only whatever the camera happens to be framing actually reaches the mesh batcher -
 // true even at the default zoom, since the field is larger than the default view.
 
@@ -24,12 +24,12 @@ import { Circle, Path, Rect, Text, type Point2, type RGBA, type Scene, type Shap
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
-const COUNT = 30000
+const COUNT = 100000
 // Scaled from the 500-shape original by sqrt(count ratio) per axis, so area grows with count
 // and the scattered/overlapping density stays the same at every scale (~1300 sq units/shape)
 // instead of thinning out or packing solid.
-const FIELD_HALF_WIDTH = 3670
-const FIELD_HALF_HEIGHT = 2650
+const FIELD_HALF_WIDTH = 6700
+const FIELD_HALF_HEIGHT = 4838
 
 type Kind = 'rect' | 'circle' | 'polygon' | 'star'
 const KINDS: readonly Kind[] = ['rect', 'circle', 'polygon', 'star']
