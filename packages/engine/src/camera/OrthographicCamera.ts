@@ -22,6 +22,10 @@ export class OrthographicCamera extends Camera {
     this.farZ = 100
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'viewHeight']
+  }
+
   // Orthographic projection: width follows the aspect ratio so pixels stay square.
   override proj(aspect: number): Matrix4x4 {
     return Matrix4x4.orthographicRH(this.viewHeight * aspect, this.viewHeight, this.nearZ, this.farZ)

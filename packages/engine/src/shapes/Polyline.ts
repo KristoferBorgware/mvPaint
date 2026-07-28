@@ -35,6 +35,10 @@ export class Polyline extends Shape {
     this.strokeWidth = options.strokeWidth ?? 1
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'points', 'closed']
+  }
+
   protected override buildGeometry(sink: MeshSink): void {
     if (this.strokeWidth <= 0 || this.points.length < 2) return
     strokePolyline(this.points, sink, {

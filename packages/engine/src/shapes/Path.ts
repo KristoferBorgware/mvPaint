@@ -41,6 +41,10 @@ export class Path extends Shape {
     this.filled = options.filled ?? true
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'contours', 'filled']
+  }
+
   protected override buildGeometry(sink: MeshSink): void {
     // Fill: one triangulated solid+holes group at a time.
     if (this.filled) {

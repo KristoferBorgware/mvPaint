@@ -8,8 +8,10 @@ import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
+import { Node } from './Node'
 import { Rect } from './Rect'
 import type { Shape } from './Shape'
+import { Text } from './Text'
 import { Transformer } from './Transformer'
 import {
   ANCHOR_DIRECTION,
@@ -678,6 +680,45 @@ function TWO_PI_PLUS(a: number): number {
   )
   assert(nested.findAncestor('Container') === group, 'includeSelf defaults to false, so the starting node itself is skipped')
   assert(nested.findAncestor('Container', true) === nested, 'includeSelf=true checks the starting node first')
+}
+
+// --- getAttr/setAttr/attrs: string-keyed access to a node's typed fields ---
+{
+  const rect = new Rect({ x: 1, y: 2, fill: [1, 0, 0, 1] })
+
+  assert(rect.getAttr('x') === 1, 'getAttr reads an ordinary field by name')
+  rect.setAttr('x', 42)
+  assert(rect.x === 42, 'setAttr falls back to a direct assignment when no dedicated setter exists')
+
+  const snapshot = rect.attrs
+  assert(snapshot.x === 42 && snapshot.id === rect.id && snapshot.fill === rect.fill, 'attrs includes both the base Node keys and the subclass ones')
+  rect.x = 100
+  assert(snapshot.x === 42 && rect.attrs.x === 100, 'attrs is a fresh snapshot each read, not a live view')
+
+  // A class that declares a dedicated setFoo() alongside a plain foo field: setAttr must
+  // call it rather than assign foo directly, since some real attributes (TextBlock.runs,
+  // just below) only exist as a read-only property paired with such a method.
+  class Widget extends Node {
+    foo = 1
+    setFooCalls = 0
+    setFoo(value: number): void {
+      this.setFooCalls++
+      this.foo = value * 2
+    }
+    protected override attrKeys(): readonly string[] {
+      return [...super.attrKeys(), 'foo']
+    }
+  }
+  const widget = new Widget()
+  widget.setAttr('foo', 5)
+  assert(widget.setFooCalls === 1 && widget.foo === 10, 'setAttr prefers a declared set<Key>() method over a direct assignment')
+
+  // TextBlock.runs is exactly that real case: a getter with no setter, paired with
+  // setRuns() (which also invalidates the shaping cache) - a plain assignment would throw.
+  const text = new Text({ text: 'hello' })
+  assert(text.getAttr('runs') === text.runs, 'getAttr reads a getter-only property too')
+  text.setAttr('runs', [{ text: 'world' }])
+  assert(text.runs.length === 1 && text.runs[0].text === 'world', "setAttr('runs', ...) on a TextBlock goes through setRuns()")
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

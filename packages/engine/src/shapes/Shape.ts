@@ -293,6 +293,51 @@ export abstract class Shape extends Node {
     this.miterLimit = options.miterLimit ?? 10
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [
+      ...super.attrKeys(),
+      'visible',
+      'pickable',
+      'draggable',
+      'x',
+      'y',
+      'scaleX',
+      'scaleY',
+      'rotation',
+      'offsetX',
+      'offsetY',
+      'skewX',
+      'skewY',
+      'zIndex',
+      'overlay',
+      'shadowColor',
+      'shadowBlur',
+      'shadowSpread',
+      'shadowOffsetX',
+      'shadowOffsetY',
+      'shadowOpacity',
+      'shadowEnabled',
+      'shadowForStrokeEnabled',
+      'width',
+      'height',
+      'fill',
+      'fillPriority',
+      'fillLinearGradientStartPoint',
+      'fillLinearGradientEndPoint',
+      'fillLinearGradientColorStops',
+      'fillRadialGradientStartPoint',
+      'fillRadialGradientStartRadius',
+      'fillRadialGradientEndPoint',
+      'fillRadialGradientEndRadius',
+      'fillRadialGradientColorStops',
+      'stroke',
+      'strokeWidth',
+      'lineJoin',
+      'lineCap',
+      'miterLimit',
+    ]
+  }
+
   // T(x,y) * R(rotation) * skew * S(scaleX,scaleY) - everything localMatrix() composes
   // except the trailing pivot translation, so shadowMatrix() below can splice its own
   // extra transform in at that same point (closest to the raw local-space geometry).

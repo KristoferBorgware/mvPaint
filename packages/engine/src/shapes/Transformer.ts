@@ -137,6 +137,20 @@ export class Transformer extends Container {
     this.hideAll()
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [
+      ...super.attrKeys(),
+      'anchorSize',
+      'rotateAnchorOffset',
+      'padding',
+      'borderWidth',
+      'anchorBorderWidth',
+      'enabledAnchors',
+      'rotateEnabled',
+      'keepRatio',
+    ]
+  }
+
   /** A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds. */
   private makePart(name: string, fill: RGBA, zIndex: number): Rect {
     const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 })

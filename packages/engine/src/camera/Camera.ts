@@ -30,6 +30,10 @@ export class Camera extends Node {
     super(name)
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'active', 'eye', 'target', 'up', 'fovY', 'nearZ', 'farZ']
+  }
+
   view(): Matrix4x4 {
     return Matrix4x4.lookAtRH(this.eye, this.target, this.up)
   }

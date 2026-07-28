@@ -84,6 +84,10 @@ export class VectorText extends TextBlock {
     this.lineJoin = options.lineJoin ?? 'round'
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'fonts']
+  }
+
   /** Shape the runs into quads + materials, cached until the content or layout changes. */
   shaped(): ShapedText {
     return this.ensureShaping().shaped

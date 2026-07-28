@@ -8,6 +8,15 @@
 // selectors: '#foo' by id, '.foo' by name, and a bare word by nodeName (the concrete
 // class, e.g. 'Rect') or nodeType (the scene-graph tier: 'Node', 'Container' or 'Shape').
 //
+// getAttr()/setAttr() read and write any of those same typed fields by string key, so code
+// that only knows a property's name at runtime (a future change-event dispatcher, a
+// property inspector, deserialization) doesn't need a per-shape-type switch. setAttr()
+// prefers a set<Key>() method when the class declares one - some attributes (TextBlock's
+// runs) are read-only properties paired with a method that also invalidates a cache, so a
+// plain assignment would either miss that or throw. attrs is a plain-object snapshot built
+// from attrKeys(), which each class overrides to append its own attribute names to its
+// parent's; the base Node's are just id and name.
+//
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -72,6 +81,35 @@ export class Node {
       .split(/\s+/)
       .filter((n) => n && n !== name)
       .join(' ')
+  }
+
+  /** Attribute keys getAttr()/setAttr()/attrs expose on this node. Override to append the
+   * subclass's own keys on top of super.attrKeys(). */
+  protected attrKeys(): readonly string[] {
+    return ['id', 'name']
+  }
+
+  getAttr(key: string): unknown {
+    return (this as unknown as Record<string, unknown>)[key]
+  }
+
+  setAttr(key: string, value: unknown): this {
+    const setterName = 'set' + key.charAt(0).toUpperCase() + key.slice(1)
+    const target = this as unknown as Record<string, unknown>
+    const setter = target[setterName]
+    if (typeof setter === 'function') {
+      ;(setter as (v: unknown) => void).call(this, value)
+    } else {
+      target[key] = value
+    }
+    return this
+  }
+
+  /** A snapshot of every attribute this node currently exposes - see attrKeys(). */
+  get attrs(): Record<string, unknown> {
+    const result: Record<string, unknown> = {}
+    for (const key of this.attrKeys()) result[key] = this.getAttr(key)
+    return result
   }
 
   // --- spatial seam ---

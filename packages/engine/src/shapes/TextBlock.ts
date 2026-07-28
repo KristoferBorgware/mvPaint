@@ -41,6 +41,10 @@ export abstract class TextBlock extends Shape {
     this.runsData = options.runs ?? (options.text !== undefined ? [{ text: options.text, style: options.style }] : [])
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'runs', 'align', 'maxWidth', 'lineHeight', 'direction', 'orientation']
+  }
+
   get runs(): readonly TextRun[] {
     return this.runsData
   }

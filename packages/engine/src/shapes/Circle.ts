@@ -62,6 +62,10 @@ export class Circle extends Shape {
     this.segments = options.segments
   }
 
+  protected override attrKeys(): readonly string[] {
+    return [...super.attrKeys(), 'radius', 'segments']
+  }
+
   override get width(): number {
     return this.radius * 2
   }
