@@ -15,6 +15,11 @@ import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
 import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
 import type { ExampleScene, SceneContent } from '../scenes'
 
+// How often a live camera-zoom change (wheel/pinch/keyboard) is reported back to React
+// state - see the onFrame callback below. A few times a second is imperceptible for a
+// numeric readout but cuts the setState rate during a gesture by an order of magnitude.
+const ZOOM_REPORT_INTERVAL_MS = 100
+
 interface WebGPUCanvasProps {
   /**
    * The example scene to show. Changing it unloads the current scene's content and builds
@@ -164,6 +169,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
     let cancelled = false
     let lastReportedZoom = zoom
+    let lastZoomReportTime = 0
     let inputController: SceneInputController | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
     const marqueeOverlay = new MarqueeOverlay()
@@ -198,12 +204,22 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // applied here.
         contentRef.current.onFrame?.(dt, speedRef.current)
         // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll
-        // it back so the zoom slider stays in sync, without a setState on every frame.
+        // it back so the zoom slider stays in sync, without a setState on every frame:
+        // a live pinch reports a new zoom on nearly every render tick, and each report is
+        // a setState on the whole app tree (the slider/label live in the top-level App
+        // component) - competing with this same render loop for the main thread exactly
+        // while the gesture is busiest. Throttled to a few times a second instead; still
+        // imperceptibly laggy for a numeric readout, and the final value always lands
+        // (the very next tick past the interval reports it, gesture or not).
         const handle = handleRef.current
         const currentZoom = handle?.getZoom()
         if (currentZoom !== undefined && currentZoom !== lastReportedZoom) {
-          lastReportedZoom = currentZoom
-          onZoomChangeRef.current?.(currentZoom)
+          const now = performance.now()
+          if (now - lastZoomReportTime >= ZOOM_REPORT_INTERVAL_MS) {
+            lastReportedZoom = currentZoom
+            lastZoomReportTime = now
+            onZoomChangeRef.current?.(currentZoom)
+          }
         }
         // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
         // updated every frame since it tracks the camera as it pans/zooms.
