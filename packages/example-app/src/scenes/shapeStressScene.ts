@@ -1,4 +1,4 @@
-// Shape stress test: 10000 shapes - rects, circles, regular polygons, stars and stroked lines -
+// Shape stress test: 30000 shapes - rects, circles, regular polygons, stars and stroked lines -
 // scattered randomly across the field with random size, rotation, stroke (or none), stroke
 // width, fill colour (solid or gradient), and opacity. Deliberately NO shadows: this is a
 // mesh-lane volume-and-variety test, not the shadow atlas's - see stressScene.ts for that one.
@@ -13,7 +13,7 @@
 // thinning out or packing solid - zoom out to see the whole thing.
 //
 // This scene also sets `disableCulling` in the registry (scenes/index.ts): the point is to
-// stress-test drawing every one of the 10000 shapes, and viewport culling would otherwise
+// stress-test drawing every one of the 30000 shapes, and viewport culling would otherwise
 // mean only whatever the camera happens to be framing actually reaches the mesh batcher -
 // true even at the default zoom, since the field is larger than the default view.
 
@@ -21,12 +21,12 @@ import { Circle, Path, Polyline, Rect, Text, type Point2, type RGBA, type Scene,
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
-const COUNT = 10000
+const COUNT = 30000
 // Scaled from the 500-shape original by sqrt(count ratio) per axis, so area grows with count
 // and the scattered/overlapping density stays the same at every scale (~1300 sq units/shape)
 // instead of thinning out or packing solid.
-const FIELD_HALF_WIDTH = 2120
-const FIELD_HALF_HEIGHT = 1530
+const FIELD_HALF_WIDTH = 3670
+const FIELD_HALF_HEIGHT = 2650
 
 type Kind = 'rect' | 'circle' | 'polygon' | 'star' | 'line'
 const KINDS: readonly Kind[] = ['rect', 'circle', 'polygon', 'star', 'line']
