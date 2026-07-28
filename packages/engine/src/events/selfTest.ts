@@ -8,6 +8,7 @@ import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
 import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
+import { PointerDispatcher } from './PointerDispatcher'
 import type { NodeEvent } from './NodeEvent'
 
 let count = 0
@@ -414,6 +415,295 @@ function tree() {
 
   resetListenerCensus()
   assert(listenerCount('click') === 0 && !hasHoverListeners(), 'resetting clears the tally outright')
+}
+
+// --- PointerDispatcher: raw input to scene-graph events ---
+//
+// Driven with a stub hit-test and a controllable clock, so press/move/release sequences and
+// the double-click window can be exercised exactly, with no canvas or GPU involved.
+{
+  interface Harness {
+    root: Container
+    group: Container
+    a: Node
+    b: Node
+    log: string[]
+    dispatcher: PointerDispatcher
+    hover: (node: Node | null) => void
+    at: (time: number) => void
+  }
+
+  function harness(listenFor: string, nodes?: (h: Omit<Harness, 'dispatcher' | 'hover' | 'at'>) => void): Harness {
+    resetListenerCensus()
+    const root = new Container('root')
+    const group = root.addChild(new Container('group'))
+    const a = group.addChild(new Node('a'))
+    const b = group.addChild(new Node('b'))
+    const log: string[] = []
+    const base = { root, group, a, b, log }
+
+    if (nodes) nodes(base)
+    else {
+      for (const node of [root, group, a, b]) {
+        node.on(listenFor, (e) => log.push(`${e.type}@${e.currentTarget.name}`))
+      }
+    }
+
+    let under: Node | null = null
+    let time = 0
+    const dispatcher = new PointerDispatcher({
+      root,
+      pick: () => under,
+      now: () => time,
+      clickThreshold: 6,
+      dblClickWindow: 400,
+    })
+    return {
+      ...base,
+      dispatcher,
+      hover: (node) => {
+        under = node
+      },
+      at: (t) => {
+        time = t
+      },
+    }
+  }
+
+  const mouse = { pointerId: 1, pointerType: 'mouse' }
+  const finger = { pointerId: 2, pointerType: 'touch' }
+  const origin = { x: 0, y: 0 }
+
+  // Both names for one press, and both bubble.
+  {
+    const h = harness('pointerdown mousedown touchstart')
+    h.dispatcher.down(mouse, origin, h.a)
+    assert(
+      h.log.join(' ') === 'pointerdown@a pointerdown@group pointerdown@root mousedown@a mousedown@group mousedown@root',
+      'a mouse press fires the canonical name and the mouse alias, each bubbling to the root',
+    )
+
+    h.log.length = 0
+    h.dispatcher.down(finger, origin, h.a)
+    assert(
+      h.log.join(' ').includes('touchstart@a') && !h.log.join(' ').includes('mousedown@a'),
+      'a touch press fires the touch alias instead',
+    )
+  }
+
+  // Empty space is the root.
+  {
+    const h = harness('pointerdown')
+    h.dispatcher.down(mouse, origin, null)
+    assert(h.log.join(' ') === 'pointerdown@root', 'a press on empty space fires on the scene root')
+  }
+
+  // A node that is not listening is treated as empty space rather than swallowing the event.
+  {
+    const h = harness('pointerdown')
+    h.a.listening = false
+    h.dispatcher.down(mouse, origin, h.a)
+    assert(h.log.join(' ') === 'pointerdown@root', 'a press on a node with listening off falls through to the root')
+  }
+
+  // One event object across both names, so stopping one stops the other.
+  {
+    const h = harness('', ({ root, group, a, log }) => {
+      a.on('pointerdown', (e) => {
+        log.push('pointerdown@a')
+        e.stopPropagation()
+      })
+      a.on('mousedown', () => log.push('mousedown@a'))
+      group.on('pointerdown', () => log.push('pointerdown@group'))
+      group.on('mousedown', () => log.push('mousedown@group'))
+      root.on('mousedown', () => log.push('mousedown@root'))
+    })
+    h.dispatcher.down(mouse, origin, h.a)
+    assert(
+      h.log.join(' ') === 'pointerdown@a mousedown@a',
+      'stopping propagation on the canonical name also keeps the alias from reaching the ancestors',
+    )
+  }
+
+  // Hover crossings.
+  {
+    const h = harness('pointerover pointerout pointerenter pointerleave')
+    h.hover(h.a)
+    h.dispatcher.move(mouse, origin)
+    assert(
+      h.log.join(' ') === 'pointerover@a pointerover@group pointerover@root pointerenter@a pointerenter@group',
+      'entering a node fires over up the whole chain, but enter only as far as was newly crossed into',
+    )
+
+    h.log.length = 0
+    h.hover(h.b)
+    h.dispatcher.move(mouse, origin)
+    assert(
+      h.log.join(' ') ===
+        'pointerout@a pointerout@group pointerout@root pointerleave@a pointerover@b pointerover@group pointerover@root pointerenter@b',
+      'moving between siblings leaves and enters only them, though out and over still bubble',
+    )
+
+    h.log.length = 0
+    h.dispatcher.move(mouse, origin)
+    assert(h.log.length === 0, 'a move that stays on the same node crosses nothing')
+
+    h.log.length = 0
+    h.hover(null)
+    h.dispatcher.move(mouse, origin)
+    assert(
+      h.log.join(' ') === 'pointerout@b pointerout@group pointerout@root pointerleave@b pointerleave@group',
+      'moving onto empty space leaves the node and its ancestors, with nothing entered',
+    )
+  }
+
+  // The census gate: no hover listener anywhere means no hit-test at all.
+  {
+    resetListenerCensus()
+    const root = new Container('root')
+    let picks = 0
+    const dispatcher = new PointerDispatcher({
+      root,
+      pick: () => {
+        picks++
+        return null
+      },
+    })
+    dispatcher.move(mouse, origin)
+    assert(picks === 0, 'with nothing listening for a hover event, a move hit-tests nothing')
+
+    root.on('pointermove', () => {})
+    dispatcher.move(mouse, origin)
+    assert(picks === 1, 'registering a hover listener is what turns per-move hit-testing on')
+  }
+
+  // Click and double click.
+  {
+    const h = harness('pointerclick click pointerdblclick dblclick')
+    h.hover(h.a)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.up(mouse, origin)
+    assert(
+      h.log.join(' ') === 'pointerclick@a pointerclick@group pointerclick@root click@a click@group click@root',
+      'a press and release on one node makes a click under both names',
+    )
+
+    h.log.length = 0
+    h.at(100)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.up(mouse, origin)
+    assert(h.log.some((entry) => entry === 'pointerdblclick@a'), 'a second click on the same node inside the window makes a double')
+
+    h.log.length = 0
+    h.at(200)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.up(mouse, origin)
+    assert(
+      !h.log.some((entry) => entry === 'pointerdblclick@a'),
+      'the count starts over afterwards, so three clicks are not two doubles',
+    )
+
+    h.log.length = 0
+    h.at(1000)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.up(mouse, origin)
+    assert(h.log.some((entry) => entry === 'pointerclick@a'), 'a click well after the previous one still clicks')
+    assert(!h.log.some((entry) => entry === 'pointerdblclick@a'), 'but is too late to be a double')
+  }
+
+  // What stops a click being a click.
+  {
+    const h = harness('pointerclick')
+    h.hover(h.a)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.up(mouse, { x: 40, y: 0 })
+    assert(h.log.length === 0, 'a pointer that wandered too far between press and release meant a drag, not a click')
+
+    h.log.length = 0
+    h.dispatcher.down(mouse, origin, h.a)
+    h.hover(h.b)
+    h.dispatcher.up(mouse, origin)
+    assert(h.log.length === 0, 'pressing one node and releasing over another is not a click on either')
+  }
+
+  // A touch click is a tap.
+  {
+    const h = harness('tap click')
+    h.hover(h.a)
+    h.dispatcher.down(finger, origin, h.a)
+    h.dispatcher.up(finger, origin)
+    assert(h.log.join(' ').includes('tap@a') && !h.log.join(' ').includes('click@a'), 'a finger taps rather than clicks')
+  }
+
+  // Cancellation takes the click away.
+  {
+    const h = harness('pointerclick pointercancel')
+    h.hover(h.a)
+    h.dispatcher.down(mouse, origin, h.a)
+    h.dispatcher.cancel(mouse, origin)
+    h.dispatcher.up(mouse, origin)
+    assert(
+      h.log.some((entry) => entry.startsWith('pointercancel@')) && !h.log.some((entry) => entry.startsWith('pointerclick@')),
+      'a cancelled press cancels, and its release no longer counts as a click',
+    )
+  }
+
+  // Pointer capture.
+  {
+    const h = harness('pointermove gotpointercapture lostpointercapture')
+    h.hover(h.b)
+    h.dispatcher.setPointerCapture(mouse.pointerId, h.a)
+    assert(h.log.some((entry) => entry === 'gotpointercapture@a'), 'taking capture tells the node')
+    assert(h.dispatcher.getCapture(mouse.pointerId) === h.a, 'and is readable back')
+
+    h.log.length = 0
+    h.dispatcher.move(mouse, origin)
+    assert(
+      h.log[0] === 'pointermove@a',
+      'a captured pointer reports to the capturing node even while over a different one',
+    )
+
+    h.log.length = 0
+    h.dispatcher.up(mouse, origin)
+    assert(h.log.some((entry) => entry === 'lostpointercapture@a'), 'the release drops the capture')
+    assert(h.dispatcher.getCapture(mouse.pointerId) === null, 'and it is gone afterwards')
+  }
+
+  // Leaving the canvas.
+  {
+    const h = harness('pointerleave')
+    h.hover(h.a)
+    h.dispatcher.move(mouse, origin)
+    h.log.length = 0
+    h.dispatcher.leave(mouse, origin)
+    assert(h.log.join(' ') === 'pointerleave@a pointerleave@group', 'the pointer leaving the canvas leaves whatever it was over')
+    assert(h.dispatcher.getHoverTarget(mouse.pointerId) === null, 'and nothing is hovered afterwards')
+  }
+
+  // Two pointers hover independently.
+  {
+    const h = harness('pointerenter')
+    h.hover(h.a)
+    h.dispatcher.move(mouse, origin)
+    h.hover(h.b)
+    h.dispatcher.move(finger, origin)
+    assert(h.dispatcher.getHoverTarget(mouse.pointerId) === h.a, 'one pointer keeps its own hover target')
+    assert(h.dispatcher.getHoverTarget(finger.pointerId) === h.b, 'while another tracks a different one')
+  }
+
+  // Wheel and context menu.
+  {
+    const h = harness('wheel contextmenu')
+    h.hover(h.a)
+    h.dispatcher.wheel(mouse, origin)
+    assert(h.log.join(' ') === 'wheel@a wheel@group wheel@root', 'the wheel fires on the node under it and bubbles')
+
+    h.log.length = 0
+    h.dispatcher.contextMenu(mouse, origin)
+    assert(h.log.join(' ') === 'contextmenu@a contextmenu@group contextmenu@root', 'so does the context menu')
+  }
+
+  resetListenerCensus()
 }
 
 console.log(`[events] self-test passed (${count} assertions)`)

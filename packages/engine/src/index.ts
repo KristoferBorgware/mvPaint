@@ -21,6 +21,7 @@ export * from './camera/OrthographicCamera'
 export * from './events/NodeEvent'
 export * from './events/eventNames'
 export * from './events/listenerCensus'
+export * from './events/PointerDispatcher'
 
 export * from './scene/Scene'
 export * from './scene/picking'

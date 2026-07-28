@@ -357,12 +357,15 @@ export class Node {
   }
 
   /**
-   * Dispatches an already-built event, taking its type from the object. Runs this node's
-   * handlers only - use fire(type, init, true) to bubble.
+   * Dispatches an already-built event, taking its type from the object. fire() is the usual
+   * way in; this exists for dispatching ONE event object several times, which is how a raw
+   * input event reaches both its canonical name and its device alias. Reusing the object
+   * carries stopPropagation() across those names: a handler that claims 'pointerdown' also
+   * keeps 'mousedown' from reaching the ancestors, while the target itself still hears both.
    */
-  dispatchEvent(event: NodeEvent): this {
-    event.currentTarget = this
-    this.fireLocal(event.type, event)
+  dispatchEvent(event: NodeEvent, bubble = false, boundary?: Node): this {
+    if (bubble) this.fireAndBubble(event.type, event, boundary)
+    else this.fireLocal(event.type, event)
     return this
   }
 

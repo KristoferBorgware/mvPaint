@@ -18,6 +18,13 @@
 //
 // Gestures resolve against the values captured when the press began, never accumulated
 // per move, so no gesture can drift over a long drag.
+//
+// Alongside all of that it feeds a PointerDispatcher (`events`), which turns the same raw
+// input into scene-graph events on whichever node the pointer is over - press, release,
+// move, the hover crossings, click and double click. Those go out before any of the gesture
+// branching here, so what a listener sees does not depend on how a press is subsequently
+// interpreted, and the two are otherwise independent: the dispatcher decides nothing about
+// selection, dragging or the camera.
 
 import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
@@ -37,6 +44,7 @@ import {
 import { screenToWorld, type Viewport } from './viewport'
 import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
+import { PointerDispatcher } from '../events/PointerDispatcher'
 
 export interface SceneInputControllerOptions {
   /** Zoom factor bounds (same units as SceneRendererHandle.setZoom/getZoom). Default [0.05, 10]. */
@@ -67,6 +75,8 @@ export interface SceneInputControllerOptions {
   rotationSnaps?: readonly number[]
   /** How close (radians) a rotation must come to a snap to take it. Default 0.12 (~7 degrees). */
   rotationSnapTolerance?: number
+  /** How long two clicks may be apart and still make a double click (ms). Default 400. */
+  dblClickWindow?: number
 }
 
 interface TrackedPointer {
@@ -152,6 +162,8 @@ export class SceneInputController {
   private readonly onDragEnd: (nodes: readonly Shape[]) => void
   private readonly previousTouchAction: string
   private readonly previousCursor: string
+  /** Turns raw pointer input into scene-graph events. Owns no gesture state. */
+  readonly events: PointerDispatcher
 
   private readonly pointers = new Map<number, TrackedPointer>()
   private gestureAnchorWorld: Vector2 | null = null
@@ -193,6 +205,16 @@ export class SceneInputController {
     this.onDrag = options.onDrag ?? (() => {})
     this.onDragEnd = options.onDragEnd ?? (() => {})
 
+    this.events = new PointerDispatcher({
+      root: handle.scene.root,
+      pick: (x, y) => handle.pick(x, y),
+      toWorld: (x, y) => this.worldAt(x, y),
+      // A click and a tap are the same judgement the gestures already make about whether a
+      // press stayed put, so they share one threshold rather than disagreeing at the edges.
+      clickThreshold: this.tapThreshold,
+      dblClickWindow: options.dblClickWindow,
+    })
+
     // Stop the browser's native touch scroll/pinch-zoom from competing with our own
     // gesture handling on touch devices.
     this.previousTouchAction = canvas.style.touchAction
@@ -203,6 +225,7 @@ export class SceneInputController {
     canvas.addEventListener('pointermove', this.onPointerMove)
     canvas.addEventListener('pointerup', this.onPointerUp)
     canvas.addEventListener('pointercancel', this.onPointerUp)
+    canvas.addEventListener('pointerleave', this.onPointerLeave)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     canvas.addEventListener('contextmenu', this.onContextMenu)
     window.addEventListener('keydown', this.onKeyDown)
@@ -214,6 +237,7 @@ export class SceneInputController {
     this.canvas.removeEventListener('pointermove', this.onPointerMove)
     this.canvas.removeEventListener('pointerup', this.onPointerUp)
     this.canvas.removeEventListener('pointercancel', this.onPointerUp)
+    this.canvas.removeEventListener('pointerleave', this.onPointerLeave)
     this.canvas.removeEventListener('wheel', this.onWheel)
     this.canvas.removeEventListener('contextmenu', this.onContextMenu)
     window.removeEventListener('keydown', this.onKeyDown)
@@ -222,6 +246,7 @@ export class SceneInputController {
     this.canvas.style.cursor = this.previousCursor
     this.clearLongPress()
     this.pointers.clear()
+    this.events.reset()
     this.drag = null
     this.transform = null
     this.marquee = null
@@ -364,9 +389,11 @@ export class SceneInputController {
 
   // --- node dragging ---
 
-  /** Arms a drag over a draggable node, selecting it first if it wasn't already. */
-  private armDrag(screenX: number, screenY: number, shiftKey: boolean): boolean {
-    const hit = this.handle.pick(screenX, screenY)
+  /**
+   * Arms a drag over a draggable node, selecting it first if it wasn't already. `hit` is
+   * whatever the press already hit-tested for (see onPointerDown).
+   */
+  private armDrag(screenX: number, screenY: number, shiftKey: boolean, hit: PickableNode | null): boolean {
     if (!hit || !hit.draggable) return false
     const anchorWorld = this.worldAt(screenX, screenY)
     if (!anchorWorld) return false
@@ -498,20 +525,27 @@ export class SceneInputController {
   // --- pointer plumbing ---
 
   private onPointerDown = (e: PointerEvent): void => {
+    // Events report what the pointer did and go out before any of the gesture branching
+    // below decides what to do about it, so the stream a listener sees is the same however
+    // the press is subsequently interpreted. The one hit-test serves both this and the drag
+    // arming further down - there is no reason to pay for it twice.
+    const point = this.toCanvasPoint(e)
+    const hit = this.handle.pick(point.x, point.y)
+    this.events.down(e, point, hit)
+
     // Middle-drag pans, which is how a mouse still reaches panning now that its primary
     // drag rubber-bands a selection.
     if (e.button === 1) {
       this.panningWithButton = true
       this.canvas.setPointerCapture(e.pointerId)
-      const p = this.toCanvasPoint(e)
-      this.pointers.set(e.pointerId, { x: p.x, y: p.y, downX: p.x, downY: p.y, type: e.pointerType })
+      this.pointers.set(e.pointerId, { x: point.x, y: point.y, downX: point.x, downY: point.y, type: e.pointerType })
       this.restartGesture()
       e.preventDefault()
       return
     }
     if (e.button !== 0) return
 
-    const p = this.toCanvasPoint(e)
+    const p = point
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, downX: p.x, downY: p.y, type: e.pointerType })
     this.tappedEmptySpace = false
@@ -546,7 +580,7 @@ export class SceneInputController {
         e.preventDefault()
         return
       }
-      if (this.dragNodes && this.armDrag(p.x, p.y, e.shiftKey)) {
+      if (this.dragNodes && this.armDrag(p.x, p.y, e.shiftKey, hit)) {
         this.restartGesture()
         e.preventDefault()
         return
@@ -565,9 +599,14 @@ export class SceneInputController {
   }
 
   private onPointerMove = (e: PointerEvent): void => {
+    const p = this.toCanvasPoint(e)
+    // Dispatched before the tracked-pointer check below, because hovering happens with no
+    // button held and so has no tracked pointer at all. Costs nothing when nothing is
+    // listening for a hover event - the dispatcher never hit-tests in that case.
+    this.events.move(e, p)
+
     const pointer = this.pointers.get(e.pointerId)
     if (!pointer) return
-    const p = this.toCanvasPoint(e)
     pointer.x = p.x
     pointer.y = p.y
 
@@ -593,7 +632,12 @@ export class SceneInputController {
     this.updateGesture()
   }
 
+  // Bound to both pointerup and pointercancel; the raw event's type tells them apart.
   private onPointerUp = (e: PointerEvent): void => {
+    const point = this.toCanvasPoint(e)
+    if (e.type === 'pointercancel') this.events.cancel(e, point)
+    else this.events.up(e, point)
+
     const pointer = this.pointers.get(e.pointerId)
     if (!pointer) return
     this.pointers.delete(e.pointerId)
@@ -640,9 +684,23 @@ export class SceneInputController {
     }
   }
 
+  // The pointer left the canvas, so it is no longer over whatever it was over. Not reached
+  // mid-drag: the canvas holds the pointer capture until the button comes up.
+  private onPointerLeave = (e: PointerEvent): void => {
+    this.events.leave(e, this.toCanvasPoint(e))
+  }
+
   // Middle-click pastes on some platforms and opens a menu on others; the canvas owns it.
   private onContextMenu = (e: Event): void => {
     e.preventDefault()
+    if (e instanceof MouseEvent) {
+      const rect = this.canvas.getBoundingClientRect()
+      this.events.contextMenu(
+        { pointerId: -1, pointerType: 'mouse' },
+        { x: e.clientX - rect.left, y: e.clientY - rect.top },
+        e,
+      )
+    }
   }
 
   // --- wheel zoom, toward the cursor ---
@@ -650,6 +708,7 @@ export class SceneInputController {
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault()
     const p = this.toCanvasPoint(e)
+    this.events.wheel({ pointerId: -1, pointerType: 'mouse' }, p, e)
     const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY)
     const nextZoom = clamp(this.handle.getZoom() * factor, this.minZoom, this.maxZoom)
     this.applyAnchoredZoom(p.x, p.y, nextZoom)
