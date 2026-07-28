@@ -248,10 +248,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Settle onto the 45-degree marks while rotating, which is what makes it
           // possible to get something exactly upright again by hand.
           rotationSnaps: [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, (5 * Math.PI) / 4, (3 * Math.PI) / 2, (7 * Math.PI) / 4],
-          onSelectionChange: (nodes) => {
-            onSelectionChangeRef.current?.(nodes)
-            handle.markGeometryDirty()
-          },
+          // No markGeometryDirty() here: every transformer part is a permanent, unit-quad
+          // slot in the mesh batcher (see Transformer's class comment) - selecting or
+          // deselecting never changes the batcher's shape set, so it never needs a rebuild.
+          // Forcing one here would re-tessellate and re-upload EVERY shape sharing the
+          // batch on every selection change, not just the handful of quads that moved.
+          onSelectionChange: (nodes) => onSelectionChangeRef.current?.(nodes),
           onMarquee: (corners) => marqueeOverlay.update(handle, corners),
         })
         controllerRef.current = inputController

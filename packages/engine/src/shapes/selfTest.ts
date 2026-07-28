@@ -542,7 +542,7 @@ function TWO_PI_PLUS(a: number): number {
   const top = edge('top')
   const widthBefore = top.scaleX
   assert(widthBefore > 100, 'the frame spans the selection plus its padding')
-  assert(top.visible, 'the frame shows once something is selected')
+  assert(top.scaleX !== 0 && top.scaleY !== 0, 'the frame shows (non-zero scale) once something is selected')
 
   // THE BUG THIS COVERS: scaling the node used to leave the frame at its old size,
   // because a Rect's width/height are baked geometry and only the renderer can trigger
@@ -581,9 +581,12 @@ function TWO_PI_PLUS(a: number): number {
   assert(t.anchorAt(anchorPosition(box, 'top-right').x, anchorPosition(box, 'top-right').y) === 'top-right', 'a corner handle is picked at its own position')
   assert(t.anchorAt(box.cx, box.cy) === null, 'the middle of the frame is not a handle')
 
-  // Detaching hides the whole frame.
+  // Detaching hides the whole frame - via zero scale, not Shape.visible (see Transformer's
+  // class comment: staying visible=true keeps every part in the mesh batcher's shape set
+  // permanently, so selecting/deselecting never forces the whole scene's geometry to rebuild).
   t.detach()
-  assert(!edge('top').visible, 'clearing the selection hides the frame')
+  assert(edge('top').visible, 'transformer parts stay Shape.visible even when hidden')
+  assert(edge('top').scaleX === 0 && edge('top').scaleY === 0, 'clearing the selection hides the frame via zero scale')
   assert(t.currentBox === null, 'and drops its box')
 }
 

@@ -19,6 +19,16 @@
 //
 // Anchors are held at a constant SCREEN size: their world size is divided by the camera
 // zoom, so a handle stays comfortably clickable whether the view is zoomed way in or out.
+//
+// Parts stay Shape.visible = true permanently, selection or not - hiding them is done by
+// scaling to zero instead (see hideAll()). Toggling visible would drop them out of
+// collectZOrder's traversal (see scene/picking.ts), changing the mesh batcher's shape SET
+// the instant a selection starts or ends - and MeshBatcher.rebuild() re-tessellates and
+// re-uploads EVERY shape sharing the batch when that set changes, not just the ones that
+// actually differ. On a scene with thousands of other shapes, that turns "select
+// something" into a full-scene rebuild costing orders of magnitude more than the ~20
+// unit quads that actually needed it. A permanent, zero-scale slot avoids that entirely:
+// the set never changes, so selecting/deselecting costs nothing beyond these few quads.
 
 import { Container } from './Container'
 import { Rect } from './Rect'
@@ -122,17 +132,16 @@ export class Transformer extends Container {
       })
     }
 
-    this.setVisible(false)
+    this.hideAll()
   }
 
   /** A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds. */
   private makePart(name: string, fill: RGBA, zIndex: number): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex })
+    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 })
     // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
     // otherwise they would shadow the very shapes they are meant to manipulate.
     rect.pickable = false
     rect.draggable = false
-    rect.visible = false
     // Drawn in the always-on-top pass, so the frame never punches a depth hole through
     // the text lane the way an ordinary translucent shape would.
     rect.overlay = true
@@ -156,7 +165,7 @@ export class Transformer extends Container {
     this.nodes = nodes.filter((node) => !this.owns(node))
     if (this.nodes.length === 0) {
       this.box = null
-      this.setVisible(false)
+      this.hideAll()
     }
   }
 
@@ -178,7 +187,7 @@ export class Transformer extends Container {
     this.box = box
     this.zoom = zoom > 0 ? zoom : 1
     if (!box || this.nodes.length === 0) {
-      this.setVisible(false)
+      this.hideAll()
       return
     }
 
@@ -254,7 +263,6 @@ export class Transformer extends Container {
     if (!rect) return
     const c = Math.cos(box.rotation)
     const s = Math.sin(box.rotation)
-    rect.visible = true
     rect.x = box.cx + localX * c - localY * s
     rect.y = box.cy + localX * s + localY * c
     rect.rotation = box.rotation
@@ -276,7 +284,6 @@ export class Transformer extends Container {
       [visual.outer, size],
       [visual.inner, innerSize],
     ] as const) {
-      rect.visible = true
       rect.x = x
       rect.y = y
       rect.rotation = rotation
@@ -285,7 +292,12 @@ export class Transformer extends Container {
     }
   }
 
-  private setVisible(visible: boolean): void {
-    for (const rect of this.parts) rect.visible = visible
+  /** Collapses every part to zero scale - invisible without dropping out of the mesh
+   * batcher's shape set (see the class comment on why that distinction matters). */
+  private hideAll(): void {
+    for (const rect of this.parts) {
+      rect.scaleX = 0
+      rect.scaleY = 0
+    }
   }
 }
