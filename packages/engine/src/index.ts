@@ -18,6 +18,8 @@ export * from './camera/FreeFlyController'
 export * from './camera/OrbitCamera'
 export * from './camera/OrthographicCamera'
 
+export * from './events/NodeEvent'
+
 export * from './scene/Scene'
 export * from './scene/picking'
 
