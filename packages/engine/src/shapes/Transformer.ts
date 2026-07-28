@@ -86,7 +86,7 @@ interface AnchorVisual {
 }
 
 export class Transformer extends Container {
-  override readonly className: string = 'Transformer'
+  override readonly nodeName: string = 'Transformer'
 
   readonly anchorSize: number
   readonly rotateAnchorOffset: number

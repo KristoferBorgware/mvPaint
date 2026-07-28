@@ -22,7 +22,7 @@ export interface PathOptions extends ShapeOptions {
 }
 
 export class Path extends Shape {
-  override readonly className: string = 'Path'
+  override readonly nodeName: string = 'Path'
 
   readonly contours: Contour[]
   private readonly groups: ContourGroup[]

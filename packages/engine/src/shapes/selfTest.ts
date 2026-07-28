@@ -623,7 +623,7 @@ function TWO_PI_PLUS(a: number): number {
   assert(shape.geometryVersion !== v0, 'a real geometry change does invalidate it')
 }
 
-// --- Node identity: id, name (a space-separated tag list), className/nodeType, and
+// --- Node identity: id, name (a space-separated tag list), nodeName/nodeType, and
 // the '#id' / '.name' / Type selector syntax used by matches()/find()/findOne()/
 // findAncestor(s)() ---
 {
@@ -639,8 +639,8 @@ function TWO_PI_PLUS(a: number): number {
       .sort()
       .join(',')
 
-  assert(a.className === 'Rect' && a.nodeType === 'Shape', 'className is the concrete class, nodeType is the scene-graph tier')
-  assert(group.className === 'Container' && group.nodeType === 'Container', 'a plain group is its own className and tier')
+  assert(a.nodeName === 'Rect' && a.nodeType === 'Shape', 'nodeName is the concrete class, nodeType is the scene-graph tier')
+  assert(group.nodeName === 'Container' && group.nodeType === 'Container', 'a plain group is its own nodeName and tier')
 
   assert(a.hasName('box') && a.hasName('selected'), 'name holds multiple space-separated tags')
   assert(!a.hasName('missing'), 'hasName misses a tag that is not present')
@@ -657,7 +657,7 @@ function TWO_PI_PLUS(a: number): number {
   assert(root.findOne('#missing') === null, "'#id' misses an absent id")
   assert(asSortedIds(root.find('.box')) === 'a,b', "'.name' selects every node carrying that tag")
   assert(asSortedIds(root.find('.selected')) === 'a', "'.name' only matches nodes carrying that exact tag")
-  assert(asSortedIds(root.find('Rect')) === 'a,b,c', "a bare word selects by className")
+  assert(asSortedIds(root.find('Rect')) === 'a,b,c', "a bare word selects by nodeName")
   assert(asSortedIds(root.find('Shape')) === 'a,b,c', "a bare word also selects by nodeType, matching every concrete subclass")
   assert(root.find('Container').length === 2, "nodeType 'Container' matches every group, including nested ones")
   assert(asSortedIds(root.find('#a, #b')) === 'a,b', 'comma-separated clauses are OR-ed together')

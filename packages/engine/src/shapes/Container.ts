@@ -5,7 +5,7 @@
 import { Node } from './Node'
 
 export class Container extends Node {
-  override readonly className: string = 'Container'
+  override readonly nodeName: string = 'Container'
   override readonly nodeType: string = 'Container'
 
   private readonly childNodes: Node[] = []

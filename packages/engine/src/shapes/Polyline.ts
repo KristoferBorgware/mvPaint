@@ -21,7 +21,7 @@ export interface PolylineOptions extends ShapeOptions {
 }
 
 export class Polyline extends Shape {
-  override readonly className: string = 'Polyline'
+  override readonly nodeName: string = 'Polyline'
 
   points: Point2[]
   closed: boolean

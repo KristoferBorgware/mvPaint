@@ -4,8 +4,8 @@
 // only Container holds children - but traversal/search live here via the eachChild() seam
 // so any Node can be walked uniformly (a leaf just yields itself).
 //
-// className/nodeType plus matches()/find()/findOne()/findAncestor(s)() implement CSS-like
-// selectors: '#foo' by id, '.foo' by name, and a bare word by className (the concrete
+// nodeName/nodeType plus matches()/find()/findOne()/findAncestor(s)() implement CSS-like
+// selectors: '#foo' by id, '.foo' by name, and a bare word by nodeName (the concrete
 // class, e.g. 'Rect') or nodeType (the scene-graph tier: 'Node', 'Container' or 'Shape').
 //
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
@@ -28,12 +28,13 @@ export class Node {
   /** Space-separated tags. Selector target: '.foo'. See hasName/addName/removeName. */
   name: string
 
-  /** This concrete class, e.g. 'Rect' or 'Transformer'. Selector target: 'Rect'. */
-  readonly className: string = 'Node'
+  /** This concrete class, e.g. 'Rect' or 'Transformer'. Fixed - not user-assignable, unlike
+   * name. Selector target: 'Rect'. */
+  readonly nodeName: string = 'Node'
 
   /** The tier of the scene-graph hierarchy this node belongs to: 'Node', 'Container' or
    * 'Shape'. Fixed by the class that introduces the tier and inherited unchanged below it,
-   * so e.g. every Shape subclass matches the selector 'Shape' regardless of className. */
+   * so e.g. every Shape subclass matches the selector 'Shape' regardless of nodeName. */
   readonly nodeType: string = 'Node'
 
   /** Set by Container.addChild; null for a detached node or the root. */
@@ -120,7 +121,7 @@ export class Node {
 
   /**
    * Tests this node against a selector: '#foo' matches id, '.foo' matches one of the
-   * space-separated names, anything else matches className or nodeType. Comma-separates
+   * space-separated names, anything else matches nodeName or nodeType. Comma-separates
    * multiple clauses (OR). A function selector is called directly with this node.
    */
   matches(selector: Selector): boolean {
@@ -131,7 +132,7 @@ export class Node {
       .some((clause) => {
         if (clause.startsWith('#')) return this.id === clause.slice(1)
         if (clause.startsWith('.')) return this.hasName(clause.slice(1))
-        return this.className === clause || this.nodeType === clause
+        return this.nodeName === clause || this.nodeType === clause
       })
   }
 
