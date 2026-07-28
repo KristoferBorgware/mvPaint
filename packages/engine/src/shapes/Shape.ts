@@ -308,11 +308,34 @@ export abstract class Shape extends Node {
     return m
   }
 
+  // Memoized on a snapshot of every field it reads (see ShapeTransform): a static shape -
+  // the overwhelming common case once a scene has settled - then costs nothing here on
+  // later frames instead of re-composing translate*rotate*skew*scale from scratch. The
+  // cache object is only reallocated on an actual change, not every call.
+  private localCache: (ShapeTransform & { matrix: Matrix4x4 }) | null = null
+
   override localMatrix(): Matrix4x4 {
+    const c = this.localCache
+    if (
+      c &&
+      c.x === this.x &&
+      c.y === this.y &&
+      c.rotation === this.rotation &&
+      c.scaleX === this.scaleX &&
+      c.scaleY === this.scaleY &&
+      c.skewX === this.skewX &&
+      c.skewY === this.skewY &&
+      c.offsetX === this.offsetX &&
+      c.offsetY === this.offsetY
+    ) {
+      return c.matrix
+    }
+
     let m = this.coreMatrix()
     if (this.offsetX !== 0 || this.offsetY !== 0) {
       m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
     }
+    this.localCache = { ...this.captureTransform(), matrix: m }
     return m
   }
 
