@@ -94,12 +94,29 @@ export class SceneRenderer {
   // a scene that never sets zIndex (every comparison ties, so the stable sort reproduces
   // traversal order anyway) or that doesn't care which shape ends up in front.
   private zSortEnabled = true
+  // Whether the shadow lane runs at all. Even with nothing to bake, prepareShadows() and
+  // draw()'s shadow section each scan every shape looking for one that casts a shadow -
+  // a scene that never uses shadows can skip both scans entirely instead of confirming,
+  // twice a frame, that the answer is still "none".
+  private shadowsEnabled = true
   private geometryDirty = true
   private textGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
   // set - so draw() can tell whether culling's output actually changed this frame.
-  private visibleMeshShapes: Shape[] = []
-  private visibleTexts: Text[] = []
+  private visibleMeshShapes: readonly Shape[] = []
+  private visibleTexts: readonly Text[] = []
+  // Last frame's gather-phase output (traversal, depth assignment, culling, overlay
+  // split), reused verbatim while cullingEnabled and zSortEnabled are both off and
+  // nothing has been marked dirty since - see draw()'s canReuseGather.
+  private cachedGather: {
+    ordered: readonly Shape[]
+    depths: ReadonlyMap<Shape, number>
+    meshShapes: readonly Shape[]
+    texts: readonly Text[]
+    visibleMeshShapes: readonly Shape[]
+    visibleMeshDepths: readonly number[]
+    overlayStart: number
+  } | null = null
   // The last frame's (margin-expanded) cull rectangle, for getCullBounds() - lets a
   // caller draw it as a debug overlay. Null before the first draw, or whenever the
   // active camera isn't an OrthographicCamera (no rectangular frustum to show).
@@ -166,6 +183,10 @@ export class SceneRenderer {
 
   /** See `cullingEnabled`. Disabling also clears the debug cull-bounds overlay's rectangle. */
   setCullingEnabled(enabled: boolean): void {
+    // A stale cachedGather would otherwise let draw()'s fast path serve a viewport-culled
+    // (or now-uncullled) set built under the OLD setting - flipping this always invalidates
+    // it, whether or not the caller also happens to call markGeometryDirty().
+    if (enabled !== this.cullingEnabled) this.cachedGather = null
     this.cullingEnabled = enabled
   }
 
@@ -175,11 +196,21 @@ export class SceneRenderer {
 
   /** See `zSortEnabled`. */
   setZSortEnabled(enabled: boolean): void {
+    if (enabled !== this.zSortEnabled) this.cachedGather = null
     this.zSortEnabled = enabled
   }
 
   getZSortEnabled(): boolean {
     return this.zSortEnabled
+  }
+
+  /** See `shadowsEnabled`. */
+  setShadowsEnabled(enabled: boolean): void {
+    this.shadowsEnabled = enabled
+  }
+
+  getShadowsEnabled(): boolean {
+    return this.shadowsEnabled
   }
 
   /** The last frame's (margin-expanded) cull rectangle, world space - for a debug overlay. */
@@ -230,6 +261,7 @@ export class SceneRenderer {
    * where no shadow-casting geometry changed, which is the common case.
    */
   prepareShadows(encoder: GPUCommandEncoder): void {
+    if (!this.shadowsEnabled) return
     const ordered = collectZOrder(this.scene, this.zSortEnabled)
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
     // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
@@ -252,63 +284,145 @@ export class SceneRenderer {
 
     this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
 
-    // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
-    // a Text can interleave correctly under the depth test regardless of which lane's
-    // draw call runs first (see scene/picking.ts). Depth ranks are scene-wide (based on
-    // EVERY shape), not affected by culling below.
-    const ordered = collectZOrder(this.scene, this.zSortEnabled)
-    const depths = new Map<Shape, number>()
-    // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
-    // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher,
-    // VectorText very much included: it is text drawn AS mesh geometry, so it wants the
-    // mesh lane, not this filter's other side. One pass buckets both instead of filtering
-    // `ordered` twice - same result, half the iteration.
-    const texts: Text[] = []
-    const meshShapes: Shape[] = []
-    for (let rank = 0; rank < ordered.length; rank++) {
-      const shape = ordered[rank]
-      depths.set(shape, depthForRank(rank, ordered.length))
-      if (shape instanceof Text) texts.push(shape)
-      else meshShapes.push(shape)
+    // Culling and zIndex sort both off means nothing here can change the visible SET on
+    // its own: no camera-dependent membership (nothing is ever culled), no zIndex-driven
+    // reordering, and structural changes (shapes actually added/removed) always come with
+    // an explicit markGeometryDirty()/markTextGeometryDirty() call. In that state, this
+    // whole gather - traversal, depth assignment, split, filter - reproduces byte-identical
+    // output every single frame it isn't given a reason to change, which is most of them
+    // for a static scene. Reusing last frame's arrays instead of rebuilding them is what
+    // lets a scene like the shape stress test skip tens of thousands of shapes' worth of
+    // traversal and array-building on every frame it's just sitting there.
+    const canReuseGather = !this.cullingEnabled && !this.zSortEnabled && !this.geometryDirty && !this.textGeometryDirty && this.cachedGather !== null
+
+    let ordered: readonly Shape[]
+    let depths: ReadonlyMap<Shape, number>
+    let meshShapes: readonly Shape[]
+    let visibleTexts: readonly Text[]
+    let visibleMeshShapes: readonly Shape[]
+    let visibleMeshDepths: readonly number[]
+    let overlayStart: number
+
+    if (canReuseGather) {
+      const g = this.cachedGather!
+      ordered = g.ordered
+      depths = g.depths
+      meshShapes = g.meshShapes
+      visibleTexts = g.texts
+      visibleMeshShapes = g.visibleMeshShapes
+      visibleMeshDepths = g.visibleMeshDepths
+      overlayStart = g.overlayStart
+    } else {
+      // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
+      // a Text can interleave correctly under the depth test regardless of which lane's
+      // draw call runs first (see scene/picking.ts). Depth ranks are scene-wide (based on
+      // EVERY shape), not affected by culling below.
+      const orderedLocal = collectZOrder(this.scene, this.zSortEnabled)
+      const depthsLocal = new Map<Shape, number>()
+      // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
+      // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher,
+      // VectorText very much included: it is text drawn AS mesh geometry, so it wants the
+      // mesh lane, not this filter's other side. One pass buckets both instead of filtering
+      // `ordered` twice - same result, half the iteration. meshDepthsLocal is built
+      // alongside meshShapesLocal, parallel by position - see MeshBatcher.updateObjects for
+      // why that's worth doing instead of a shape-keyed Map lookup per object.
+      const texts: Text[] = []
+      const meshShapesLocal: Shape[] = []
+      const meshDepthsLocal: number[] = []
+      for (let rank = 0; rank < orderedLocal.length; rank++) {
+        const shape = orderedLocal[rank]
+        const depth = depthForRank(rank, orderedLocal.length)
+        depthsLocal.set(shape, depth)
+        if (shape instanceof Text) texts.push(shape)
+        else {
+          meshShapesLocal.push(shape)
+          meshDepthsLocal.push(depth)
+        }
+      }
+
+      // Viewport cull: skip anything whose bounds don't overlap the camera's current view
+      // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
+      // non-orthographic camera (only OrthographicCamera has a rectangular frustum) or when
+      // cullingEnabled is off, which also skips the per-object test itself, not just its
+      // effect. Depths are filtered in step with their shapes via an explicit loop (not
+      // .filter(), which can't keep a second array in sync) whenever culling can actually
+      // drop something.
+      const viewBounds =
+        this.cullingEnabled && camera instanceof OrthographicCamera
+          ? camera.viewBounds(width / height).expanded(this.cullMargin)
+          : null
+      this.lastCullBounds = viewBounds
+      let onScreen: Shape[]
+      let onScreenDepths: number[]
+      if (viewBounds) {
+        onScreen = []
+        onScreenDepths = []
+        for (let i = 0; i < meshShapesLocal.length; i++) {
+          if (isShapeOnScreen(meshShapesLocal[i], viewBounds)) {
+            onScreen.push(meshShapesLocal[i])
+            onScreenDepths.push(meshDepthsLocal[i])
+          }
+        }
+      } else {
+        onScreen = meshShapesLocal
+        onScreenDepths = meshDepthsLocal
+      }
+      const visibleTextsLocal = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
+
+      // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
+      // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
+      // the overlay with depth off, so editor furniture sits on top without occluding. Same
+      // one-pass bucketing as above, depths carried alongside; the overlay tail is only
+      // appended (a second, usually empty pair of arrays) when there's actually one to append.
+      const normal: Shape[] = []
+      const normalDepths: number[] = []
+      const overlays: Shape[] = []
+      const overlayDepths: number[] = []
+      for (let i = 0; i < onScreen.length; i++) {
+        const shape = onScreen[i]
+        if (shape.overlay) {
+          overlays.push(shape)
+          overlayDepths.push(onScreenDepths[i])
+        } else {
+          normal.push(shape)
+          normalDepths.push(onScreenDepths[i])
+        }
+      }
+      const visibleMeshShapesLocal = overlays.length > 0 ? normal.concat(overlays) : normal
+      const visibleMeshDepthsLocal = overlays.length > 0 ? normalDepths.concat(overlayDepths) : normalDepths
+      const overlayStartLocal = normal.length
+
+      // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
+      // objects belong in them changes - content added/removed, or the visible set itself
+      // changing as the camera pans/zooms or an object crosses the view boundary - not
+      // every frame just because something moved (that's updateObjects(), below, cheap and
+      // unconditional either way).
+      if (this.geometryDirty || !sameMembers(visibleMeshShapesLocal, this.visibleMeshShapes)) {
+        this.batcher.rebuild(visibleMeshShapesLocal)
+        this.geometryDirty = false
+      }
+      this.visibleMeshShapes = visibleMeshShapesLocal
+
+      ordered = orderedLocal
+      depths = depthsLocal
+      meshShapes = onScreen
+      visibleTexts = visibleTextsLocal
+      visibleMeshShapes = visibleMeshShapesLocal
+      visibleMeshDepths = visibleMeshDepthsLocal
+      overlayStart = overlayStartLocal
+
+      this.cachedGather = {
+        ordered: orderedLocal,
+        depths: depthsLocal,
+        meshShapes: onScreen,
+        texts: visibleTextsLocal,
+        visibleMeshShapes: visibleMeshShapesLocal,
+        visibleMeshDepths: visibleMeshDepthsLocal,
+        overlayStart: overlayStartLocal,
+      }
     }
 
-    // Viewport cull: skip anything whose bounds don't overlap the camera's current view
-    // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
-    // non-orthographic camera (only OrthographicCamera has a rectangular frustum) or when
-    // cullingEnabled is off, which also skips the per-object test itself, not just its effect.
-    const viewBounds =
-      this.cullingEnabled && camera instanceof OrthographicCamera
-        ? camera.viewBounds(width / height).expanded(this.cullMargin)
-        : null
-    this.lastCullBounds = viewBounds
-    const onScreen = viewBounds ? meshShapes.filter((s) => isShapeOnScreen(s, viewBounds)) : meshShapes
-    const visibleTexts = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
-
-    // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
-    // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
-    // the overlay with depth off, so editor furniture sits on top without occluding. Same
-    // one-pass bucketing as above; the overlay tail is only appended (a second, usually
-    // empty array) when there's actually one to append.
-    const normal: Shape[] = []
-    const overlays: Shape[] = []
-    for (const shape of onScreen) {
-      if (shape.overlay) overlays.push(shape)
-      else normal.push(shape)
-    }
-    const visibleMeshShapes = overlays.length > 0 ? normal.concat(overlays) : normal
-    const overlayStart = normal.length
-
-    // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
-    // objects belong in them changes - content added/removed, or the visible set itself
-    // changing as the camera pans/zooms or an object crosses the view boundary - not
-    // every frame just because something moved (that's updateObjects(), below, cheap and
-    // unconditional either way).
-    if (this.geometryDirty || !sameMembers(visibleMeshShapes, this.visibleMeshShapes)) {
-      this.batcher.rebuild(visibleMeshShapes)
-      this.geometryDirty = false
-    }
-    this.visibleMeshShapes = visibleMeshShapes
-    this.batcher.updateObjects(visibleMeshShapes, depths)
+    this.batcher.updateObjects(visibleMeshShapes, visibleMeshDepths)
 
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
@@ -327,24 +441,27 @@ export class SceneRenderer {
     // drawn, every shape has already written its depth, so the test alone decides whether
     // the shadow lands on top of a given shape or is hidden behind it - including the very
     // shape casting it. Drawing them first instead would paint every shadow under
-    // everything, which is only correct for a single-layer scene.
-    const shadowCasters = onScreen.filter((s) => s.hasShadow())
-    if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
-      if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
-        this.shadowBatcher.rebuild(shadowCasters)
-        this.shadowGeometryDirty = false
+    // everything, which is only correct for a single-layer scene. Skipped entirely when
+    // shadowsEnabled is off - see its declaration for why that's worth having.
+    if (this.shadowsEnabled) {
+      const shadowCasters = meshShapes.filter((s) => s.hasShadow())
+      if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
+        if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
+          this.shadowBatcher.rebuild(shadowCasters)
+          this.shadowGeometryDirty = false
+        }
+        // Half a depth step behind the caster: far enough to lose the depth test against its
+        // own shape, near enough to stay in front of whatever sits below it. This also
+        // re-reads each shadow's atlas slot, so a silhouette re-baked this frame is picked up
+        // without the geometry above needing to know anything about it.
+        this.shadowBatcher.updateObjects(this.shadowAtlas, depths, 0.5 / (ordered.length + 1))
+        pass.setPipeline(this.shadowPipeline)
+        this.shadowBatcher.draw(pass, this.frameUniforms.bindGroup, this.shadowAtlas)
       }
-      // Half a depth step behind the caster: far enough to lose the depth test against its
-      // own shape, near enough to stay in front of whatever sits below it. This also
-      // re-reads each shadow's atlas slot, so a silhouette re-baked this frame is picked up
-      // without the geometry above needing to know anything about it.
-      this.shadowBatcher.updateObjects(this.shadowAtlas, depths, 0.5 / (ordered.length + 1))
-      pass.setPipeline(this.shadowPipeline)
-      this.shadowBatcher.draw(pass, this.frameUniforms.bindGroup, this.shadowAtlas)
     }
 
     // Last, and without touching depth: the overlay draws over every other lane.
-    if (overlays.length > 0) {
+    if (overlayStart < visibleMeshShapes.length) {
       pass.setPipeline(this.overlayPipeline)
       this.batcher.draw(
         pass,
@@ -379,6 +496,9 @@ export interface SceneRendererHandle {
   /** Turns the zIndex depth-sort on/off - see SceneRenderer's `zSortEnabled`. */
   setZSortEnabled: (enabled: boolean) => void
   getZSortEnabled: () => boolean
+  /** Turns the shadow lane on/off entirely - see SceneRenderer's `shadowsEnabled`. */
+  setShadowsEnabled: (enabled: boolean) => void
+  getShadowsEnabled: () => boolean
   /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
   getCullBounds: () => AABB | null
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
@@ -492,6 +612,12 @@ export async function createSceneRenderer(
     },
     getZSortEnabled() {
       return scene.getZSortEnabled()
+    },
+    setShadowsEnabled(enabled: boolean) {
+      scene.setShadowsEnabled(enabled)
+    },
+    getShadowsEnabled() {
+      return scene.getShadowsEnabled()
     },
     getCullBounds() {
       return scene.getCullBounds()

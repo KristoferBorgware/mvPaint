@@ -300,11 +300,13 @@ export class MeshBatcher {
    * Each object's record is OBJECT_STRIDE bytes;
    * f32/u32 views share one ArrayBuffer so integer fields (fillType, stopCount) can be
    * written alongside the float fields (matrix, gradient points/radii, stops, depth) at
-   * their exact byte offsets. `depths` maps each shape to its zIndex-derived NDC depth
-   * (see scene/picking.ts's collectZOrder/depthForRank) - shared across both lanes so a
-   * shape and a Text can interleave correctly regardless of draw order.
+   * their exact byte offsets. `depths[i]` is `shapes[i]`'s zIndex-derived NDC depth (see
+   * scene/picking.ts's collectZOrder/depthForRank) - a plain array aligned by position
+   * rather than a Map keyed by shape, since a hash lookup per object is real, avoidable
+   * cost once there are tens of thousands of them and the caller already has them in the
+   * same order it's handing shapes over in.
    */
-  updateObjects(shapes: readonly Shape[], depths: ReadonlyMap<Shape, number>): void {
+  updateObjects(shapes: readonly Shape[], depths: readonly number[]): void {
     if (!this.objectBuffer || this.objectCount === 0 || !this.objectData || !this.objectF32 || !this.objectU32) return
     const n = Math.min(this.objectCounts.length, shapes.length)
     const f32 = this.objectF32
@@ -319,7 +321,7 @@ export class MeshBatcher {
       // actually moved (see Node.worldMatrix()'s cache), which is what lets the slot-level
       // cache below skip a static shape's re-pack instead of just its worldMatrix compute.
       const model = shape.worldMatrix().toGPU()
-      const depth = depths.get(shape) ?? 0.5
+      const depth = depths[i] ?? 0.5
       const materials = shape.materials()
 
       for (let m = 0; m < this.objectCounts[i]; m++, object++) {

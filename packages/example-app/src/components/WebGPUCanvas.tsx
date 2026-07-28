@@ -132,6 +132,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       // restores normal culling for whatever comes next, with no special-cased "on the way out".
       handle?.setCullingEnabled(!def.disableCulling)
       handle?.setZSortEnabled(!def.disableZSort)
+      handle?.setShadowsEnabled(!def.disableShadows)
 
       // Both lanes rebuild from the visible set, which has just changed wholesale.
       handle?.markGeometryDirty()

@@ -66,6 +66,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
       '100000 rects, circles, polygons and stars scattered randomly - size, rotation and colour vary, but every shape is a solid opaque fill with no stroke, and deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan, and the zIndex depth-sort is off too (every shape ties at zIndex 0 anyway). Reload scene for a fresh layout.',
     disableCulling: true,
     disableZSort: true,
+    disableShadows: true,
     build: buildShapeStressScene,
   },
   {

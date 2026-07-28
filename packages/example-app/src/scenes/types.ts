@@ -44,6 +44,13 @@ export interface ExampleScene {
    * normal); the canvas restores it on switching to any scene that doesn't set this.
    */
   disableZSort?: boolean
+  /**
+   * Skip the shadow lane entirely for this scene: no per-frame scan for shadow-casting
+   * shapes, in either the shadow-atlas prepass or the main draw. Free for a scene that
+   * never enables a shadow on anything. Default false (shadows on, as normal); the canvas
+   * restores it on switching to any scene that doesn't set this.
+   */
+  disableShadows?: boolean
   /** Populates `scene.root`. The root is already emptied of the previous scene's content. */
   build: (scene: Scene) => SceneContent
 }
