@@ -139,10 +139,10 @@ export function shadowQuadBounds(
 }
 
 /**
- * Konva's shadow offset semantics, which are the canvas 2D ones: the offset scales with
- * the node's absolute scale but is NOT turned by its rotation (a canvas shadow's offset is
- * applied in device space, outside the current transform). `offsetY` is downward-positive,
- * so it flips against this scene's y-up axis.
+ * The canvas 2D shadow offset semantics: the offset scales with the node's absolute scale
+ * but is NOT turned by its rotation (a canvas shadow's offset is applied in device space,
+ * outside the current transform). `offsetY` is downward-positive, so it flips against this
+ * scene's y-up axis.
  *
  * `scaleX`/`scaleY` are the world matrix's axis lengths - see worldAxisScale.
  */
@@ -156,14 +156,14 @@ export function shadowWorldOffset(
 }
 
 /**
- * The absolute scale a world matrix applies, as the lengths of its two axis columns -
- * Konva's getAbsoluteScale(), which is what it multiplies shadowOffset by.
- * `m` is column-major (the layout Matrix4x4.toGPU produces).
+ * The absolute scale a world matrix applies, as the lengths of its two axis columns. This
+ * is the factor the shadow offset is multiplied by. `m` is column-major (the layout
+ * Matrix4x4.toGPU produces).
  *
- * Blur needs no such factor here: Konva multiplies shadowBlur by the absolute scale
- * because it blurs in device space, whereas baking the blur into a LOCAL-space texture
- * gets the same result for free - the quad carries the world transform, so the baked blur
- * is magnified by exactly the shape's own scale.
+ * Blur needs no such factor here. Blurring in device space would mean scaling the blur
+ * radius the same way, but baking the blur into a LOCAL-space texture gets the same result
+ * for free - the quad carries the world transform, so the baked blur is magnified by
+ * exactly the shape's own scale.
  */
 export function worldAxisScale(m: ArrayLike<number>): { x: number; y: number } {
   return {

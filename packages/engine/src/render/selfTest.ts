@@ -512,7 +512,7 @@ assert(
   assert(quad.y1 - quad.y0 === small.height / small.texelsPerUnit, 'the quad spans the slot exactly in y')
   assert(quad.x0 === -35 && quad.y0 === -25, 'the quad starts a full margin before the silhouette')
 
-  // Konva/canvas offset semantics: scaled by absolute scale, downward-positive, and NOT
+  // Canvas offset semantics: scaled by absolute scale, downward-positive, and NOT
   // turned by rotation (that is what worldAxisScale extracts - lengths, not direction).
   const offset = shadowWorldOffset(4, 6, 2, 3)
   assert(offset.x === 8, 'offsetX scales with the absolute x scale')

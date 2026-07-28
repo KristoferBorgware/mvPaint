@@ -176,7 +176,7 @@ export abstract class Shape extends Node {
    */
   overlay = false
 
-  // --- shadow (canvas 2D / Konva model; see the file header) --------------------------
+  // --- shadow (the canvas 2D model; see the file header) ------------------------------
   /** Shadow tint; its alpha is multiplied by shadowOpacity. */
   shadowColor: RGBA = [0, 0, 0, 1]
   /**

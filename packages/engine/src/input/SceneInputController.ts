@@ -25,6 +25,13 @@
 // branching here, so what a listener sees does not depend on how a press is subsequently
 // interpreted, and the two are otherwise independent: the dispatcher decides nothing about
 // selection, dragging or the camera.
+//
+// The gestures themselves also report what they are doing, as scene events (see
+// events/sceneEvents): dragstart/dragmove/dragend and transformstart/transform/transformend
+// on each node taking part, and selectionchange plus marqueestart/marqueemove/marqueeend on
+// the scene root. These are raised alongside the callback options of the same names, which
+// keep working; the events are what let a host observe all of this without being wired in
+// as a callback at construction time.
 
 import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
@@ -45,6 +52,8 @@ import { screenToWorld, type Viewport } from './viewport'
 import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
 import { PointerDispatcher } from '../events/PointerDispatcher'
+import { hasListener } from '../events/listenerCensus'
+import type { NodeEventInit } from '../events/NodeEvent'
 
 export interface SceneInputControllerOptions {
   /** Zoom factor bounds (same units as SceneRendererHandle.setZoom/getZoom). Default [0.05, 10]. */
@@ -262,6 +271,25 @@ export class SceneInputController {
     this.selection = nodes.filter((node) => !this.transformer?.owns(node))
     this.transformer?.attach(this.selection)
     this.onSelectionChange([...this.selection])
+    this.fireOnRoot('selectionchange', { selection: this.selection })
+  }
+
+  // --- scene events ---
+  //
+  // Each is raised alongside the matching callback option, not instead of it. Everything
+  // here checks the census first, so a scene that listens for none of it pays nothing -
+  // which matters for the per-move ones, dragmove and transform.
+
+  /** Raises a drag or transform event on every node taking part, carrying the whole set. */
+  private fireOnNodes(type: string, nodes: readonly Shape[]): void {
+    if (nodes.length === 0 || !hasListener(type)) return
+    for (const node of nodes) node.fire(type, { nodes }, true)
+  }
+
+  /** Raises a scene-wide event on the root, which is where such listeners belong. */
+  private fireOnRoot(type: string, init: NodeEventInit): void {
+    if (!hasListener(type)) return
+    this.handle.scene.root.fire(type, init, true)
   }
 
   private viewport(): Viewport {
@@ -333,6 +361,7 @@ export class SceneInputController {
       snapshots: transformer.selection.map((node) => ({ node, transform: node.captureTransform() })),
     }
     this.canvas.style.cursor = anchor === 'rotate' ? 'grabbing' : 'nwse-resize'
+    this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node))
   }
 
   private updateTransform(world: Vector2, shiftKey: boolean, altKey: boolean): void {
@@ -376,7 +405,9 @@ export class SceneInputController {
     for (const snap of session.snapshots) {
       applyWorldTransform(snap.node, delta)
     }
-    this.onDrag(session.snapshots.map((s) => s.node))
+    const nodes = session.snapshots.map((s) => s.node)
+    this.onDrag(nodes)
+    this.fireOnNodes('transform', nodes)
   }
 
   private endTransform(): void {
@@ -385,6 +416,7 @@ export class SceneInputController {
     this.transform = null
     this.canvas.style.cursor = this.previousCursor
     this.onDragEnd(nodes)
+    this.fireOnNodes('transformend', nodes)
   }
 
   // --- node dragging ---
@@ -424,6 +456,7 @@ export class SceneInputController {
       drag.active = true
       this.canvas.style.cursor = 'grabbing'
       this.onDragStart(drag.nodes)
+      this.fireOnNodes('dragstart', drag.nodes)
     }
 
     const world = this.worldAt(pointer.x, pointer.y)
@@ -437,6 +470,7 @@ export class SceneInputController {
     // No markGeometryDirty(): x/y are transform-only, applied per frame from the object's
     // world matrix, so a drag never rebuilds geometry however far the nodes travel.
     this.onDrag(drag.nodes)
+    this.fireOnNodes('dragmove', drag.nodes)
   }
 
   /** Ends the drag, optionally snapping the nodes back to where the drag started. */
@@ -453,6 +487,7 @@ export class SceneInputController {
       })
     }
     this.onDragEnd(drag.nodes)
+    this.fireOnNodes('dragend', drag.nodes)
   }
 
   // --- selection box (marquee) ---
@@ -460,6 +495,7 @@ export class SceneInputController {
   private beginMarquee(world: Vector2, additive: boolean): void {
     this.marquee = { from: world, to: world, additive }
     this.onMarquee({ from: world, to: world })
+    this.fireOnRoot('marqueestart', { from: world, to: world })
   }
 
   private updateMarquee(pointer: TrackedPointer): void {
@@ -468,6 +504,7 @@ export class SceneInputController {
     if (!world) return
     this.marquee.to = world
     this.onMarquee({ from: this.marquee.from, to: this.marquee.to })
+    this.fireOnRoot('marqueemove', { from: this.marquee.from, to: this.marquee.to })
   }
 
   private endMarquee(): void {
@@ -486,6 +523,20 @@ export class SceneInputController {
     } else {
       this.setSelection(picked)
     }
+    this.fireOnRoot('marqueeend', { from: session.from, to: session.to, selection: this.selection })
+  }
+
+  /**
+   * Abandons a selection box without selecting anything - a plain click that dragged out no
+   * area, or a second finger arriving. Still ends it as far as listeners are concerned, so
+   * every marqueestart has exactly one marqueeend whatever became of the gesture.
+   */
+  private cancelMarquee(): void {
+    const session = this.marquee
+    this.marquee = null
+    this.marqueeArmed = false
+    this.onMarquee(null)
+    if (session) this.fireOnRoot('marqueeend', { from: session.from, to: session.to, selection: [] })
   }
 
   private armLongPress(pointer: TrackedPointer, additive: boolean): void {
@@ -557,11 +608,7 @@ export class SceneInputController {
       this.clearLongPress()
       this.endDrag(true)
       this.endTransform()
-      if (this.marquee) {
-        this.marquee = null
-        this.marqueeArmed = false
-        this.onMarquee(null)
-      }
+      this.cancelMarquee()
       this.restartGesture()
       e.preventDefault()
       return
@@ -663,8 +710,7 @@ export class SceneInputController {
         if (wasTap && !this.marqueeArmed) {
           // A plain click on empty space clears the selection instead of selecting the
           // zero-area rectangle it technically dragged out.
-          this.marquee = null
-          this.onMarquee(null)
+          this.cancelMarquee()
           if (!e.shiftKey) this.setSelection([])
         } else {
           this.endMarquee()

@@ -44,6 +44,11 @@ export function hasHoverListeners(): boolean {
   return hoverCount > 0
 }
 
+/** Whether a type has any listener at all - lets a dispatch cost nothing when none does. */
+export function hasListener(type: string): boolean {
+  return (counts.get(type) ?? 0) > 0
+}
+
 /** Whether any of these types has a listener - lets a dispatch cost nothing when none does. */
 export function hasAnyListener(types: readonly string[]): boolean {
   for (const type of types) {

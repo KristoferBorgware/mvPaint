@@ -43,7 +43,8 @@ import {
   type NodeEventHandler,
   type NodeEventInit,
 } from '../events/NodeEvent'
-import { countListenersAdded, countListenersRemoved } from '../events/listenerCensus'
+import { countListenersAdded, countListenersRemoved, hasListener } from '../events/listenerCensus'
+import { attrChangeEventName } from '../events/sceneEvents'
 
 export type NodeVisitor = (node: Node) => void
 
@@ -130,7 +131,16 @@ export class Node {
     return (this as unknown as Record<string, unknown>)[key]
   }
 
+  /**
+   * Writes an attribute and, if anything is listening, raises '<key>Change' with the old and
+   * new values. Only a real change is reported, compared by identity - so replacing a fill
+   * array raises it while editing that array in place does not.
+   */
   setAttr(key: string, value: unknown): this {
+    const changeEvent = attrChangeEventName(key)
+    const watched = hasListener(changeEvent)
+    const oldVal = watched ? this.getAttr(key) : undefined
+
     const setterName = 'set' + key.charAt(0).toUpperCase() + key.slice(1)
     const target = this as unknown as Record<string, unknown>
     const setter = target[setterName]
@@ -138,6 +148,11 @@ export class Node {
       ;(setter as (v: unknown) => void).call(this, value)
     } else {
       target[key] = value
+    }
+
+    if (watched) {
+      const newVal = this.getAttr(key)
+      if (newVal !== oldVal) this.fire(changeEvent, { attr: key, oldVal, newVal }, true)
     }
     return this
   }

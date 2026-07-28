@@ -1,7 +1,11 @@
 // Container - a Node that holds children. Concrete containers (a scene
 // root / group) can be instantiated directly; Shape and Camera are leaf Nodes. Adds the
 // child list and the eachChild() override that powers Node's traversal and search.
+//
+// Membership changes raise 'add' and 'remove' on the container, carrying the child and
+// bubbling, so an ancestor can watch a whole subtree with one listener.
 
+import { hasListener } from '../events/listenerCensus'
 import { Node } from './Node'
 
 export class Container extends Node {
@@ -19,6 +23,9 @@ export class Container extends Node {
   addChild<T extends Node>(child: T): T {
     child.parent = this
     this.childNodes.push(child)
+    // Checked rather than fired unconditionally: populating a large scene is one call per
+    // shape, and an event nothing listens for would still walk to the root on every one.
+    if (hasListener('add')) this.fire('add', { child }, true)
     return child
   }
 
@@ -27,6 +34,9 @@ export class Container extends Node {
     if (i < 0) return false
     this.childNodes.splice(i, 1)
     child.parent = null
+    // Fired from the container the child just left, so the event still has somewhere to
+    // bubble - the child itself is detached by now and would reach nothing.
+    if (hasListener('remove')) this.fire('remove', { child }, true)
     return true
   }
 

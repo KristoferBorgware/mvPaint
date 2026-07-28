@@ -6,6 +6,9 @@
 
 import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
+import { Rect } from '../shapes/Rect'
+import { Text } from '../shapes/Text'
+import type { AttrChangeEvent, ChildEvent } from './sceneEvents'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
 import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
 import { PointerDispatcher } from './PointerDispatcher'
@@ -702,6 +705,83 @@ function tree() {
     h.dispatcher.contextMenu(mouse, origin)
     assert(h.log.join(' ') === 'contextmenu@a contextmenu@group contextmenu@root', 'so does the context menu')
   }
+
+  resetListenerCensus()
+}
+
+// --- attribute change events ---
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const rect = root.addChild(new Rect({ x: 1, fill: [1, 0, 0, 1] }))
+  const seen: AttrChangeEvent[] = []
+  const atRoot: string[] = []
+  rect.on('xChange', (e) => seen.push(e as AttrChangeEvent))
+  root.on('xChange', (e) => atRoot.push(`${e.type}@${e.currentTarget.name || 'root'}`))
+
+  rect.setAttr('x', 5)
+  assert(seen.length === 1, 'setAttr raises the attribute change event')
+  assert(seen[0].type === 'xChange' && seen[0].attr === 'x', 'named after the attribute, and carrying its name')
+  assert(seen[0].oldVal === 1 && seen[0].newVal === 5, 'with the values on either side of the change')
+  assert(seen[0].target === rect, 'targeted at the node that changed')
+  assert(atRoot.length === 1, 'and bubbling, so a container can watch its subtree')
+
+  rect.setAttr('x', 5)
+  assert(seen.length === 1, 'setting the same value again reports nothing')
+
+  // Direct assignment deliberately does not raise it - the attributes are plain fields.
+  rect.x = 99
+  assert(seen.length === 1, 'assigning the field directly does not raise a change event')
+
+  // Identity comparison: a replaced array is a change, an edited one is not.
+  const fills: AttrChangeEvent[] = []
+  rect.on('fillChange', (e) => fills.push(e as AttrChangeEvent))
+  rect.setAttr('fill', [0, 1, 0, 1])
+  assert(fills.length === 1, 'replacing an array attribute is a change')
+  const sameArray = rect.fill
+  ;(sameArray as unknown as number[])[0] = 0.5
+  rect.setAttr('fill', sameArray)
+  assert(fills.length === 1, 'handing back the same array is not, however it was edited in place')
+
+  // A change routed through a dedicated setter still reports.
+  const runs: AttrChangeEvent[] = []
+  const text = root.addChild(new Text({ text: 'a' }))
+  text.on('runsChange', (e) => runs.push(e as AttrChangeEvent))
+  text.setAttr('runs', [{ text: 'b' }])
+  assert(runs.length === 1 && text.runs[0].text === 'b', 'an attribute written through its own setter reports too')
+
+  resetListenerCensus()
+}
+
+// --- add and remove ---
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const group = root.addChild(new Container('group'))
+  const log: string[] = []
+  root.on('add remove', (e) => {
+    const child = (e as ChildEvent).child
+    log.push(`${e.type} child=${child.name} on=${e.currentTarget.name}`)
+  })
+
+  const leaf = group.addChild(new Node('leaf'))
+  assert(log.join('') === 'add child=leaf on=root', 'adding a child raises add, bubbling from the container it joined')
+
+  log.length = 0
+  group.removeChild(leaf)
+  assert(log.join('') === 'remove child=leaf on=root', 'removing it raises remove, from the container it left')
+
+  log.length = 0
+  group.removeChild(leaf)
+  assert(log.length === 0, 'removing something that was never there raises nothing')
+
+  // The container is the target, so the event still has ancestors to travel through - the
+  // child is detached by the time remove goes out and would reach nothing on its own.
+  const targets: string[] = []
+  root.on('remove', (e) => targets.push(e.target.name))
+  const other = group.addChild(new Node('other'))
+  group.removeChild(other)
+  assert(targets.join('') === 'group', 'remove is targeted at the container, not at the departed child')
 
   resetListenerCensus()
 }

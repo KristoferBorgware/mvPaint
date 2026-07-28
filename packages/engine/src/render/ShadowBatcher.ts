@@ -142,7 +142,7 @@ export class ShadowBatcher {
       const base = (i * SHADOW_OBJECT_STRIDE) / 4
       const world = shape.worldMatrix().toGPU()
 
-      // Canvas/Konva shadow offset: scaled by the shape's absolute scale, but applied
+      // Canvas shadow offset: scaled by the shape's absolute scale, but applied
       // along WORLD axes rather than the shape's own - so a rotated shape's shadow still
       // falls in the direction the (notional) light comes from. Prepending it to the world
       // matrix's translation column is the same as multiplying by a world translation.
