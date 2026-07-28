@@ -166,6 +166,13 @@ export class SceneInputController {
   private marquee: MarqueeSession | null = null
   private longPressTimer: ReturnType<typeof setTimeout> | null = null
   private marqueeArmed = false
+  // True from press to release whenever the press hit neither a transformer handle nor a
+  // draggable node - i.e. empty space. A mouse click on empty space clears the selection
+  // via the marquee branch below (it rubber-bands immediately, so `hadMarquee` is always
+  // true there); a touch tap releases before the long-press timer ever arms a marquee, so
+  // `hadMarquee` is false for it and this flag is what lets onPointerUp still clear the
+  // selection for that case.
+  private tappedEmptySpace = false
   private spaceHeld = false
 
   constructor(canvas: HTMLCanvasElement, handle: SceneRendererHandle, options: SceneInputControllerOptions = {}) {
@@ -507,6 +514,7 @@ export class SceneInputController {
     const p = this.toCanvasPoint(e)
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, downX: p.x, downY: p.y, type: e.pointerType })
+    this.tappedEmptySpace = false
 
     if (this.pointers.size >= 2) {
       this.multiTouch = true
@@ -544,6 +552,7 @@ export class SceneInputController {
         return
       }
       // Empty space: rubber-band right away on a mouse, or arm the hold on a touch.
+      this.tappedEmptySpace = true
       if (touch) {
         this.armLongPress(this.pointers.get(e.pointerId)!, e.shiftKey)
       } else {
@@ -616,6 +625,11 @@ export class SceneInputController {
         } else {
           this.endMarquee()
         }
+      } else if (wasTap && this.tappedEmptySpace) {
+        // Touch: a quick tap releases before the long-press timer ever arms a marquee
+        // (see armLongPress), so `hadMarquee` above is false - this is the touch
+        // equivalent of the mouse's "plain click on empty space" branch just above.
+        if (!e.shiftKey) this.setSelection([])
       }
 
       this.multiTouch = false
