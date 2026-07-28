@@ -43,6 +43,7 @@ import {
   type NodeEventHandler,
   type NodeEventInit,
 } from '../events/NodeEvent'
+import { countListenersAdded, countListenersRemoved } from '../events/listenerCensus'
 
 export type NodeVisitor = (node: Node) => void
 
@@ -293,6 +294,7 @@ export class Node {
       const entries = this.listeners.get(type)
       if (entries) entries.push({ namespace, handler })
       else this.listeners.set(type, [{ namespace, handler }])
+      countListenersAdded(type)
     }
     return this
   }
@@ -318,6 +320,7 @@ export class Node {
   off(events?: string, handler?: NodeEventHandler): this {
     if (!this.listeners) return this
     if (events === undefined) {
+      for (const [type, entries] of this.listeners) countListenersRemoved(type, entries.length)
       this.listeners = null
       return this
     }
@@ -427,6 +430,8 @@ export class Node {
     const kept = entries.filter(
       (entry) => (namespace !== '' && entry.namespace !== namespace) || (handler !== undefined && entry.handler !== handler),
     )
+    if (kept.length === entries.length) return
+    countListenersRemoved(type, entries.length - kept.length)
     if (kept.length === 0) this.listeners?.delete(type)
     else this.listeners?.set(type, kept)
   }

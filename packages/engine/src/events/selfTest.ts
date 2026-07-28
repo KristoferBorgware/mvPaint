@@ -6,6 +6,8 @@
 
 import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
+import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
+import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
 import type { NodeEvent } from './NodeEvent'
 
 let count = 0
@@ -311,6 +313,107 @@ function tree() {
   assert(a.findAncestors('Container').length === 2, 'findAncestors walks the whole chain by default')
   assert(a.findAncestors('Container', false, root).length === 1, 'stopNode bounds the walk below it')
   assert(a.findAncestors('Container', false, group).length === 0, 'stopNode is itself excluded')
+}
+
+// --- the name tables ---
+{
+  assert(deviceFor('mouse') === 'mouse', 'a mouse is a mouse')
+  assert(deviceFor('pen') === 'mouse', 'a pen groups with the mouse family')
+  assert(deviceFor('touch') === 'touch', 'a finger is its own family')
+  assert(deviceFor('') === 'mouse', 'an unreported pointer type falls back to the mouse family')
+
+  assert(eventNamesFor('pointerdown', 'mouse').join(',') === 'pointerdown,mousedown', 'a mouse press fires both its names')
+  assert(eventNamesFor('pointerdown', 'touch').join(',') === 'pointerdown,touchstart', 'a touch press fires the touch alias')
+  assert(eventNamesFor('pointerclick', 'mouse').join(',') === 'pointerclick,click', 'a synthesized click carries the plain name')
+  assert(eventNamesFor('pointerclick', 'touch').join(',') === 'pointerclick,tap', 'the touch equivalent of a click is a tap')
+  assert(eventNamesFor('pointerdblclick', 'touch').join(',') === 'pointerdblclick,dbltap', 'and of a double click, a double tap')
+
+  const pairs = POINTER_ACTIONS.flatMap((action) => [eventNamesFor(action, 'mouse'), eventNamesFor(action, 'touch')])
+  assert(pairs.every((names) => names.length === 2), 'every action resolves to exactly two names')
+  assert(
+    POINTER_ACTIONS.every(
+      (action) => eventNamesFor(action, 'mouse')[0] === action && eventNamesFor(action, 'touch')[0] === action,
+    ),
+    'the canonical pointer name comes first on both devices, so it always fires',
+  )
+  assert(
+    POINTER_ACTIONS.every((action) => {
+      const mouse = eventNamesFor(action, 'mouse')[1]
+      const touch = eventNamesFor(action, 'touch')[1]
+      return mouse !== action && touch !== action && mouse !== touch
+    }),
+    'the two device aliases are distinct from the canonical name and from each other',
+  )
+  assert(new Set(pairs.flat()).size === POINTER_ACTIONS.length * 3, 'no name is reused across actions')
+
+  assert(
+    eventNamesFor('pointermove', 'mouse') === eventNamesFor('pointermove', 'mouse'),
+    'the name arrays are shared, so dispatching allocates nothing',
+  )
+
+  const hover = ['pointermove', 'mousemove', 'touchmove', 'pointerover', 'mouseout', 'touchenter', 'pointerleave']
+  assert(hover.every((name) => HOVER_EVENTS.has(name)), 'every move/over/out/enter/leave name across all three families counts as hover')
+  const notHover = ['pointerdown', 'mousedown', 'touchstart', 'click', 'tap', 'pointerup', 'wheel']
+  assert(notHover.every((name) => !HOVER_EVENTS.has(name)), 'press, release and click do not, since they need no per-move hit-test')
+}
+
+// --- the listener census ---
+{
+  resetListenerCensus()
+  assert(listenerCount('click') === 0 && !hasHoverListeners(), 'the census starts empty')
+
+  const a = new Node('a')
+  const b = new Node('b')
+  const noop = (): void => {}
+
+  a.on('click', noop)
+  assert(listenerCount('click') === 1, 'on() counts a listener')
+  assert(!hasHoverListeners(), 'a click listener does not make the input layer start hit-testing every move')
+
+  b.on('click', noop)
+  assert(listenerCount('click') === 2, 'the count spans every node, not just one')
+
+  a.off('click')
+  assert(listenerCount('click') === 1, "off() discounts only the node it was called on")
+  b.off('click')
+  assert(listenerCount('click') === 0, 'the count returns to zero once the last one goes')
+
+  // The gate the whole tally exists for.
+  a.on('pointermove', noop)
+  assert(hasHoverListeners(), 'a hover listener turns per-move hit-testing on')
+  a.off('pointermove')
+  assert(!hasHoverListeners(), 'and removing it turns it back off')
+
+  a.on('mouseenter', noop)
+  assert(hasHoverListeners(), 'a device-alias hover name counts the same as the canonical one')
+  a.off('mouseenter')
+  assert(!hasHoverListeners(), 'removing the alias clears it too')
+
+  // Every removal path has to discount, or the gate would latch on forever.
+  a.on('click.tool pointermove.tool', noop)
+  assert(listenerCount('click') === 1 && hasHoverListeners(), 'a namespaced registration counts like any other')
+  a.off('.tool')
+  assert(listenerCount('click') === 0 && !hasHoverListeners(), 'a namespace removal discounts everything it removed')
+
+  a.on('click', noop)
+  a.on('pointermove', noop)
+  a.off()
+  assert(listenerCount('click') === 0 && !hasHoverListeners(), 'off() with no arguments discounts the whole node')
+
+  let onceRuns = 0
+  a.once('pointerover', () => onceRuns++)
+  assert(hasHoverListeners(), 'a once() registration counts while it is still pending')
+  a.fire('pointerover')
+  assert(onceRuns === 1 && !hasHoverListeners(), 'and discounts itself when it fires')
+
+  a.on('click', noop)
+  a.off('click', () => {})
+  assert(listenerCount('click') === 1, 'removing a handler that was never registered discounts nothing')
+  a.off('click', noop)
+  assert(listenerCount('click') === 0, 'removing the real one does')
+
+  resetListenerCensus()
+  assert(listenerCount('click') === 0 && !hasHoverListeners(), 'resetting clears the tally outright')
 }
 
 console.log(`[events] self-test passed (${count} assertions)`)
