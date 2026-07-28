@@ -191,6 +191,14 @@ export class MeshBatcher {
   private objectU32: Uint32Array | null = null
   private objectCache: ObjectCache[] = []
 
+  // updateObjects()'s dirty-range upload: two adjacent changed slots within this many
+  // objects of each other are merged into one writeBuffer call rather than split into two
+  // (a few hundred wasted bytes is cheaper than the call), and if a frame's changes are
+  // scattered into more ranges than this, it falls back to one whole-buffer upload instead
+  // of issuing an unbounded number of small GPU writes.
+  private static readonly DIRTY_RANGE_MERGE_GAP = 8
+  private static readonly MAX_DIRTY_RANGES = 512
+
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
     this.objectLayout = objectLayout
@@ -312,6 +320,10 @@ export class MeshBatcher {
     const f32 = this.objectF32
     const u32 = this.objectU32
     let anyChanged = false
+    // Which object slots actually got new bytes this frame, as merged [start, end) ranges
+    // in ascending object-index order (objects are visited in index order below, so no sort
+    // is needed) - see the upload step for why this is worth tracking.
+    const dirtyRanges: { start: number; end: number }[] = []
 
     let object = 0
     for (let i = 0; i < n; i++) {
@@ -342,6 +354,12 @@ export class MeshBatcher {
           continue // Buffer already holds these exact bytes from a previous frame.
         }
         anyChanged = true
+        const lastRange = dirtyRanges[dirtyRanges.length - 1]
+        if (lastRange && object - lastRange.end <= MeshBatcher.DIRTY_RANGE_MERGE_GAP) {
+          lastRange.end = object + 1
+        } else {
+          dirtyRanges.push({ start: object, end: object + 1 })
+        }
 
         const floatBase = (object * OBJECT_STRIDE) / 4
         f32.set(model, floatBase)
@@ -383,8 +401,30 @@ export class MeshBatcher {
     // Skipping the upload when nothing changed matters less for its own bandwidth (it was
     // already cheap - see the investigation numbers) than for what it signals: the whole
     // per-object CPU loop above just short-circuited to cache comparisons for every slot.
+    //
+    // When something DID change, upload only the bytes that actually changed rather than
+    // the whole buffer: dragging or transforming a selection touches a few objects out of
+    // however many exist in total, but re-uploading everyone else's untouched bytes every
+    // frame for the gesture's whole duration was pure waste - at 100k objects (304 bytes
+    // each) that's a ~30MB copy for a handful of moved shapes. dirtyRanges merges nearby
+    // slots into single writeBuffer calls (a shape's own material block is already
+    // contiguous, and small gaps are cheaper to just re-copy than to split over); once a
+    // gesture's changes are scattered widely enough that the range count would balloon (a
+    // marquee-dragged selection scattered across object-slot order, which tracks scene/
+    // creation order rather than screen position), issuing that many separate GPU writes
+    // would cost more than one contiguous copy, so it falls back to uploading the whole
+    // buffer instead - never worse than the old always-upload-everything behaviour, just
+    // no longer paying it for a small edit.
     if (anyChanged) {
-      this.device.queue.writeBuffer(this.objectBuffer, 0, this.objectData)
+      if (dirtyRanges.length <= MeshBatcher.MAX_DIRTY_RANGES) {
+        for (const range of dirtyRanges) {
+          const byteOffset = range.start * OBJECT_STRIDE
+          const byteLength = (range.end - range.start) * OBJECT_STRIDE
+          this.device.queue.writeBuffer(this.objectBuffer, byteOffset, this.objectData, byteOffset, byteLength)
+        }
+      } else {
+        this.device.queue.writeBuffer(this.objectBuffer, 0, this.objectData)
+      }
     }
   }
 
