@@ -3,7 +3,8 @@ import Stats from 'stats.js'
 import {
   boxForNodes,
   createSceneRenderer,
-  SceneInputController,
+  SceneInputDispatcher,
+  screenToWorld,
   Transformer,
   Vector3,
   panToAnchor,
@@ -72,7 +73,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
-  const controllerRef = useRef<SceneInputController | null>(null)
+  const controllerRef = useRef<SceneInputDispatcher | null>(null)
   const transformerRef = useRef<Transformer | null>(null)
   const cullBoundsOverlayRef = useRef<CullBoundsOverlay | null>(null)
   const marqueeOverlayRef = useRef<MarqueeOverlay | null>(null)
@@ -178,7 +179,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let cancelled = false
     let lastReportedZoom = zoom
     let lastZoomReportTime = 0
-    let inputController: SceneInputController | null = null
+    let inputController: SceneInputDispatcher | null = null
     let detachKeyboard: (() => void) | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
     cullBoundsOverlayRef.current = cullBoundsOverlay
@@ -257,7 +258,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         homeCameraRef.current = { eye: handle.camera.eye.clone(), target: handle.camera.target.clone() }
         handle.setZoom(zoom)
         handle.setCullMargin(cullMargin)
-        inputController = new SceneInputController(canvas, handle, {
+        inputController = new SceneInputDispatcher(canvas, {
+          // A lean surface rather than the whole renderer handle: the dispatcher needs to
+          // hit-test, project a point into the scene, and resolve a rectangle - nothing else.
+          root: handle.scene.root,
+          pick: (x, y) => handle.pick(x, y),
+          toWorld: (x, y) => screenToWorld(handle.camera, x, y, { width: canvas.clientWidth, height: canvas.clientHeight }),
+          nodesInBox: (from, to) => handle.nodesInBox(from, to),
           transformer,
           // Settle onto the 45-degree marks while rotating, which is what makes it
           // possible to get something exactly upright again by hand.

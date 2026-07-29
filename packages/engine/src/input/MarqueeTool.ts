@@ -10,7 +10,7 @@
 // assuming.
 //
 // begin/update/end are separate calls rather than one gesture handler because the pointer
-// that drives them belongs to SceneInputController, which feeds this while it is active.
+// that drives them belongs to SceneInputDispatcher, which feeds this while it is active.
 // That keeps a marquee drag from having to open the hover-event path just to read where the
 // pointer is - see listenerCensus for why that would cost a hit-test per move.
 

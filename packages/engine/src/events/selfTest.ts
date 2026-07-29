@@ -13,7 +13,7 @@ import { Text } from '../shapes/Text'
 import type { AttrChangeEvent, ChildEvent, MarqueeEvent } from './sceneEvents'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
 import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
-import { PointerDispatcher } from './PointerDispatcher'
+import { SceneInputDispatcher } from '../input/SceneInputDispatcher'
 import type { NodeEvent } from './NodeEvent'
 
 let count = 0
@@ -422,19 +422,21 @@ function tree() {
   assert(listenerCount('click') === 0 && !hasHoverListeners(), 'resetting clears the tally outright')
 }
 
-// --- PointerDispatcher: raw input to scene-graph events ---
+// --- SceneInputDispatcher: raw input to scene-graph events ---
 //
-// Driven with a stub hit-test and a controllable clock, so press/move/release sequences and
-// the double-click window can be exercised exactly, with no canvas or GPU involved.
+// Driven with no canvas at all, a stub hit-test and a controllable clock, so press/move/
+// release sequences and the double-click window can be exercised exactly.
 {
+  // Shapes rather than plain Nodes, because that is what a real hit-test returns; nothing
+  // here depends on their geometry.
   interface Harness {
     root: Container
     group: Container
-    a: Node
-    b: Node
+    a: Rect
+    b: Rect
     log: string[]
-    dispatcher: PointerDispatcher
-    hover: (node: Node | null) => void
+    dispatcher: SceneInputDispatcher
+    hover: (node: Rect | null) => void
     at: (time: number) => void
   }
 
@@ -442,8 +444,8 @@ function tree() {
     resetListenerCensus()
     const root = new Container('root')
     const group = root.addChild(new Container('group'))
-    const a = group.addChild(new Node('a'))
-    const b = group.addChild(new Node('b'))
+    const a = group.addChild(new Rect({ name: 'a' }))
+    const b = group.addChild(new Rect({ name: 'b' }))
     const log: string[] = []
     const base = { root, group, a, b, log }
 
@@ -454,13 +456,13 @@ function tree() {
       }
     }
 
-    let under: Node | null = null
+    let under: Rect | null = null
     let time = 0
-    const dispatcher = new PointerDispatcher({
+    const dispatcher = new SceneInputDispatcher(null, {
       root,
       pick: () => under,
       now: () => time,
-      clickThreshold: 6,
+      tapThreshold: 6,
       dblClickWindow: 400,
     })
     return {
@@ -567,7 +569,7 @@ function tree() {
     resetListenerCensus()
     const root = new Container('root')
     let picks = 0
-    const dispatcher = new PointerDispatcher({
+    const dispatcher = new SceneInputDispatcher(null, {
       root,
       pick: () => {
         picks++

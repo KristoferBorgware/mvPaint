@@ -1,5 +1,5 @@
 // Pure pan/zoom math for a 2D OrthographicCamera, shared by pointer-drag, pinch and
-// wheel handling in SceneInputController. Both operations are expressed as "keep this
+// wheel handling an application builds on the pan/pinch events. Both are expressed as "keep this
 // world point pinned under this viewport pixel", which is what makes drag-to-pan and
 // zoom-toward-cursor/pinch-center feel stable: the world point under the pointer never
 // slides, whether it moves (pan) or the scale changes around it (zoom).

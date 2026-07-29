@@ -143,7 +143,7 @@ export abstract class Shape extends Node {
   /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
   pickable = true
   /**
-   * Whether a pointer drag over this node repositions it (see input/SceneInputController).
+   * Whether a pointer drag over this node repositions it (see input/SceneInputDispatcher).
    * A drag only ever reaches a node that pickNode() returns, so `pickable = false` already
    * rules one out; this turns dragging off for a node that should still be selectable.
    */

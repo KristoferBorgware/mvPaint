@@ -1,6 +1,6 @@
 // MarqueeOverlay - the translucent rectangle drawn while a selection box is being pulled
 // out. Purely a visual: the controller decides what the rectangle actually selects when
-// it is released (see SceneInputController's onMarquee).
+// it is released - the application decides that, from the marquee events.
 //
 // Built the way Transformer builds its own frame: five UNIT quads (one fill, four border
 // edges) that are only ever moved and scaled, never resized by width/height and never

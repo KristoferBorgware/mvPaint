@@ -1,5 +1,5 @@
 // Self-test for the pan/zoom/pick math (screenToWorld, panToAnchor, zoomToward) and the
-// node-drag math (draggedPosition). Pure camera/geometry, no DOM - SceneInputController
+// node-drag math (draggedPosition). Pure camera/geometry, no DOM - SceneInputDispatcher
 // itself is a thin event-wiring layer over these and isn't covered here. Run with:
 //   npx tsx src/input/selfTest.ts
 

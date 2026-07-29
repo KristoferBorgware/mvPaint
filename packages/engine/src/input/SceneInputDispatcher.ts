@@ -1,45 +1,40 @@
-// SceneInputController - wires a canvas to the Pointer Events API (one code path for
-// mouse, touch and pen) plus the wheel, and drives node dragging and the Transformer
-// through a SceneRendererHandle. It owns no rendering state of its own.
+// SceneInputDispatcher - the whole path from a DOM pointer event to something the scene
+// can be told about, in one place: it listens on the canvas, tracks the pointers, works out
+// which node each event is over, and dispatches scene-graph events on it.
 //
-// A pointer press resolves in priority order: a transformer handle, then a draggable node,
-// then empty space. What any of it MEANS is not decided here - the press is reported, and
-// anything an application wants from it (pulling out a marquee, changing what is selected,
-// moving the view) is that application's to arrange, from the events below.
+// What it does NOT do is decide what any of that means. It reports; an application listens
+// and acts. Concretely:
+//
+//  - press, release, move, the hover crossings, click and double click go out on whichever
+//    node the pointer is over, bubbling to the scene root. Empty space, and a node that is
+//    not listening, both resolve to the root, so a background handler is root.on('click').
+//  - viewport gestures are recognised but never applied. A pan or pinch reports the pointer
+//    (or the midpoint of two), the world point that sat under it when the gesture began,
+//    and how far a pinch has spread since - everything panToAnchor and a zoom need. The
+//    application moves the camera, or does not. Nothing here reads the camera at all; it
+//    only asks the host to turn screen coordinates into world ones.
+//  - the marquee (`marquee`) is fed from here but never started here. An application calls
+//    beginMarquee() when it decides a press means one, and hears 'marqueeend'.
+//  - node dragging and the transformer's resize/rotate ARE performed, because they are
+//    mechanism rather than policy, and they report as dragstart/dragmove/dragend and
+//    transformstart/transform/transformend on every node taking part.
 //
 // There is no selection here. What is selected is an application's own idea, and often a
 // broader one than a frame around some shapes - rows in a panel, a locked layer, a group
 // edited together. Where this needs to know which nodes move as a unit, it asks the
-// Transformer what it is wrapping (see armDrag), because that set is the one thing the
-// engine genuinely does have to know about, and the application decides what goes in it.
+// Transformer what it is wrapping (see armDrag), because that set is the one thing it
+// genuinely has to know about, and the application decides what goes in it.
 //
-// Gestures resolve against the values captured when the press began, never accumulated
-// per move, so no gesture can drift over a long drag.
+// A pointer press resolves in priority order: a transformer handle, then a draggable node,
+// then empty space. Gestures resolve against the values captured when the press began,
+// never accumulated per move, so no gesture can drift over a long drag.
 //
-// It feeds a PointerDispatcher (`events`), which turns the same raw input into scene-graph
-// events on whichever node the pointer is over - press, release, move, the hover crossings,
-// click and double click. Those go out before any of the gesture branching here, so what a
-// listener sees does not depend on how a press is subsequently interpreted.
-//
-// The gestures themselves report as scene events (see events/sceneEvents):
-// dragstart/dragmove/dragend and transformstart/transform/transformend on each node taking
-// part, and marqueestart/marqueemove/marqueeend plus panstart/panmove/panend and
-// pinchstart/pinchmove/pinchend on the scene root. A press that should change what is
-// selected is heard through the ordinary pointer events, on whichever node it landed.
-//
-// Two things are deliberately provided rather than performed:
-//
-//  - the marquee (`marquee`, a MarqueeTool) is fed from here but never started here; an
-//    application calls beginMarquee() when it decides a press means one.
-//  - viewport gestures are recognised but never applied. A pan or pinch reports the pointer,
-//    the world point that was under it, and how far a pinch has spread - everything
-//    panToAnchor and a zoom need - and the application moves the camera, or does not.
-//    Nothing here reads or writes the camera except to turn screen coordinates into world
-//    ones, so keyboard bindings, zoom limits and what a wheel notch is worth all belong to
-//    whoever is driving.
+// The raw entry points (down/move/up/cancel/leave/wheel/contextMenu) are public. The canvas
+// listeners call them, and so can a host driving input from somewhere else - a test, a
+// replay, a different event source - without a DOM.
 
-import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
+import type { Node } from '../shapes/Node'
 import type { Shape, ShapeTransform } from '../shapes/Shape'
 import type { Transformer } from '../shapes/Transformer'
 import { Vector2 } from '../math/Vector2'
@@ -53,30 +48,48 @@ import {
   type ResizeAnchor,
   type TransformerAnchor,
 } from '../shapes/transformerMath'
-import { screenToWorld, type Viewport } from './viewport'
 import { draggedPosition } from './nodeDrag'
-import { PointerDispatcher } from '../events/PointerDispatcher'
 import { MarqueeTool } from './MarqueeTool'
 import { hasListener } from '../events/listenerCensus'
-import type { NodeEventInit } from '../events/NodeEvent'
+import { deviceFor, eventNamesFor, type PointerAction, type PointerDevice } from '../events/eventNames'
+import { hasAnyListener, hasHoverListeners } from '../events/listenerCensus'
+import { createNodeEvent, type NodeEventInit } from '../events/NodeEvent'
 
-export interface SceneInputControllerOptions {
-  /** Max total pointer movement (CSS px) for a gesture to still count as a tap/click. Default 6. */
-  tapThreshold?: number
-  /** The transformer whose handles take priority over dragging/selecting. */
+/** The parts of a raw pointer event this reads. A DOM PointerEvent satisfies it. */
+export interface PointerInput {
+  pointerId: number
+  pointerType: string
+}
+
+/** A point in canvas-relative CSS pixels. */
+export interface ScreenPoint {
+  x: number
+  y: number
+}
+
+export interface SceneInputDispatcherOptions {
+  /** Where empty-space events fire and where bubbling ends - normally the scene root. */
+  root: Node
+  /** The topmost node under a canvas-relative point, or null over empty space. */
+  pick: (screenX: number, screenY: number) => PickableNode | null
+  /** World position of a canvas-relative point. Without it, nothing that needs world space runs. */
+  toWorld?: (screenX: number, screenY: number) => Vector2 | null
+  /** The nodes a world rectangle covers - what the marquee resolves through. */
+  nodesInBox?: (from: Vector2, to: Vector2) => Shape[]
+  /** The transformer whose handles take priority over dragging. */
   transformer?: Transformer
+  /** Max total pointer movement (CSS px) for a press to still count as a tap/click. Default 6. */
+  tapThreshold?: number
+  /** How long two clicks may be apart and still make a double click (ms). Default 400. */
+  dblClickWindow?: number
   /** Set false so a one-pointer drag is never a node drag, whatever it presses on. Default true. */
   dragNodes?: boolean
-  /** Called when a node drag begins (after the tap threshold is passed), ends, or moves. */
-  onDragStart?: (nodes: readonly Shape[]) => void
-  onDrag?: (nodes: readonly Shape[]) => void
-  onDragEnd?: (nodes: readonly Shape[]) => void
   /** Angles (radians) a rotate drag settles onto when within `rotationSnapTolerance`. */
   rotationSnaps?: readonly number[]
   /** How close (radians) a rotation must come to a snap to take it. Default 0.12 (~7 degrees). */
   rotationSnapTolerance?: number
-  /** How long two clicks may be apart and still make a double click (ms). Default 400. */
-  dblClickWindow?: number
+  /** Clock for the double-click window. Defaults to performance.now. */
+  now?: () => number
 }
 
 /** Which viewport gesture the current pointers add up to. */
@@ -112,7 +125,15 @@ interface TransformSession {
   snapshots: NodeSnapshot[]
 }
 
+/** What a press remembered, so its release can decide whether a click happened. */
+interface PressState {
+  target: Node
+  x: number
+  y: number
+}
+
 const DEFAULT_TAP_THRESHOLD = 6
+const DEFAULT_DBL_CLICK_WINDOW = 400
 
 /** Corner anchors scale both axes at once, so they are the ones keepRatio applies to. */
 function isCornerAnchor(anchor: TransformerAnchor): boolean {
@@ -121,22 +142,28 @@ function isCornerAnchor(anchor: TransformerAnchor): boolean {
   )
 }
 
-export class SceneInputController {
-  private readonly canvas: HTMLCanvasElement
-  private readonly handle: SceneRendererHandle
+export class SceneInputDispatcher {
+  private readonly canvas: HTMLCanvasElement | null
+  private readonly root: Node
+  private readonly pick: (screenX: number, screenY: number) => PickableNode | null
+  private readonly toWorld: (screenX: number, screenY: number) => Vector2 | null
+  private readonly transformer?: Transformer
   private readonly tapThreshold: number
+  private readonly dblClickWindow: number
+  private readonly dragNodes: boolean
   private readonly rotationSnaps?: readonly number[]
   private readonly rotationSnapTolerance: number
-  private readonly transformer?: Transformer
-  private readonly dragNodes: boolean
-  private readonly onDragStart: (nodes: readonly Shape[]) => void
-  private readonly onDrag: (nodes: readonly Shape[]) => void
-  private readonly onDragEnd: (nodes: readonly Shape[]) => void
+  private readonly now: () => number
   private readonly previousTouchAction: string
   private readonly previousCursor: string
-  /** Turns raw pointer input into scene-graph events. Owns no gesture state. */
-  readonly events: PointerDispatcher
 
+  // Hover, capture and press state - what the event dispatch needs to remember.
+  private readonly hoverTargets = new Map<number, Node>()
+  private readonly captures = new Map<number, Node>()
+  private readonly presses = new Map<number, PressState>()
+  private lastClick: { target: Node; time: number } | null = null
+
+  // Gesture state - what the pointer tracking needs to remember.
   private readonly pointers = new Map<number, TrackedPointer>()
   private gestureKind: GestureKind = 'none'
   private gestureAnchorWorld: Vector2 | null = null
@@ -148,47 +175,44 @@ export class SceneInputController {
 
   private drag: NodeDragSession | null = null
   private transform: TransformSession | null = null
+
   /** The rubber-band rectangle. Started by the application, fed from here - see beginMarquee. */
   readonly marquee: MarqueeTool
 
   /**
    * When false, a press ignores transformer handles and draggable nodes, leaving the drag
    * to be reported as a pan instead. Applications switch this off for a "grab the view"
-   * modifier - holding space, a hand tool - which is a binding the engine has no view on.
+   * modifier - holding space, a hand tool - which is a binding this has no view on.
    */
   grabContent = true
 
-
-  constructor(canvas: HTMLCanvasElement, handle: SceneRendererHandle, options: SceneInputControllerOptions = {}) {
+  /**
+   * `canvas` may be null to build one that is driven entirely through the raw entry points,
+   * with no DOM listeners of its own.
+   */
+  constructor(canvas: HTMLCanvasElement | null, options: SceneInputDispatcherOptions) {
     this.canvas = canvas
-    this.handle = handle
+    this.root = options.root
+    this.pick = options.pick
+    this.toWorld = options.toWorld ?? (() => null)
+    this.transformer = options.transformer
     this.tapThreshold = options.tapThreshold ?? DEFAULT_TAP_THRESHOLD
+    this.dblClickWindow = options.dblClickWindow ?? DEFAULT_DBL_CLICK_WINDOW
+    this.dragNodes = options.dragNodes ?? true
     this.rotationSnaps = options.rotationSnaps
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 0.12
-    this.transformer = options.transformer
-    this.dragNodes = options.dragNodes ?? true
-    this.onDragStart = options.onDragStart ?? (() => {})
-    this.onDrag = options.onDrag ?? (() => {})
-    this.onDragEnd = options.onDragEnd ?? (() => {})
+    this.now = options.now ?? (() => performance.now())
 
-    this.marquee = new MarqueeTool(handle.scene.root, (from, to) => handle.nodesInBox(from, to))
+    const resolve = options.nodesInBox ?? (() => [])
+    this.marquee = new MarqueeTool(options.root, resolve)
 
-    this.events = new PointerDispatcher({
-      root: handle.scene.root,
-      pick: (x, y) => handle.pick(x, y),
-      toWorld: (x, y) => this.worldAt(x, y),
-      // A click and a tap are the same judgement the gestures already make about whether a
-      // press stayed put, so they share one threshold rather than disagreeing at the edges.
-      clickThreshold: this.tapThreshold,
-      dblClickWindow: options.dblClickWindow,
-    })
+    this.previousTouchAction = canvas?.style.touchAction ?? ''
+    this.previousCursor = canvas?.style.cursor ?? ''
+    if (!canvas) return
 
     // Stop the browser's native touch scroll/pinch-zoom from competing with our own
     // gesture handling on touch devices.
-    this.previousTouchAction = canvas.style.touchAction
     canvas.style.touchAction = 'none'
-    this.previousCursor = canvas.style.cursor
-
     canvas.addEventListener('pointerdown', this.onPointerDown)
     canvas.addEventListener('pointermove', this.onPointerMove)
     canvas.addEventListener('pointerup', this.onPointerUp)
@@ -199,27 +223,38 @@ export class SceneInputController {
   }
 
   destroy(): void {
-    this.canvas.removeEventListener('pointerdown', this.onPointerDown)
-    this.canvas.removeEventListener('pointermove', this.onPointerMove)
-    this.canvas.removeEventListener('pointerup', this.onPointerUp)
-    this.canvas.removeEventListener('pointercancel', this.onPointerUp)
-    this.canvas.removeEventListener('pointerleave', this.onPointerLeave)
-    this.canvas.removeEventListener('wheel', this.onWheel)
-    this.canvas.removeEventListener('contextmenu', this.onContextMenu)
-    this.canvas.style.touchAction = this.previousTouchAction
-    this.canvas.style.cursor = this.previousCursor
+    const canvas = this.canvas
+    if (canvas) {
+      canvas.removeEventListener('pointerdown', this.onPointerDown)
+      canvas.removeEventListener('pointermove', this.onPointerMove)
+      canvas.removeEventListener('pointerup', this.onPointerUp)
+      canvas.removeEventListener('pointercancel', this.onPointerUp)
+      canvas.removeEventListener('pointerleave', this.onPointerLeave)
+      canvas.removeEventListener('wheel', this.onWheel)
+      canvas.removeEventListener('contextmenu', this.onContextMenu)
+      canvas.style.touchAction = this.previousTouchAction
+      canvas.style.cursor = this.previousCursor
+    }
     this.pointers.clear()
-    this.events.reset()
+    this.reset()
     this.marquee.cancel()
     this.drag = null
     this.transform = null
   }
 
+  /** World position of a canvas-relative point, via the projection the host supplied. */
+  private worldAt(screenX: number, screenY: number): Vector2 | null {
+    return this.toWorld(screenX, screenY)
+  }
+
+  private setCursor(cursor: string): void {
+    if (this.canvas) this.canvas.style.cursor = cursor
+  }
+
   // --- scene events ---
   //
-  // Each is raised alongside the matching callback option, not instead of it. Everything
-  // here checks the census first, so a scene that listens for none of it pays nothing -
-  // which matters for the per-move ones, dragmove and transform.
+  // Everything here checks the census first, so a scene listening for none of it pays
+  // nothing - which matters for the per-move ones, dragmove and transform.
 
   /** Raises a drag or transform event on every node taking part, carrying the whole set. */
   private fireOnNodes(type: string, nodes: readonly Shape[]): void {
@@ -230,21 +265,14 @@ export class SceneInputController {
   /** Raises a scene-wide event on the root, which is where such listeners belong. */
   private fireOnRoot(type: string, init: NodeEventInit): void {
     if (!hasListener(type)) return
-    this.handle.scene.root.fire(type, init, true)
+    this.root.fire(type, init, true)
   }
 
-  private viewport(): Viewport {
-    return { width: this.canvas.clientWidth, height: this.canvas.clientHeight }
+  private toCanvasPoint(e: PointerEvent | WheelEvent | MouseEvent): { x: number; y: number } {
+    const rect = this.canvas?.getBoundingClientRect()
+    return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) }
   }
 
-  private toCanvasPoint(e: PointerEvent | WheelEvent): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
-  }
-
-  private worldAt(screenX: number, screenY: number): Vector2 | null {
-    return screenToWorld(this.handle.camera, screenX, screenY, this.viewport())
-  }
 
   // --- viewport gestures: pan (1 pointer) and pinch (2 pointers) ---
   //
@@ -255,7 +283,6 @@ export class SceneInputController {
 
   private restartGesture(): void {
     const active = [...this.pointers.values()]
-    const viewport = this.viewport()
     const next: GestureKind = active.length === 1 ? 'pan' : active.length === 2 ? 'pinch' : 'none'
 
     if (next !== this.gestureKind && this.gestureKind !== 'none') {
@@ -264,13 +291,13 @@ export class SceneInputController {
     this.gestureKind = next
 
     if (next === 'pan') {
-      this.gestureAnchorWorld = screenToWorld(this.handle.camera, active[0].x, active[0].y, viewport)
+      this.gestureAnchorWorld = this.worldAt(active[0].x, active[0].y)
       this.gesturePoint = new Vector2(active[0].x, active[0].y)
       this.gestureScale = 1
     } else if (next === 'pinch') {
       const midX = (active[0].x + active[1].x) / 2
       const midY = (active[0].y + active[1].y) / 2
-      this.gestureAnchorWorld = screenToWorld(this.handle.camera, midX, midY, viewport)
+      this.gestureAnchorWorld = this.worldAt(midX, midY)
       this.gesturePoint = new Vector2(midX, midY)
       this.gestureStartDistance = Math.hypot(active[0].x - active[1].x, active[0].y - active[1].y)
       this.gestureScale = 1
@@ -321,7 +348,7 @@ export class SceneInputController {
       startWorld: world,
       snapshots: transformer.nodes.map((node: Shape) => ({ node, transform: node.captureTransform() })),
     }
-    this.canvas.style.cursor = anchor === 'rotate' ? 'grabbing' : 'nwse-resize'
+    this.setCursor(anchor === 'rotate' ? 'grabbing' : 'nwse-resize')
     this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node))
   }
 
@@ -367,7 +394,6 @@ export class SceneInputController {
       applyWorldTransform(snap.node, delta)
     }
     const nodes = session.snapshots.map((s) => s.node)
-    this.onDrag(nodes)
     this.fireOnNodes('transform', nodes)
   }
 
@@ -375,8 +401,7 @@ export class SceneInputController {
     if (!this.transform) return
     const nodes = this.transform.snapshots.map((s) => s.node)
     this.transform = null
-    this.canvas.style.cursor = this.previousCursor
-    this.onDragEnd(nodes)
+    this.setCursor(this.previousCursor)
     this.fireOnNodes('transformend', nodes)
   }
 
@@ -413,8 +438,7 @@ export class SceneInputController {
       const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
       if (moved <= this.tapThreshold) return
       drag.active = true
-      this.canvas.style.cursor = 'grabbing'
-      this.onDragStart(drag.nodes)
+      this.setCursor('grabbing')
       this.fireOnNodes('dragstart', drag.nodes)
     }
 
@@ -428,7 +452,6 @@ export class SceneInputController {
     })
     // No markGeometryDirty(): x/y are transform-only, applied per frame from the object's
     // world matrix, so a drag never rebuilds geometry however far the nodes travel.
-    this.onDrag(drag.nodes)
     this.fireOnNodes('dragmove', drag.nodes)
   }
 
@@ -437,7 +460,7 @@ export class SceneInputController {
     const drag = this.drag
     if (!drag) return
     this.drag = null
-    this.canvas.style.cursor = this.previousCursor
+    this.setCursor(this.previousCursor)
     if (!drag.active) return
     if (revert) {
       drag.nodes.forEach((node, i) => {
@@ -445,7 +468,6 @@ export class SceneInputController {
         node.y = drag.startPositions[i].y
       })
     }
-    this.onDragEnd(drag.nodes)
     this.fireOnNodes('dragend', drag.nodes)
   }
 
@@ -477,15 +499,15 @@ export class SceneInputController {
     // the press is subsequently interpreted. The one hit-test serves both this and the drag
     // arming further down - there is no reason to pay for it twice.
     const point = this.toCanvasPoint(e)
-    const hit = this.handle.pick(point.x, point.y)
-    this.events.down(e, point, hit)
+    const hit = this.pick(point.x, point.y)
+    this.down(e, point, hit)
 
     // The middle button is tracked but never grabs content, so its drag always reports as
     // a pan - the one press whose meaning is fixed here, since there is nothing under it
     // to grab in the first place.
     if (e.button === 1) {
       this.panningWithButton = true
-      this.canvas.setPointerCapture(e.pointerId)
+      this.canvas?.setPointerCapture(e.pointerId)
       this.pointers.set(e.pointerId, { x: point.x, y: point.y, downX: point.x, downY: point.y, type: e.pointerType })
       this.restartGesture()
       e.preventDefault()
@@ -494,7 +516,7 @@ export class SceneInputController {
     if (e.button !== 0) return
 
     const p = point
-    this.canvas.setPointerCapture(e.pointerId)
+    this.canvas?.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, downX: p.x, downY: p.y, type: e.pointerType })
 
     if (this.pointers.size >= 2) {
@@ -535,7 +557,7 @@ export class SceneInputController {
     // Dispatched before the tracked-pointer check below, because hovering happens with no
     // button held and so has no tracked pointer at all. Costs nothing when nothing is
     // listening for a hover event - the dispatcher never hit-tests in that case.
-    this.events.move(e, p)
+    this.move(e, p)
 
     const pointer = this.pointers.get(e.pointerId)
     if (!pointer) return
@@ -561,13 +583,13 @@ export class SceneInputController {
   // Bound to both pointerup and pointercancel; the raw event's type tells them apart.
   private onPointerUp = (e: PointerEvent): void => {
     const point = this.toCanvasPoint(e)
-    if (e.type === 'pointercancel') this.events.cancel(e, point)
-    else this.events.up(e, point)
+    if (e.type === 'pointercancel') this.cancel(e, point)
+    else this.up(e, point)
 
     const pointer = this.pointers.get(e.pointerId)
     if (!pointer) return
     this.pointers.delete(e.pointerId)
-    if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId)
+    if (this.canvas?.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId)
 
     if (e.button === 1 || this.panningWithButton) {
       this.panningWithButton = false
@@ -602,19 +624,14 @@ export class SceneInputController {
   // The pointer left the canvas, so it is no longer over whatever it was over. Not reached
   // mid-drag: the canvas holds the pointer capture until the button comes up.
   private onPointerLeave = (e: PointerEvent): void => {
-    this.events.leave(e, this.toCanvasPoint(e))
+    this.leave(e, this.toCanvasPoint(e))
   }
 
   // Middle-click pastes on some platforms and opens a menu on others; the canvas owns it.
   private onContextMenu = (e: Event): void => {
     e.preventDefault()
     if (e instanceof MouseEvent) {
-      const rect = this.canvas.getBoundingClientRect()
-      this.events.contextMenu(
-        { pointerId: -1, pointerType: 'mouse' },
-        { x: e.clientX - rect.left, y: e.clientY - rect.top },
-        e,
-      )
+      this.contextMenu({ pointerId: -1, pointerType: 'mouse' }, this.toCanvasPoint(e), e)
     }
   }
 
@@ -623,7 +640,238 @@ export class SceneInputController {
   // gesture is never what was wanted.
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault()
-    this.events.wheel({ pointerId: -1, pointerType: 'mouse' }, this.toCanvasPoint(e), e)
+    this.wheel({ pointerId: -1, pointerType: 'mouse' }, this.toCanvasPoint(e), e)
+  }
+
+  // --- raw input ---
+
+  /**
+   * A press. `hit` is the node under the pointer, passed in because the gesture handling
+   * below has usually just hit-tested for it and there is no reason to pay for that twice.
+   */
+  down(input: PointerInput, screen: ScreenPoint, hit: Node | null): void {
+    const device = deviceFor(input.pointerType)
+    const target = this.effectiveTarget(hit)
+    const init = this.initFor(input, screen)
+
+    // A finger has no hover before it lands, so the press is also the crossing.
+    this.updateHover(input.pointerId, device, target, init)
+
+    this.presses.set(input.pointerId, { target, x: screen.x, y: screen.y })
+    this.dispatch('pointerdown', device, target, init)
+  }
+
+  /** A move. Costs nothing at all unless something is listening for a hover-class event. */
+  move(input: PointerInput, screen: ScreenPoint): void {
+    if (!hasHoverListeners()) return
+    const device = deviceFor(input.pointerType)
+    const target = this.captures.get(input.pointerId) ?? this.effectiveTarget(this.pick(screen.x, screen.y))
+    const init = this.initFor(input, screen)
+
+    this.updateHover(input.pointerId, device, target, init)
+    this.dispatch('pointermove', device, target, init)
+  }
+
+  /**
+   * A release, which is also where a click or double click is decided.
+   *
+   * Unlike down(), this hit-tests for itself: the controller's gesture handling has no use
+   * for what is under a release, so there is no result to share, and the test is skipped
+   * entirely unless a release or click listener exists to receive the outcome.
+   */
+  up(input: PointerInput, screen: ScreenPoint): void {
+    const device = deviceFor(input.pointerType)
+    const init = this.initFor(input, screen)
+    const target = this.captures.get(input.pointerId) ?? this.effectiveTarget(this.pickForRelease(input, device, screen))
+
+    this.dispatch('pointerup', device, target, init)
+
+    const press = this.presses.get(input.pointerId)
+    this.presses.delete(input.pointerId)
+    if (press) this.resolveClick(press, target, device, screen, init)
+
+    this.releaseCapture(input.pointerId)
+  }
+
+  /** The gesture was taken away - by the browser, or by a second finger arriving. No click. */
+  cancel(input: PointerInput, screen: ScreenPoint): void {
+    const device = deviceFor(input.pointerType)
+    const target = this.captures.get(input.pointerId) ?? this.root
+    const init = this.initFor(input, screen)
+
+    this.dispatch('pointercancel', device, target, init)
+    this.presses.delete(input.pointerId)
+    this.updateHover(input.pointerId, device, this.root, init)
+    this.releaseCapture(input.pointerId)
+  }
+
+  /** The pointer left the canvas, so whatever it was over, it no longer is. */
+  leave(input: PointerInput, screen: ScreenPoint): void {
+    const device = deviceFor(input.pointerType)
+    this.updateHover(input.pointerId, device, this.root, this.initFor(input, screen))
+  }
+
+  wheel(input: PointerInput, screen: ScreenPoint, raw?: unknown): void {
+    this.dispatchNamed('wheel', this.hitTarget(screen, ['wheel']), { ...this.initFor(input, screen), evt: raw })
+  }
+
+  contextMenu(input: PointerInput, screen: ScreenPoint, raw?: unknown): void {
+    this.dispatchNamed('contextmenu', this.hitTarget(screen, ['contextmenu']), {
+      ...this.initFor(input, screen),
+      evt: raw,
+    })
+  }
+
+  // --- pointer capture ---
+
+  /**
+   * Routes this pointer's later moves and its release to `node` whatever they pass over,
+   * so a node that was grabbed keeps hearing about the pointer that grabbed it. Released
+   * automatically when the pointer comes up or is cancelled.
+   */
+  setPointerCapture(pointerId: number, node: Node): void {
+    this.releaseCapture(pointerId)
+    this.captures.set(pointerId, node)
+    node.fire('gotpointercapture', { pointerId }, true)
+  }
+
+  releaseCapture(pointerId: number): void {
+    const node = this.captures.get(pointerId)
+    if (!node) return
+    this.captures.delete(pointerId)
+    node.fire('lostpointercapture', { pointerId }, true)
+  }
+
+  getCapture(pointerId: number): Node | null {
+    return this.captures.get(pointerId) ?? null
+  }
+
+  /** The node this pointer is currently over, or null if it is over empty space. */
+  getHoverTarget(pointerId: number): Node | null {
+    const target = this.hoverTargets.get(pointerId) ?? null
+    return target === this.root ? null : target
+  }
+
+  /** Drops all hover, press and capture state without firing anything. */
+  reset(): void {
+    this.hoverTargets.clear()
+    this.captures.clear()
+    this.presses.clear()
+    this.lastClick = null
+  }
+
+  // --- internals ---
+
+  /**
+   * A node that is not listening is treated exactly as empty space: the event goes to the
+   * root instead, rather than vanishing because it landed on something deaf.
+   */
+  private effectiveTarget(hit: Node | null): Node {
+    return hit !== null && hit.isListening() ? hit : this.root
+  }
+
+  private hitTarget(screen: ScreenPoint, names: readonly string[]): Node {
+    if (!hasAnyListener(names)) return this.root
+    return this.effectiveTarget(this.pick(screen.x, screen.y))
+  }
+
+  /** What a release landed on - worth hit-testing for only if a release or click is wanted. */
+  private pickForRelease(input: PointerInput, device: PointerDevice, screen: ScreenPoint): Node | null {
+    const wanted = hasAnyListener(eventNamesFor('pointerup', device))
+      ? true
+      : this.presses.has(input.pointerId) &&
+        (hasAnyListener(eventNamesFor('pointerclick', device)) ||
+          hasAnyListener(eventNamesFor('pointerdblclick', device)))
+    return wanted ? this.pick(screen.x, screen.y) : null
+  }
+
+  private initFor(input: PointerInput, screen: ScreenPoint): NodeEventInit {
+    return {
+      evt: input,
+      pointerId: input.pointerId,
+      screen: new Vector2(screen.x, screen.y),
+      world: this.worldAt(screen.x, screen.y) ?? undefined,
+    }
+  }
+
+  /**
+   * Fires the out/leave then over/enter pair when the pointer crosses from one node to
+   * another, in that order, and remembers where it now is. Each half is bounded by the
+   * other node, so a move between two children of one parent is not reported to that parent
+   * as leaving and re-entering it (see Node.fire's `boundary`).
+   *
+   * Over empty space the target is the root, which fires neither half itself - there is
+   * nothing to enter - but does receive the leaving half bubbling up from the node vacated.
+   */
+  private updateHover(pointerId: number, device: PointerDevice, target: Node, init: NodeEventInit): void {
+    const previous = this.hoverTargets.get(pointerId) ?? this.root
+    if (previous === target) return
+    this.hoverTargets.set(pointerId, target)
+
+    if (previous !== this.root) {
+      this.dispatch('pointerout', device, previous, init, target)
+      this.dispatch('pointerleave', device, previous, init, target)
+    }
+    if (target !== this.root) {
+      this.dispatch('pointerover', device, target, init, previous)
+      this.dispatch('pointerenter', device, target, init, previous)
+    }
+  }
+
+  /**
+   * A click is a press and a release on the same node without the pointer wandering far
+   * enough in between to have meant a drag. A second one on that same node inside the
+   * double-click window makes a double click, after which the count starts over, so three
+   * clicks are not two doubles.
+   */
+  private resolveClick(
+    press: PressState,
+    target: Node,
+    device: PointerDevice,
+    screen: ScreenPoint,
+    init: NodeEventInit,
+  ): void {
+    if (press.target !== target) return
+    if (Math.hypot(screen.x - press.x, screen.y - press.y) > this.tapThreshold) return
+
+    this.dispatch('pointerclick', device, target, init)
+
+    const time = this.now()
+    const last = this.lastClick
+    if (last && last.target === target && time - last.time <= this.dblClickWindow) {
+      this.dispatch('pointerdblclick', device, target, init)
+      this.lastClick = null
+    } else {
+      this.lastClick = { target, time }
+    }
+  }
+
+  /**
+   * Fires one action under both of its names - the canonical pointer one and the alias for
+   * the device that produced it. Both names share ONE event object, so a handler that stops
+   * propagation on either stops it for both (see Node.dispatchEvent), and so a dispatch
+   * nothing is listening for allocates nothing at all.
+   */
+  private dispatch(
+    action: PointerAction,
+    device: PointerDevice,
+    target: Node,
+    init: NodeEventInit,
+    boundary?: Node,
+  ): void {
+    const names = eventNamesFor(action, device)
+    if (!hasAnyListener(names)) return
+    const event = createNodeEvent(names[0], target, init)
+    for (const name of names) {
+      event.type = name
+      target.dispatchEvent(event, true, boundary)
+    }
+  }
+
+  /** Fires a type that has no device variants. */
+  private dispatchNamed(name: string, target: Node, init: NodeEventInit): void {
+    if (!hasAnyListener([name])) return
+    target.fire(name, init, true)
   }
 }
 
