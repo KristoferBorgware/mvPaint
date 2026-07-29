@@ -10,6 +10,7 @@ import type { Shape } from '../shapes/Shape'
 import type { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import type { TextMaterial } from '../text/layout'
+import { quadCorner } from '../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
 import {
   TEXT_GLYPH_BIT,
@@ -82,9 +83,10 @@ export class TextBatcher {
         const packed = (objectBase + q.material) | (q.isGlyph ? TEXT_GLYPH_BIT : 0)
         const b = vertexCount
         const push = (x: number, y: number, u: number, v: number): void => {
-          // Faux-italic shear: offset x by skew * (y - pivot), turning the rect into a slanted
-          // parallelogram (0 skew leaves it axis-aligned).
-          posUvColor.push(x + q.skew * (y - q.skewPivotY), y, u, v, q.color[0], q.color[1], q.color[2], q.color[3])
+          // The corner's real position: the faux-italic shear, then the rotation that makes
+          // text follow a curve. Both are identity for ordinary straight, upright text.
+          const p = quadCorner(q, x, y)
+          posUvColor.push(p.x, p.y, u, v, q.color[0], q.color[1], q.color[2], q.color[3])
           packedIds.push(packed)
           vertexCount++
         }

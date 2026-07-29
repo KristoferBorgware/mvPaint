@@ -19,6 +19,8 @@
 import { readFileSync } from 'node:fs'
 import { kerningFor, normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
 import { layoutText, type FontProvider, type TextRun } from './layout'
+import { arcPath, circlePath, TextPathGeometry } from './textPath'
+import { quadCorner } from './textQuad'
 import type { FontStyle } from './FontAtlas'
 // Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts also pulls in `?url` PNG
 // imports only a bundler can resolve, which would break this file running under plain node.
@@ -665,6 +667,299 @@ const recordGeometry = (shape: VectorText) => {
   const line = boundsOf(new VectorText({ fonts: vectorFonts, text: 'ABCD', style: { fontSize: 40 } }))
   assert(strip.y1 - strip.y0 > 2 * (line.y1 - line.y0), 'a single column is far taller than the same text on a line')
   assert(strip.x1 - strip.x0 < line.x1 - line.x0, 'and far narrower')
+}
+
+
+// --- text on a path -------------------------------------------------------------------
+//
+// The precise handle on a bent glyph is the midpoint of its baseline: that is the point the
+// bend maps onto the curve, and the rotation happens about it, so it must land exactly on
+// the curve however the glyph is turned.
+type BentQuad = ReturnType<typeof layoutText>['quads'][number]
+const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
+const baselineMidpoint = (q: BentQuad) => quadCorner(q, (q.x0 + q.x1) / 2, q.originY)
+/** Distance from the origin, which the circle examples below put their centre at. */
+const radiusOf = (p: { x: number; y: number }) => Math.hypot(p.x, p.y)
+
+// --- the curve itself: distance in, position and direction out ---
+{
+  const line = TextPathGeometry.fromPoints([
+    { x: 0, y: 0 },
+    { x: 30, y: 0 },
+    { x: 30, y: 40 },
+  ])
+  assert(line.length === 70, 'length is the sum of the segments')
+  assert(!line.closed, 'a path is open unless it says otherwise')
+
+  const start = line.sampleAt(0)
+  assert(start !== null && start.x === 0 && start.y === 0, 'distance 0 is the first point')
+  const corner = line.sampleAt(30)
+  assert(corner !== null && corner.x === 30 && corner.y === 0, 'distance lands exactly on a joint')
+  const mid = line.sampleAt(15)
+  assert(mid !== null && mid.x === 15 && near(mid.angle, 0), 'the first leg runs along +x')
+  const up = line.sampleAt(50)
+  assert(up !== null && up.x === 30 && up.y === 20 && near(up.angle, Math.PI / 2), 'the second leg turns to +y')
+
+  assert(line.sampleAt(-1) === null && line.sampleAt(71) === null, 'an open path has nothing past its ends')
+  assert(line.sampleAt(70) !== null, 'but its far end is on it')
+
+  // Repeated points carry no direction, so they are dropped rather than yielding NaN angles.
+  const dupes = TextPathGeometry.fromPoints([
+    { x: 0, y: 0 },
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+  ])
+  assert(dupes.length === 10, 'a repeated point adds no length')
+  assert(Number.isFinite(dupes.sampleAt(5)!.angle), 'and leaves the direction defined')
+
+  let threw = false
+  try {
+    TextPathGeometry.fromPoints([{ x: 1, y: 1 }])
+  } catch {
+    threw = true
+  }
+  assert(threw, 'a single point is not a path')
+}
+
+// --- direction is smooth along a flattened curve, but not through a real corner ---
+{
+  // A flattened circle turns in steps of one segment. Sampled closely, the direction must
+  // change gradually rather than jumping a whole segment's worth at each joint - otherwise
+  // consecutive glyphs stair-step round the circle instead of turning evenly.
+  const circle = circlePath(115)
+  const step = circle.length / 400
+  let biggestJump = 0
+  let previous = circle.sampleAt(0)!.angle
+  for (let d = step; d <= circle.length; d += step) {
+    const angle = circle.sampleAt(d)!.angle
+    let delta = angle - previous
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+    biggestJump = Math.max(biggestJump, Math.abs(delta))
+    previous = angle
+  }
+  // Turning evenly, 1/400th of a circle is 0.0157 rad; a segment-at-a-time would be ~0.13.
+  assert(biggestJump < 0.03, `the direction turns evenly round a flattened circle (largest step ${biggestJump.toFixed(4)} rad)`)
+
+  // A right angle is a corner of the path, not an artefact of flattening, so it is NOT
+  // smoothed away: each leg keeps its own direction all the way to the corner.
+  const bend = TextPathGeometry.fromPoints([
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 40, y: 40 },
+  ])
+  assert(near(bend.sampleAt(39)!.angle, 0), 'the first leg runs straight up to the corner')
+  assert(near(bend.sampleAt(41)!.angle, Math.PI / 2), 'and the second starts turned, with no lean-in between')
+}
+
+// --- closed curves wrap instead of ending ---
+{
+  const square = TextPathGeometry.fromPoints(
+    [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+      { x: 0, y: 10 },
+    ],
+    true,
+  )
+  assert(square.length === 40, 'closing the path adds the segment back to the start')
+  const wrapped = square.sampleAt(45)!
+  const same = square.sampleAt(5)!
+  assert(wrapped.x === same.x && wrapped.y === same.y, 'past the end comes round to the beginning')
+  const negative = square.sampleAt(-5)!
+  const equivalent = square.sampleAt(35)!
+  assert(negative.x === equivalent.x && negative.y === equivalent.y, 'and before the start comes round from the end')
+}
+
+// --- reversing runs the same shape the other way ---
+{
+  const line = TextPathGeometry.fromPoints([
+    { x: 0, y: 0 },
+    { x: 10, y: 0 },
+  ])
+  const back = line.reversed()
+  assert(back.length === line.length, 'reversing keeps the length')
+  assert(back.sampleAt(0)!.x === 10, 'distance 0 is what was the far end')
+  assert(near(Math.abs(back.sampleAt(5)!.angle), Math.PI), 'and the direction is opposite')
+}
+
+// --- arcs and circles ---
+{
+  const quarter = arcPath(100, 0, Math.PI / 2)
+  assert(Math.abs(quarter.length - (Math.PI / 2) * 100) < 0.5, "a quarter arc's length is r * sweep")
+  assert(!quarter.closed, 'an arc is open')
+  const at0 = quarter.sampleAt(0)!
+  assert(near(at0.x, 100) && near(at0.y, 0, 1e-9), 'it starts at its start angle')
+
+  // Flattening is driven by the tolerance, so a bigger circle gets more segments, not coarser
+  // corners: the sampled points stay on the true circle either way.
+  for (const radius of [20, 400]) {
+    const circle = circlePath(radius)
+    for (let d = 0; d < circle.length; d += circle.length / 37) {
+      assert(Math.abs(radiusOf(circle.sampleAt(d)!) - radius) < 0.3, `r=${radius}: every sample is on the circle`)
+    }
+  }
+
+  const circle = circlePath(200)
+  assert(circle.closed, 'a circle is closed')
+  assert(Math.abs(circle.length - 2 * Math.PI * 200) < 1, "its length is the circle's circumference")
+
+  // The default arrangement is the one that reads across the top with the letters standing
+  // up off the outside: distance 0 at the top, running towards +x, normal pointing outward.
+  const top = circle.sampleAt(0)!
+  assert(near(top.x, 0, 1e-9) && near(top.y, 200), 'distance 0 is the top of the circle')
+  assert(Math.abs(top.angle) < 0.05, 'where the curve runs left to right')
+  const normalY = Math.cos(top.angle)
+  assert(normalY > 0, "so a glyph's up direction points away from the centre")
+
+  const other = circlePath(200, { clockwise: false })
+  assert(Math.cos(other.sampleAt(0)!.angle) < 0, 'run the other way, the same point hangs text inside')
+}
+
+// --- glyphs land on the curve ---
+{
+  const radius = 220
+  const shaped = layoutText([run('CURVED TEXT', { fontSize: 32 })], { textPath: { path: circlePath(radius), align: 'center' } }, fonts)
+  const glyphs = shaped.quads.filter((q) => q.isGlyph)
+  assert(glyphs.length === 10, 'every non-space glyph survives a circle long enough to hold them')
+
+  for (const q of glyphs) {
+    assert(Math.abs(radiusOf(baselineMidpoint(q)) - radius) < 0.3, 'each glyph sits with its baseline on the circle')
+  }
+
+  // Centred on a closed curve, the text straddles distance 0 - the top - so it spans both
+  // sides of the y axis and stays in the upper half.
+  const xs = glyphs.map((q) => baselineMidpoint(q).x)
+  assert(Math.min(...xs) < 0 && Math.max(...xs) > 0, 'centring puts half the text either side of the top')
+  assert(glyphs.every((q) => baselineMidpoint(q).y > 0), 'and all of it in the top half of the circle')
+
+  // Each glyph is turned to its own place on the curve; the first and last differ most.
+  const rotations = glyphs.map((q) => q.rotation)
+  assert(new Set(rotations.map((r) => r.toFixed(4))).size === rotations.length, 'every glyph has its own rotation')
+  assert(rotations[0] > rotations[rotations.length - 1], 'turning steadily clockwise from first to last')
+  assert(Math.abs(rotations[0] - rotations[rotations.length - 1]) > 0.5, 'over a substantial arc')
+}
+
+// --- a straight path reproduces straight layout ---
+{
+  const text = 'straight'
+  const flat = layoutText([run(text, { fontSize: 30 })], {}, fonts)
+  const onLine = layoutText(
+    [run(text, { fontSize: 30 })],
+    { textPath: { path: TextPathGeometry.fromPoints([{ x: 0, y: 0 }, { x: 1000, y: 0 }]) } },
+    fonts,
+  )
+  const a = flat.quads.filter((q) => q.isGlyph)
+  const b = onLine.quads.filter((q) => q.isGlyph)
+  assert(a.length === b.length, 'a straight path changes nothing about which glyphs there are')
+  assert(b.every((q) => q.rotation === 0), 'and turns none of them')
+  // The baseline is laid ON the path, so the block shifts up by exactly its ascent.
+  const lift = b[0].y0 - a[0].y0
+  for (let i = 0; i < a.length; i++) {
+    assert(near(b[i].x0, a[i].x0), 'x positions are untouched')
+    assert(near(b[i].y0 - a[i].y0, lift), 'and y is shifted by one constant, not distorted')
+  }
+}
+
+// --- text that outruns an open curve is cut off, not piled up ---
+{
+  const long = run('a much longer line of text than will fit', { fontSize: 40 })
+  const short = arcPath(60, 0, Math.PI / 2) // ~94 units of curve
+  const clipped = layoutText([long], { textPath: { path: short } }, fonts).quads.filter((q) => q.isGlyph)
+  const whole = layoutText([long], {}, fonts).quads.filter((q) => q.isGlyph)
+  assert(clipped.length > 0, 'what fits is kept')
+  assert(clipped.length < whole.length, 'and what runs off the end is dropped')
+  for (const q of clipped) {
+    assert(Math.abs(radiusOf(baselineMidpoint(q)) - 60) < 0.4, 'everything kept is on the curve')
+  }
+
+  // A closed curve has no end to run off: the same text wraps round and keeps every glyph.
+  const wrapped = layoutText([long], { textPath: { path: circlePath(60) } }, fonts).quads.filter((q) => q.isGlyph)
+  assert(wrapped.length === whole.length, 'a closed curve keeps them all, wrapping round')
+}
+
+// --- startOffset, align and side ---
+{
+  const path = circlePath(200)
+  const glyphsOf = (o: Parameters<typeof layoutText>[1]) => layoutText([run('ABCDEF', { fontSize: 30 })], o, fonts).quads.filter((q) => q.isGlyph)
+
+  const start = glyphsOf({ textPath: { path } })
+  const centred = glyphsOf({ textPath: { path, align: 'center' } })
+  const end = glyphsOf({ textPath: { path, align: 'end' } })
+  // 'start' begins at the offset and runs on from it, 'end' finishes there, 'center'
+  // straddles it. Measured against the top of the circle, which the curve leaves towards +x.
+  assert(start.every((q) => baselineMidpoint(q).x > 0), "'start' lays the whole run after the offset")
+  assert(end.every((q) => baselineMidpoint(q).x < 0), "'end' lays it all before the offset instead")
+  assert(baselineMidpoint(centred[0]).x < 0 && baselineMidpoint(centred[centred.length - 1]).x > 0, "'center' straddles it")
+  assert(baselineMidpoint(start[0]).x < baselineMidpoint(centred[0]).x + 1e-9 === false, "'start' begins further along than 'center' does")
+
+  // startOffset moves the text along the curve; a quarter of the way round is the left side
+  // of the circle when the curve runs clockwise from the top.
+  const moved = glyphsOf({ textPath: { path, startOffset: path.length / 4, align: 'center' } })
+  assert(baselineMidpoint(moved[0]).x > 100, 'a quarter turn clockwise from the top is the right-hand side')
+
+  // The far side of the curve: text is turned over, so its up direction points inward.
+  const outside = glyphsOf({ textPath: { path, align: 'center' } })
+  const inside = glyphsOf({ textPath: { path, align: 'center', side: 'right' } })
+  assert(Math.cos(outside[0].rotation) * Math.cos(inside[0].rotation) < 0.99, "'right' turns the text over")
+  assert(inside.every((q) => baselineMidpoint(q).y > 0), 'both sides still sit at the top of the circle')
+  const ascenderOut = (q: BentQuad) => radiusOf(quadCorner(q, (q.x0 + q.x1) / 2, q.y1))
+  assert(ascenderOut(outside[0]) > 200, 'set on the left of the curve, a glyph reaches outward')
+  assert(ascenderOut(inside[0]) < 200, 'set on the right, it reaches inward')
+}
+
+// --- offset lifts the text off the curve ---
+{
+  const path = circlePath(150)
+  const on = layoutText([run('lift', { fontSize: 24 })], { textPath: { path, align: 'center' } }, fonts).quads.filter((q) => q.isGlyph)
+  const off = layoutText([run('lift', { fontSize: 24 })], { textPath: { path, align: 'center', offset: 25 } }, fonts).quads.filter((q) => q.isGlyph)
+  assert(Math.abs(radiusOf(baselineMidpoint(on[0])) - 150) < 0.3, 'with no offset the baseline is on the curve')
+  assert(Math.abs(radiusOf(baselineMidpoint(off[0])) - 175) < 0.3, 'a positive offset pushes it out along the normal')
+}
+
+// --- rules and highlights bend too, by being cut into pieces ---
+{
+  const path = circlePath(180)
+  const straight = layoutText([run('underlined', { fontSize: 28, underline: true })], {}, fonts)
+  const curved = layoutText([run('underlined', { fontSize: 28, underline: true })], { textPath: { path, align: 'center' } }, fonts)
+
+  const straightRules = straight.quads.filter((q) => !q.isGlyph)
+  const curvedRules = curved.quads.filter((q) => !q.isGlyph)
+  assert(straightRules.length === 1, 'on a straight baseline an underline is one long rectangle')
+  assert(curvedRules.length > 8, 'on a curve it becomes a row of short ones that can follow it')
+  assert(new Set(curvedRules.map((q) => q.rotation.toFixed(5))).size > 1, 'each turned to its own part of the curve')
+
+  // The rule stays where a rule belongs: just below the baseline, so inside the circle.
+  for (const q of curvedRules) {
+    const r = radiusOf(quadCorner(q, (q.x0 + q.x1) / 2, (q.y0 + q.y1) / 2))
+    assert(r < 180 && r > 160, 'and sitting just inside the curve, under the glyphs')
+  }
+}
+
+// --- more than one line becomes concentric rings ---
+{
+  const path = circlePath(240)
+  const shaped = layoutText([run('first\nsecond', { fontSize: 26 })], { textPath: { path, align: 'center' } }, fonts)
+  const glyphs = shaped.quads.filter((q) => q.isGlyph)
+  const radii = glyphs.map((q) => radiusOf(baselineMidpoint(q)))
+  const outer = radii.filter((r) => r > 225)
+  const inner = radii.filter((r) => r <= 225)
+  assert(outer.length === 5 && inner.length === 6, 'the first line lands on the curve and the second sits inside it')
+  assert(outer.every((r) => Math.abs(r - 240) < 0.4), 'the first line is on the curve itself')
+  // A ring of its own, one line-height in - not collapsed onto the first, and not fanned out.
+  // The spread is the flattening tolerance: the normal is the chord's, not the true radius'.
+  assert(Math.max(...inner) - Math.min(...inner) < 0.5, 'and the second keeps a constant radius of its own')
+  assert(240 - Math.max(...inner) > 20 && 240 - Math.min(...inner) < 45, 'one line-height inside the first, keeping the leading')
+}
+
+// --- a curve is ignored for vertical text, which has no single baseline to lay on one ---
+{
+  const path = circlePath(200)
+  const plain = layoutText([run('AB', { fontSize: 30 })], { orientation: 'vertical' }, fonts)
+  const withPath = layoutText([run('AB', { fontSize: 30 })], { orientation: 'vertical', textPath: { path } }, fonts)
+  assert(withPath.quads.length === plain.quads.length, 'vertical text is unchanged by a curve')
+  assert(withPath.quads.every((q) => q.rotation === 0), 'and none of it is turned')
 }
 
 console.log(`[text] self-test passed (${count} assertions)`)

@@ -26,7 +26,8 @@ import { TextBlock, type TextBlockOptions } from './TextBlock'
 import type { MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import type { VectorFontBook } from '../text/VectorFont'
-import { layoutText, type ShapedText, type TextMaterial, type TextQuad } from '../text/layout'
+import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
+import { quadCorner, type TextQuad } from '../text/textQuad'
 
 export interface VectorTextOptions extends TextBlockOptions {
   /** The parsed outlines this node draws from - see loadDefaultVectorFonts(). */
@@ -126,12 +127,11 @@ export class VectorText extends TextBlock {
       if (!mesh || mesh.vertices.length === 0) return
 
       const source = shaped.materials[quad.material]
-      const place = (p: Point2): Point2 => {
-        const y = quad.originY + p.y * quad.unitScale
-        // Faux italic shears x about the line's baseline, matching the MSDF lane, which
-        // applies the same shear to each corner of the glyph's quad.
-        return { x: quad.originX + p.x * quad.unitScale + quad.skew * (y - quad.skewPivotY), y }
-      }
+      // Every outline point goes through the same corner transform the MSDF lane applies to
+      // the glyph's quad - the faux-italic shear, then any curve rotation - so an outline
+      // shears and bends exactly as its box does.
+      const place = (p: Point2): Point2 =>
+        quadCorner(quad, quad.originX + p.x * quad.unitScale, quad.originY + p.y * quad.unitScale)
 
       // Fill: the cached triangulation, transformed into this instance's place on the line.
       const base = mesh.vertices.map((v) => {
@@ -208,10 +208,14 @@ function redirect(sink: MeshSink, material: number, isFill: boolean): MeshSink {
 
 /** A decoration or highlight: the quad itself, with no outline behind it. */
 function emitRect(sink: MeshSink, quad: TextQuad, material: number): void {
-  const a = sink.vertex(quad.x0, quad.y0, true, material)
-  const b = sink.vertex(quad.x1, quad.y0, true, material)
-  const c = sink.vertex(quad.x1, quad.y1, true, material)
-  const d = sink.vertex(quad.x0, quad.y1, true, material)
+  const corner = (x: number, y: number): number => {
+    const p = quadCorner(quad, x, y)
+    return sink.vertex(p.x, p.y, true, material)
+  }
+  const a = corner(quad.x0, quad.y0)
+  const b = corner(quad.x1, quad.y0)
+  const c = corner(quad.x1, quad.y1)
+  const d = corner(quad.x0, quad.y1)
   sink.triangle(a, b, c)
   sink.triangle(a, c, d)
 }

@@ -42,6 +42,7 @@ export * from './shapes/VectorText'
 export type { RGBA, Point2, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export type { LineJoin, LineCap } from './render/stroke'
 
+export * from './svg/flattenPath'
 export * from './svg/loadSvg'
 
 export * from './image/ImageTexture'
@@ -50,6 +51,8 @@ export * from './image/svgSize'
 
 export * from './text/FontAtlas'
 export * from './text/layout'
+export * from './text/textQuad'
+export * from './text/textPath'
 export * from './text/msdfMetrics'
 export * from './text/VectorFont'
 export * from './text/vectorFonts'

@@ -10,6 +10,8 @@
 // origin (horizontal lines descend to negative y; vertical columns extend to negative x).
 
 import type { FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
+import { NO_ROTATION, type TextQuad } from './textQuad'
+import { bendOntoPath, type TextPathOptions } from './textPath'
 import type { FontStyle } from './FontAtlas'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
 
@@ -90,6 +92,12 @@ export interface TextLayoutOptions {
   direction?: TextDirection
   /** 'horizontal' (default) flows in lines; 'vertical' stacks glyphs in right-to-left columns. */
   orientation?: TextOrientation
+  /**
+   * Bend the finished block onto a curve (see text/textPath.ts). Everything else still
+   * applies first - runs, kerning, wrapping, alignment, decorations - and the result is then
+   * mapped onto the curve glyph by glyph.
+   */
+  textPath?: TextPathOptions
 }
 
 /** The slice of a font source the shaper needs: metrics, atlas index, and synthesis flags. */
@@ -119,45 +127,17 @@ export interface TextMaterial {
   distanceRange: number
 }
 
-/** One quad in node-local space (y-up). Glyph quads carry an atlas uv rect; `skew` shears x. */
-export interface TextQuad {
-  material: number
-  /** Which font source the glyph came from - an atlas for MSDF text, a parsed TTF for vector text. */
-  atlasIndex: number
-  isGlyph: boolean
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-  u0: number
-  v0: number
-  u1: number
-  v1: number
-  color: RGBA
-  /** Faux-italic shear factor: each corner's x is offset by skew*(y - skewPivotY). */
-  skew: number
-  skewPivotY: number
-  // --- outline placement -------------------------------------------------------------
-  // The three fields below say where this glyph's OUTLINE sits, for a consumer that draws
-  // the real contours instead of sampling a textured quad (see shapes/VectorText.ts).
-  // The quad itself is only the glyph's bounding box, which a blank glyph doesn't have and
-  // an outline can't be reconstructed from - so the shaper records the placement directly
-  // rather than making the second consumer re-derive it and drift from this one.
-  /** The glyph's code point; 0 on a decoration or highlight quad. */
-  codePoint: number
-  /** Pen origin ON the baseline, including baseline shift and any shadow/glow offset. */
-  originX: number
-  originY: number
-  /** Font units -> node-local units: multiply an outline's coordinates by this. */
-  unitScale: number
-}
-
 export interface ShapedText {
   quads: TextQuad[]
   materials: TextMaterial[]
   width: number
   height: number
   lineCount: number
+  /**
+   * The y of the block's first baseline. Bending onto a curve lays this line on the curve
+   * and keeps every other line's distance from it, so the leading survives the mapping.
+   */
+  referenceBaseline: number
 }
 
 const BLACK: RGBA = [0, 0, 0, 1]
@@ -309,9 +289,12 @@ function buildStream(runs: readonly TextRun[], resolved: RunResolved[]): (Entry 
 export function layoutText(runs: readonly TextRun[], options: TextLayoutOptions, fonts: FontProvider): ShapedText {
   const { resolved, materials } = resolveRuns(runs, fonts)
   if (options.orientation === 'vertical') {
+    // A curve is not applied here: a vertical column runs along its own axis and has no one
+    // baseline to lay on a curve, so there is nothing coherent to map.
     return layoutVertical(runs, options, resolved, materials, fonts)
   }
-  return layoutHorizontal(runs, options, resolved, materials)
+  const shaped = layoutHorizontal(runs, options, resolved, materials)
+  return options.textPath ? bendOntoPath(shaped, options.textPath, shaped.referenceBaseline) : shaped
 }
 
 // Kerning between two consecutive entries of the same run (0 across runs / spacers).
@@ -425,6 +408,7 @@ function layoutHorizontal(
   const blockWidth = maxWidth ?? Math.max(0, ...widths)
 
   let topY = 0
+  let referenceBaseline = 0
   lines.forEach((l, li) => {
     let ascent = fallback.ascent
     let descent = fallback.descent
@@ -437,6 +421,7 @@ function layoutHorizontal(
     // The baseline is fixed by the (unshifted) ascent; a run's baselineShift then moves its
     // glyphs relative to it (a small super/subscript rides within the line's leading).
     const baselineY = topY - ascent
+    if (li === 0) referenceBaseline = baselineY
 
     // Justify wrapped (non-final) lines by widening the inter-word spacers.
     const spacerCount = l.entries.reduce((n, e) => n + (e.rr < 0 ? 1 : 0), 0)
@@ -484,6 +469,7 @@ function layoutHorizontal(
     width: blockWidth,
     height: -topY,
     lineCount: lines.length,
+    referenceBaseline,
   }
 }
 
@@ -550,6 +536,7 @@ function makeGlyphQuad(
     originX,
     originY,
     unitScale: scale,
+    ...NO_ROTATION,
   }
 }
 
@@ -565,7 +552,9 @@ function emitRunDecorations(
   const solid = (x0: number, y0: number, x1: number, y1: number, color: RGBA, out: TextQuad[]) => {
     // No outline behind a rule or a highlight - the quad IS the shape, so codePoint 0 tells
     // an outline consumer to draw the rectangle itself.
-    out.push({ material: rr.mainMaterial, atlasIndex: rr.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color, skew: 0, skewPivotY: 0, codePoint: 0, originX: x0, originY: y0, unitScale: rr.scale })
+    // originY is the line's baseline, not the rule's own y: it is what a curve mapping
+    // measures this quad's offset from, so an underline bends with the glyphs above it.
+    out.push({ material: rr.mainMaterial, atlasIndex: rr.atlasIndex, isGlyph: false, x0, y0, x1, y1, u0: 0, v0: 0, u1: 0, v1: 0, color, skew: 0, skewPivotY: 0, codePoint: 0, originX: x0, originY: baselineY, unitScale: rr.scale, ...NO_ROTATION })
   }
   const shift = rr.baselineShift
   if (rr.highlight) {
@@ -649,6 +638,7 @@ function layoutVertical(
     width: -columnX,
     height: maxDepth,
     lineCount: columns.length,
+    referenceBaseline: 0,
   }
 }
 

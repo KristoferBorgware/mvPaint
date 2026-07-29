@@ -21,12 +21,13 @@ import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
+import { quadCorner, type QuadTransform } from '../text/textQuad'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
 export type PickableNode = Shape
 
 /** The corners textLocalBounds needs from each quad - satisfied by ShapedText's TextQuad. */
-export interface QuadBounds {
+export interface QuadBounds extends QuadTransform {
   x0: number
   y0: number
   x1: number
@@ -51,12 +52,23 @@ export function hitTestShape(shape: Shape, worldX: number, worldY: number): bool
   return shape.hitTestLocal(local.x, local.y)
 }
 
-/** The union of a shaped text's glyph+decoration quads, in the Text node's own local space. */
+/**
+ * The union of a shaped text's glyph+decoration quads, in the Text node's own local space.
+ * All four corners go through the quad's own transform, so italic and curved text are
+ * bounded by where their glyphs actually are rather than by the boxes they started as.
+ */
 export function textLocalBounds(shaped: { quads: readonly QuadBounds[] }): AABB {
   const box = new AABB()
   for (const q of shaped.quads) {
-    box.encapsulate(new Vector3(q.x0, q.y0, 0))
-    box.encapsulate(new Vector3(q.x1, q.y1, 0))
+    for (const [x, y] of [
+      [q.x0, q.y0],
+      [q.x1, q.y0],
+      [q.x1, q.y1],
+      [q.x0, q.y1],
+    ]) {
+      const p = quadCorner(q, x, y)
+      box.encapsulate(new Vector3(p.x, p.y, 0))
+    }
   }
   return box
 }

@@ -210,16 +210,34 @@ class TransformGroup extends Container {
 
 // --- picking: textLocalBounds unions every quad's corners ---
 {
-  const bounds = textLocalBounds({
-    quads: [
-      { x0: 0, y0: 0, x1: 10, y1: -5 },
-      { x0: 8, y0: -5, x1: 20, y1: -12 },
-    ],
+  // An upright, unsheared quad - what straight text produces.
+  const box = (x0: number, y0: number, x1: number, y1: number) => ({
+    x0,
+    y0,
+    x1,
+    y1,
+    skew: 0,
+    skewPivotY: 0,
+    rotation: 0,
+    rotationPivotX: 0,
+    rotationPivotY: 0,
   })
+
+  const bounds = textLocalBounds({ quads: [box(0, 0, 10, -5), box(8, -5, 20, -12)] })
   assert(bounds.valid(), 'text bounds valid for a non-empty quad list')
   assert(bounds.min.x === 0 && bounds.max.x === 20, 'text bounds union x across all quads')
   assert(bounds.min.y === -12 && bounds.max.y === 0, 'text bounds union y across all quads')
   assert(!textLocalBounds({ quads: [] }).valid(), 'text bounds invalid for no quads')
+
+  // A quad turned by a curve is bounded by where it ended up, not by the box it started as:
+  // a quarter turn about the origin takes a 10x2 box lying on +x onto +y.
+  const turned = textLocalBounds({ quads: [{ ...box(0, 0, 10, 2), rotation: Math.PI / 2 }] })
+  assert(Math.abs(turned.min.x - -2) < 1e-9 && Math.abs(turned.max.x - 0) < 1e-9, 'a turned quad bounds where its corners went in x')
+  assert(Math.abs(turned.min.y - 0) < 1e-9 && Math.abs(turned.max.y - 10) < 1e-9, 'and in y')
+
+  // The shear counts too - the reason italic text was ever bounded slightly short.
+  const sheared = textLocalBounds({ quads: [{ ...box(0, 0, 10, 4), skew: 0.5 }] })
+  assert(sheared.max.x === 12, 'a sheared quad reaches past its box by skew * height')
 }
 
 // --- culling: isShapeOnScreen tests WORLD-space bounds overlap against a view

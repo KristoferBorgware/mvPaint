@@ -13,6 +13,7 @@
 
 import { Shape, type ShapeOptions } from './Shape'
 import type { TextAlign, TextDirection, TextLayoutOptions, TextOrientation, TextRun, TextRunStyle } from '../text/layout'
+import type { TextPathOptions } from '../text/textPath'
 
 /** Constructor options shared by every text kind: styled content plus block layout. */
 export interface TextBlockOptions extends ShapeOptions, TextLayoutOptions {
@@ -28,6 +29,8 @@ export abstract class TextBlock extends Shape {
   lineHeight: number
   direction: TextDirection
   orientation: TextOrientation
+  /** A curve for the text to follow; undefined lays it out on a straight baseline. */
+  textPath: TextPathOptions | undefined
 
   protected runsData: TextRun[]
 
@@ -38,11 +41,12 @@ export abstract class TextBlock extends Shape {
     this.lineHeight = options.lineHeight ?? 1
     this.direction = options.direction ?? 'ltr'
     this.orientation = options.orientation ?? 'horizontal'
+    this.textPath = options.textPath
     this.runsData = options.runs ?? (options.text !== undefined ? [{ text: options.text, style: options.style }] : [])
   }
 
   protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'runs', 'align', 'maxWidth', 'lineHeight', 'direction', 'orientation']
+    return [...super.attrKeys(), 'runs', 'align', 'maxWidth', 'lineHeight', 'direction', 'orientation', 'textPath']
   }
 
   get runs(): readonly TextRun[] {
@@ -74,6 +78,7 @@ export abstract class TextBlock extends Shape {
       lineHeight: this.lineHeight,
       direction: this.direction,
       orientation: this.orientation,
+      textPath: this.textPath,
     }
   }
 
