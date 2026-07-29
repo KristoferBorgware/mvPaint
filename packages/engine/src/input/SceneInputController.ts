@@ -1,18 +1,11 @@
 // SceneInputController - wires a canvas to the Pointer Events API (one code path for
-// mouse, touch and pen) plus wheel and keyboard, and drives camera pan/zoom, selection,
-// node dragging and the Transformer through a SceneRendererHandle. It owns no rendering
-// state of its own.
+// mouse, touch and pen) plus wheel and keyboard, and drives camera pan/zoom, node dragging
+// and the Transformer through a SceneRendererHandle. It owns no rendering state of its own.
 //
-// A pointer press resolves in priority order: a transformer handle, then a node, then
-// empty space. What empty space does depends on the input, because the two devices want
-// opposite defaults:
-//
-//  - mouse/pen: left-drag on empty space rubber-bands a SELECTION BOX. Panning moves to
-//    middle-drag or space+drag, the way desktop editors do it - a mouse has spare buttons
-//    and a keyboard, so the primary drag is spent on selection.
-//  - touch: a one-finger drag on empty space still PANS, since a finger has nothing else
-//    to fall back on. Press and hold instead (see `longPressMs`) to arm the selection box,
-//    confirmed with a haptic tick where the browser supports one.
+// A pointer press resolves in priority order: a transformer handle, then a draggable node,
+// then empty space. What empty space means is not decided here - a one-finger drag over it
+// pans the camera, and anything else an application wants from it (pulling out a marquee,
+// clearing what is selected) is that application's to arrange, from the events below.
 //
 // Two pointers always pinch-zoom and pan together, like a map.
 //
@@ -24,14 +17,18 @@
 // move, the hover crossings, click and double click. Those go out before any of the gesture
 // branching here, so what a listener sees does not depend on how a press is subsequently
 // interpreted, and the two are otherwise independent: the dispatcher decides nothing about
-// selection, dragging or the camera.
+// dragging or the camera.
 //
 // The gestures themselves also report what they are doing, as scene events (see
 // events/sceneEvents): dragstart/dragmove/dragend and transformstart/transform/transformend
-// on each node taking part, and selectionchange plus marqueestart/marqueemove/marqueeend on
-// the scene root. These are raised alongside the callback options of the same names, which
-// keep working; the events are what let a host observe all of this without being wired in
-// as a callback at construction time.
+// on each node taking part, and marqueestart/marqueemove/marqueeend on the scene root.
+// Listening to those is how a host observes all of this without being wired in as a
+// callback at construction time.
+//
+// The marquee (`marquee`, a MarqueeTool) is provided but never triggered from here. An
+// application calls beginMarquee() when it decides a press means one - a selection tool
+// being active, a modifier held, a long press it recognised itself - and this feeds the
+// rectangle until the pointer comes up. See MarqueeTool for why that split.
 
 import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
@@ -52,6 +49,7 @@ import { screenToWorld, type Viewport } from './viewport'
 import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
 import { PointerDispatcher } from '../events/PointerDispatcher'
+import { MarqueeTool } from './MarqueeTool'
 import { hasListener } from '../events/listenerCensus'
 import type { NodeEventInit } from '../events/NodeEvent'
 
@@ -63,11 +61,6 @@ export interface SceneInputControllerOptions {
   tapThreshold?: number
   /** Called whenever the selection changes, with every selected node (empty when cleared). */
   onSelectionChange?: (nodes: Shape[]) => void
-  /**
-   * Called as the selection box is dragged, with its two world-space corners - and with
-   * null when it ends - so the host can draw it. Nothing is selected until it is released.
-   */
-  onMarquee?: (corners: { from: Vector2; to: Vector2 } | null) => void
   /** The transformer whose handles take priority over dragging/selecting. */
   transformer?: Transformer
   /** Set false to always pan the camera on a one-pointer drag, never move a node. Default true. */
@@ -76,10 +69,6 @@ export interface SceneInputControllerOptions {
   onDragStart?: (nodes: readonly Shape[]) => void
   onDrag?: (nodes: readonly Shape[]) => void
   onDragEnd?: (nodes: readonly Shape[]) => void
-  /** Hold time (ms) before a stationary touch arms the selection box. Default 450. */
-  longPressMs?: number
-  /** Buzz when a long press arms the selection box, where supported. Default true. */
-  haptics?: boolean
   /** Angles (radians) a rotate drag settles onto when within `rotationSnapTolerance`. */
   rotationSnaps?: readonly number[]
   /** How close (radians) a rotation must come to a snap to take it. Default 0.12 (~7 degrees). */
@@ -118,21 +107,12 @@ interface TransformSession {
   snapshots: NodeSnapshot[]
 }
 
-/** A rubber-band selection in progress. */
-interface MarqueeSession {
-  from: Vector2
-  to: Vector2
-  additive: boolean
-}
-
 const DEFAULT_MIN_ZOOM = 0.05
 const DEFAULT_MAX_ZOOM = 10
 const DEFAULT_TAP_THRESHOLD = 6
-const DEFAULT_LONG_PRESS_MS = 450
 const WHEEL_ZOOM_SENSITIVITY = 0.002 // ~18% zoom change per 100px of wheel delta
 const KEY_ZOOM_FACTOR = 1.2
 const KEY_PAN_STEP_PX = 40
-const LONG_PRESS_HAPTIC_MS = 12
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -158,14 +138,11 @@ export class SceneInputController {
   private readonly minZoom: number
   private readonly maxZoom: number
   private readonly tapThreshold: number
-  private readonly longPressMs: number
-  private readonly haptics: boolean
   private readonly rotationSnaps?: readonly number[]
   private readonly rotationSnapTolerance: number
   private readonly transformer?: Transformer
   private readonly dragNodes: boolean
   private readonly onSelectionChange: (nodes: Shape[]) => void
-  private readonly onMarquee: (corners: { from: Vector2; to: Vector2 } | null) => void
   private readonly onDragStart: (nodes: readonly Shape[]) => void
   private readonly onDrag: (nodes: readonly Shape[]) => void
   private readonly onDragEnd: (nodes: readonly Shape[]) => void
@@ -184,16 +161,8 @@ export class SceneInputController {
   private selection: Shape[] = []
   private drag: NodeDragSession | null = null
   private transform: TransformSession | null = null
-  private marquee: MarqueeSession | null = null
-  private longPressTimer: ReturnType<typeof setTimeout> | null = null
-  private marqueeArmed = false
-  // True from press to release whenever the press hit neither a transformer handle nor a
-  // draggable node - i.e. empty space. A mouse click on empty space clears the selection
-  // via the marquee branch below (it rubber-bands immediately, so `hadMarquee` is always
-  // true there); a touch tap releases before the long-press timer ever arms a marquee, so
-  // `hadMarquee` is false for it and this flag is what lets onPointerUp still clear the
-  // selection for that case.
-  private tappedEmptySpace = false
+  /** The rubber-band rectangle. Started by the application, fed from here - see beginMarquee. */
+  readonly marquee: MarqueeTool
   private spaceHeld = false
 
   constructor(canvas: HTMLCanvasElement, handle: SceneRendererHandle, options: SceneInputControllerOptions = {}) {
@@ -202,17 +171,16 @@ export class SceneInputController {
     this.minZoom = options.minZoom ?? DEFAULT_MIN_ZOOM
     this.maxZoom = options.maxZoom ?? DEFAULT_MAX_ZOOM
     this.tapThreshold = options.tapThreshold ?? DEFAULT_TAP_THRESHOLD
-    this.longPressMs = options.longPressMs ?? DEFAULT_LONG_PRESS_MS
-    this.haptics = options.haptics ?? true
     this.rotationSnaps = options.rotationSnaps
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 0.12
     this.transformer = options.transformer
     this.dragNodes = options.dragNodes ?? true
     this.onSelectionChange = options.onSelectionChange ?? (() => {})
-    this.onMarquee = options.onMarquee ?? (() => {})
     this.onDragStart = options.onDragStart ?? (() => {})
     this.onDrag = options.onDrag ?? (() => {})
     this.onDragEnd = options.onDragEnd ?? (() => {})
+
+    this.marquee = new MarqueeTool(handle.scene.root, (from, to) => handle.nodesInBox(from, to))
 
     this.events = new PointerDispatcher({
       root: handle.scene.root,
@@ -253,12 +221,11 @@ export class SceneInputController {
     window.removeEventListener('keyup', this.onKeyUp)
     this.canvas.style.touchAction = this.previousTouchAction
     this.canvas.style.cursor = this.previousCursor
-    this.clearLongPress()
     this.pointers.clear()
     this.events.reset()
+    this.marquee.cancel()
     this.drag = null
     this.transform = null
-    this.marquee = null
   }
 
   /** The currently selected nodes. */
@@ -331,7 +298,7 @@ export class SceneInputController {
     if (active.length === 1) {
       // Anything that grabbed content moves that content, never the camera - including
       // before a drag passes the tap threshold, so the view can't creep under a click.
-      if (this.drag || this.transform || this.marquee) return
+      if (this.drag || this.transform || this.marquee.active) return
       panToAnchor(this.handle.camera, viewport, active[0].x, active[0].y, this.gestureAnchorWorld)
       return
     }
@@ -490,87 +457,24 @@ export class SceneInputController {
     this.fireOnNodes('dragend', drag.nodes)
   }
 
-  // --- selection box (marquee) ---
+  // --- marquee ---
+  //
+  // The rectangle itself lives in MarqueeTool; this only feeds it while it is active. It is
+  // never started from here: an application calls beginMarquee() when it decides a marquee
+  // is what the press means, and listens for 'marqueeend' to decide what the result is for.
 
-  private beginMarquee(world: Vector2, additive: boolean): void {
-    this.marquee = { from: world, to: world, additive }
-    this.onMarquee({ from: world, to: world })
-    this.fireOnRoot('marqueestart', { from: world, to: world })
+  /**
+   * Starts pulling a rectangle out from a world point. Later moves and the release are fed
+   * to it automatically until it finishes. A pointer event's `world` field is the usual
+   * source for the argument.
+   */
+  beginMarquee(world: Vector2): void {
+    this.marquee.begin(world)
   }
 
   private updateMarquee(pointer: TrackedPointer): void {
-    if (!this.marquee) return
     const world = this.worldAt(pointer.x, pointer.y)
-    if (!world) return
-    this.marquee.to = world
-    this.onMarquee({ from: this.marquee.from, to: this.marquee.to })
-    this.fireOnRoot('marqueemove', { from: this.marquee.from, to: this.marquee.to })
-  }
-
-  private endMarquee(): void {
-    const session = this.marquee
-    this.marquee = null
-    this.marqueeArmed = false
-    this.onMarquee(null)
-    if (!session) return
-
-    const hits = this.handle.nodesInBox(session.from, session.to)
-    const picked = hits.filter((node) => !this.transformer?.owns(node))
-    if (session.additive) {
-      const merged = [...this.selection]
-      for (const node of picked) if (!merged.includes(node)) merged.push(node)
-      this.setSelection(merged)
-    } else {
-      this.setSelection(picked)
-    }
-    this.fireOnRoot('marqueeend', { from: session.from, to: session.to, selection: this.selection })
-  }
-
-  /**
-   * Abandons a selection box without selecting anything - a plain click that dragged out no
-   * area, or a second finger arriving. Still ends it as far as listeners are concerned, so
-   * every marqueestart has exactly one marqueeend whatever became of the gesture.
-   */
-  private cancelMarquee(): void {
-    const session = this.marquee
-    this.marquee = null
-    this.marqueeArmed = false
-    this.onMarquee(null)
-    if (session) this.fireOnRoot('marqueeend', { from: session.from, to: session.to, selection: [] })
-  }
-
-  private armLongPress(pointer: TrackedPointer, additive: boolean): void {
-    this.clearLongPress()
-    this.longPressTimer = setTimeout(() => {
-      this.longPressTimer = null
-      // Only if the finger is still parked - any real movement means they meant to pan.
-      const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
-      if (moved > this.tapThreshold || this.drag || this.transform) return
-      const world = this.worldAt(pointer.downX, pointer.downY)
-      if (!world) return
-      this.marqueeArmed = true
-      this.vibrate()
-      this.beginMarquee(world, additive)
-    }, this.longPressMs)
-  }
-
-  private clearLongPress(): void {
-    if (this.longPressTimer !== null) {
-      clearTimeout(this.longPressTimer)
-      this.longPressTimer = null
-    }
-  }
-
-  /** A short haptic tick, where the browser offers one (notably not iOS Safari). */
-  private vibrate(): void {
-    if (!this.haptics) return
-    const vibrate = typeof navigator !== 'undefined' ? navigator.vibrate?.bind(navigator) : undefined
-    try {
-      vibrate?.(LONG_PRESS_HAPTIC_MS)
-    } catch {
-      // A browser may refuse (no user gesture yet, or the feature is policy-blocked);
-      // haptics are a nicety, never a reason to break the gesture.
-    }
+    if (world) this.marquee.update(world)
   }
 
   // --- pointer plumbing ---
@@ -599,23 +503,20 @@ export class SceneInputController {
     const p = point
     this.canvas.setPointerCapture(e.pointerId)
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, downX: p.x, downY: p.y, type: e.pointerType })
-    this.tappedEmptySpace = false
 
     if (this.pointers.size >= 2) {
       this.multiTouch = true
       // A second finger means a pinch. Put anything mid-gesture back and let the camera
       // take over: grabbing content on the way into a two-finger zoom shouldn't move it.
-      this.clearLongPress()
       this.endDrag(true)
       this.endTransform()
-      this.cancelMarquee()
+      this.marquee.cancel()
       this.restartGesture()
       e.preventDefault()
       return
     }
 
     const world = this.worldAt(p.x, p.y)
-    const touch = e.pointerType === 'touch'
 
     // Space+drag is the other desktop pan, matching every editor that rebinds the primary
     // drag to something else.
@@ -631,13 +532,6 @@ export class SceneInputController {
         this.restartGesture()
         e.preventDefault()
         return
-      }
-      // Empty space: rubber-band right away on a mouse, or arm the hold on a touch.
-      this.tappedEmptySpace = true
-      if (touch) {
-        this.armLongPress(this.pointers.get(e.pointerId)!, e.shiftKey)
-      } else {
-        this.beginMarquee(world, e.shiftKey)
       }
     }
 
@@ -657,12 +551,6 @@ export class SceneInputController {
     pointer.x = p.x
     pointer.y = p.y
 
-    // Movement before the hold fires means they meant to pan, not to select.
-    if (this.longPressTimer !== null) {
-      const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
-      if (moved > this.tapThreshold) this.clearLongPress()
-    }
-
     if (this.transform) {
       const world = this.worldAt(p.x, p.y)
       if (world) this.updateTransform(world, e.shiftKey, e.altKey)
@@ -672,7 +560,7 @@ export class SceneInputController {
       this.updateDrag(pointer)
       return
     }
-    if (this.marquee) {
+    if (this.marquee.active) {
       this.updateMarquee(pointer)
       return
     }
@@ -696,34 +584,22 @@ export class SceneInputController {
       return
     }
 
-    this.clearLongPress()
-
     if (this.pointers.size === 0) {
       const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
-      const hadMarquee = this.marquee !== null
+      const hadMarquee = this.marquee.active
       const wasTap = !this.multiTouch && moved <= this.tapThreshold
 
       this.endTransform()
       this.endDrag(false)
 
+      // A press that never travelled dragged out no area, so there is nothing to resolve -
+      // but it still ends, so a listener sees one end per start either way.
       if (hadMarquee) {
-        if (wasTap && !this.marqueeArmed) {
-          // A plain click on empty space clears the selection instead of selecting the
-          // zero-area rectangle it technically dragged out.
-          this.cancelMarquee()
-          if (!e.shiftKey) this.setSelection([])
-        } else {
-          this.endMarquee()
-        }
-      } else if (wasTap && this.tappedEmptySpace) {
-        // Touch: a quick tap releases before the long-press timer ever arms a marquee
-        // (see armLongPress), so `hadMarquee` above is false - this is the touch
-        // equivalent of the mouse's "plain click on empty space" branch just above.
-        if (!e.shiftKey) this.setSelection([])
+        if (wasTap) this.marquee.cancel()
+        else this.marquee.end()
       }
 
       this.multiTouch = false
-      this.marqueeArmed = false
       this.gestureAnchorWorld = null
     } else {
       this.restartGesture()

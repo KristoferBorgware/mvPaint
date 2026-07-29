@@ -4,11 +4,13 @@
 // GPU, no DOM. Run with:
 //   npx tsx src/events/selfTest.ts
 
+import { MarqueeTool } from '../input/MarqueeTool'
+import { Vector2 } from '../math/Vector2'
 import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
 import { Rect } from '../shapes/Rect'
 import { Text } from '../shapes/Text'
-import type { AttrChangeEvent, ChildEvent } from './sceneEvents'
+import type { AttrChangeEvent, ChildEvent, MarqueeEvent } from './sceneEvents'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
 import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
 import { PointerDispatcher } from './PointerDispatcher'
@@ -782,6 +784,63 @@ function tree() {
   const other = group.addChild(new Node('other'))
   group.removeChild(other)
   assert(targets.join('') === 'group', 'remove is targeted at the container, not at the departed child')
+
+  resetListenerCensus()
+}
+
+// --- MarqueeTool: geometry and announcements, with no opinion about what it means ---
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const covered = [new Rect({ name: 'a' }), new Rect({ name: 'b' })]
+  let resolveCalls = 0
+  const tool = new MarqueeTool(root, () => {
+    resolveCalls++
+    return covered
+  })
+
+  const log: string[] = []
+  root.on('marqueestart marqueemove marqueeend', (e) => {
+    const m = e as MarqueeEvent
+    const names = m.nodes ? ` nodes=${m.nodes.map((n) => n.name).join('+') || 'none'}` : ''
+    log.push(`${e.type} ${m.from.x},${m.from.y} -> ${m.to.x},${m.to.y}${names}`)
+  })
+
+  assert(!tool.active && tool.corners === null, 'a fresh tool is idle')
+
+  tool.begin(new Vector2(10, 20))
+  assert(tool.active, 'begin() starts one')
+  assert(log.join('|') === 'marqueestart 10,20 -> 10,20', 'which starts as a degenerate rectangle at that point')
+
+  log.length = 0
+  tool.update(new Vector2(50, 60))
+  assert(log.join('|') === 'marqueemove 10,20 -> 50,60', 'update() moves the free corner and keeps the anchored one')
+  assert(tool.corners?.from.x === 10 && tool.corners?.to.x === 50, 'and the corners read back')
+
+  log.length = 0
+  const result = tool.end()
+  assert(resolveCalls === 1, 'end() resolves the rectangle exactly once')
+  assert(result === covered, 'and hands back what it covered')
+  assert(log.join('|') === 'marqueeend 10,20 -> 50,60 nodes=a+b', 'announcing the same on the event')
+  assert(!tool.active, 'and goes idle')
+
+  // A rectangle that is abandoned still ends, but resolves nothing.
+  log.length = 0
+  resolveCalls = 0
+  tool.begin(new Vector2(1, 2))
+  tool.update(new Vector2(3, 4))
+  tool.cancel()
+  assert(resolveCalls === 0, 'cancel() does not resolve what the rectangle covered')
+  assert(log.join('|') === 'marqueestart 1,2 -> 1,2|marqueemove 1,2 -> 3,4|marqueeend 1,2 -> 3,4 nodes=none', 'but still ends, carrying nothing')
+  assert(!tool.active, 'and goes idle too')
+
+  // Calls that arrive with nothing in progress are ignored rather than announced.
+  log.length = 0
+  tool.update(new Vector2(9, 9))
+  assert(log.length === 0 && !tool.active, 'update() with no marquee in progress does nothing')
+  assert(tool.end().length === 0 && log.length === 0, 'end() likewise')
+  tool.cancel()
+  assert(log.length === 0, 'and cancel()')
 
   resetListenerCensus()
 }

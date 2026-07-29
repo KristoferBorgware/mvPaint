@@ -59,6 +59,7 @@ export * from './input/nodeDrag'
 export * from './scene/selection'
 export * from './shapes/Transformer'
 export * from './shapes/transformerMath'
+export * from './input/MarqueeTool'
 export * from './input/SceneInputController'
 
 export * from './webgpu/SceneRenderer'

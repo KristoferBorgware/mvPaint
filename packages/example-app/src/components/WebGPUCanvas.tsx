@@ -6,6 +6,7 @@ import {
   SceneInputController,
   Transformer,
   Vector3,
+  type MarqueeEvent,
   type Node,
   type Scene,
   type SceneRendererHandle,
@@ -263,14 +264,70 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Forcing one here would re-tessellate and re-upload EVERY shape sharing the
           // batch on every selection change, not just the handful of quads that moved.
           onSelectionChange: (nodes) => onSelectionChangeRef.current?.(nodes),
-          // No markGeometryDirty() here either, for the same reason as the transformer
-          // above: every marquee part is now a permanent, unit-quad slot too (see
-          // MarqueeOverlay's class comment) - pulling out a selection box, or even just a
-          // plain empty-space click (which begins and instantly ends a zero-size one),
-          // never changes the batcher's shape set.
-          onMarquee: (corners) => marqueeOverlay.update(corners, handle.getZoom()),
         })
         controllerRef.current = inputController
+
+        // --- what a press on empty space means, which is this application's to decide ---
+        //
+        // The engine reports where the pointer went and provides the rectangle; everything
+        // below - that a bare drag pulls one out, that a held finger does too, that what it
+        // covers becomes the selection, that shift adds to it rather than replacing it - is
+        // policy, and lives here so a different host can choose differently.
+        const root = handle.scene.root
+        const controller = inputController
+        let marqueeAdds = false
+        let holdTimer: ReturnType<typeof setTimeout> | null = null
+        const cancelHold = () => {
+          if (holdTimer !== null) clearTimeout(holdTimer)
+          holdTimer = null
+        }
+
+        root.on('pointerdown', (e) => {
+          // Only a press that reached the root itself landed on empty space; anything over
+          // a shape has that shape as its target.
+          if (e.target !== root || !e.world) return
+          marqueeAdds = (e.evt as PointerEvent | undefined)?.shiftKey ?? false
+          if ((e.evt as PointerEvent | undefined)?.pointerType === 'touch') {
+            // A finger has no spare button, so a bare drag keeps panning and a held finger
+            // is what asks for a rectangle instead.
+            const world = e.world
+            cancelHold()
+            holdTimer = setTimeout(() => {
+              holdTimer = null
+              navigator.vibrate?.(12)
+              controller.beginMarquee(world)
+            }, 450)
+          } else {
+            controller.beginMarquee(e.world)
+          }
+        })
+        root.on('pointermove', () => {
+          // Moving before the hold fires means a pan was meant, not a rectangle.
+          if (holdTimer !== null && !controller.marquee.active) cancelHold()
+        })
+        root.on('pointerup pointercancel', cancelHold)
+
+        // The overlay follows the rectangle. No markGeometryDirty(): every marquee part is a
+        // permanent, unit-quad slot in the mesh batcher (see MarqueeOverlay's class comment),
+        // so pulling one out never changes the batcher's shape set.
+        root.on('marqueestart marqueemove', (e) => {
+          const { from, to } = e as MarqueeEvent
+          marqueeOverlay.update({ from, to }, handle.getZoom())
+        })
+        root.on('marqueeend', (e) => {
+          marqueeOverlay.update(null, handle.getZoom())
+          const covered = ((e as MarqueeEvent).nodes ?? []) as Shape[]
+          if (covered.length === 0 && !marqueeAdds) return
+          const merged = marqueeAdds ? [...controller.getSelection()] : []
+          for (const node of covered) if (!merged.includes(node)) merged.push(node)
+          controller.setSelection(merged)
+        })
+
+        // A click that hit nothing clears the selection - again a choice, not a given.
+        root.on('click tap', (e) => {
+          if (e.target !== root) return
+          if (!(e.evt as PointerEvent | undefined)?.shiftKey) controller.setSelection([])
+        })
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)

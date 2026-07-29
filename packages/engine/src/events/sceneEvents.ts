@@ -47,14 +47,15 @@ export interface SelectionEvent extends NodeEvent {
 }
 
 /**
- * Fired on the scene root as a selection box is pulled out. `from` and `to` are its opposite
- * corners in world space; on 'marqueeend' `selection` is what it ended up selecting, which
- * is empty when the gesture was abandoned rather than completed.
+ * Fired on the scene root as a marquee rectangle is pulled out. `from` and `to` are its
+ * opposite corners in world space; on 'marqueeend' `nodes` is what the finished rectangle
+ * covered, which is empty when the gesture was abandoned rather than completed. What
+ * covering a node means is the application's to decide - see MarqueeTool.
  */
 export interface MarqueeEvent extends NodeEvent {
   from: Vector2
   to: Vector2
-  selection?: readonly Node[]
+  nodes?: readonly Node[]
 }
 
 /** Every scene event with a fixed name. Attribute changes are named after their attribute. */
