@@ -46,6 +46,7 @@ export * from './svg/loadSvg'
 
 export * from './image/ImageTexture'
 export * from './image/imageUv'
+export * from './image/svgSize'
 
 export * from './text/FontAtlas'
 export * from './text/layout'

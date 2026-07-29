@@ -9,6 +9,10 @@
 // through getImageData() rather than handing the canvas straight to fromSource() because
 // Chromium will not copy from a canvas that was never in the document. A real application
 // would more often reach for ImageTexture.load(url).
+//
+// The last row comes from an inline SVG through ImageTexture.fromSvg() instead, at two
+// different pixel sizes, since choosing that size is the one decision rasterizing a document
+// forces on you.
 
 import { Circle, Image, ImageTexture, Rect, Text, type Scene } from '@mvpaint/engine'
 import { DARK } from './palette'
@@ -54,6 +58,37 @@ function spriteStripPixels(frameSize: number, frames: number): ImageData {
     ctx.fillText(String(i + 1), i * frameSize + frameSize / 2, frameSize / 2)
   }
   return ctx.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+// An SVG source, inline. Everything it needs is in the document because the browser
+// rasterizes an <img>-loaded SVG without fetching anything external - no webfonts, no linked
+// images. It carries a viewBox and no width/height, which is the common shape for an icon and
+// the case where the target size is entirely the caller's to pick.
+const BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0a830"/>
+      <stop offset="1" stop-color="#e8443f"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#g)"/>
+  <path d="M32 12 L38 26 L53 27 L41 36 L45 51 L32 42 L19 51 L23 36 L11 27 L26 26 Z" fill="#ffffff"/>
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#2f2f2f" stroke-width="3"/>
+</svg>`
+
+// Rasterized once and reused across scene rebuilds: fromSvg is asynchronous, so it happens in
+// prepare() rather than in build(), and re-rasterizing the same document on every switch back
+// would be wasted work. The two scales are the point of the pair - same document, same size on
+// screen, different numbers of pixels behind it.
+let svgTextures: { coarse: ImageTexture; fine: ImageTexture } | null = null
+
+export async function prepareImageScene(device: GPUDevice): Promise<void> {
+  if (svgTextures) return
+  const [coarse, fine] = await Promise.all([
+    ImageTexture.fromSvg(device, BADGE_SVG, { width: 24, height: 24, label: 'badge-24' }),
+    ImageTexture.fromSvg(device, BADGE_SVG, { width: 128, height: 128, scale: 2, label: 'badge-256' }),
+  ])
+  svgTextures = { coarse, fine }
 }
 
 /** A tiny, deliberately blocky sprite, to show off nearest-neighbour filtering. */
@@ -197,6 +232,53 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
   root.addChild(new Rect({ name: 'image-z-rect', x: 350, y: -230, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1], zIndex: 1 }))
   root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 390, y: -200, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 }, zIndex: 0 }))
   root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: [0.9, 0.3, 0.5, 0.9], zIndex: 2 }))
+
+  // Row 4: an SVG as the source. Both quads are the same size on screen and come from the
+  // same document; only the pixel size they were rasterized at differs, which is the whole
+  // trade of this route. Vectors would be sharp at any zoom - loadSvgDocument does that -
+  // but each one costs geometry, whereas these are a quad apiece however complex the artwork.
+  if (svgTextures) {
+    root.addChild(label(-520, -340, 'svg rasterized at 24px'))
+    root.addChild(new Image({ name: 'image-svg-coarse', texture: svgTextures.coarse, x: -450, y: -420, width: 130, height: 130 }))
+
+    root.addChild(label(-330, -340, 'svg rasterized at 256px'))
+    root.addChild(new Image({ name: 'image-svg-fine', texture: svgTextures.fine, x: -250, y: -420, width: 130, height: 130 }))
+
+    // Nothing about the source makes it a special kind of image: it tiles, tints and casts a
+    // shadow like any other texture.
+    root.addChild(label(-140, -340, 'svg tiled 2x2'))
+    root.addChild(
+      new Image({
+        name: 'image-svg-tiled',
+        texture: svgTextures.fine,
+        x: -50,
+        y: -420,
+        width: 130,
+        height: 130,
+        tileX: 2,
+        tileY: 2,
+        wrapX: 'repeat',
+        wrapY: 'repeat',
+      }),
+    )
+
+    root.addChild(label(60, -340, 'svg with a shadow'))
+    root.addChild(
+      new Image({
+        name: 'image-svg-shadow',
+        texture: svgTextures.fine,
+        x: 150,
+        y: -420,
+        width: 130,
+        height: 130,
+        rotation: -0.15,
+        shadowColor: [0, 0, 0, 0.45],
+        shadowBlur: 16,
+        shadowOffsetX: 8,
+        shadowOffsetY: 10,
+      }),
+    )
+  }
 
   // A spinning image, to show that a transform never rebuilds the lane's geometry.
   const spinner = root.addChild(

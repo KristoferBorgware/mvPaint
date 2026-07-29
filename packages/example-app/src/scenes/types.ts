@@ -21,13 +21,15 @@ export interface ExampleScene {
   /** One or two lines shown under the title in the picker. */
   description: string
   /**
-   * Any assets this scene needs fetched before it can be built - awaited by the canvas, and
+   * Any assets this scene needs prepared before it can be built - awaited by the canvas, and
    * expected to memoize, since it runs again on every switch back to the scene. Only for
    * things the engine doesn't load at startup: the vector text scene's TTFs are ~1.6MB and
-   * would be dead weight for every other scene, so they're fetched on first open instead.
-   * The canvas keeps the previous scene on screen while this runs.
+   * would be dead weight for every other scene, so they're fetched on first open instead,
+   * and rasterizing an SVG is asynchronous whether or not anything is fetched. The device is
+   * there for assets that live on the GPU; the canvas keeps the previous scene on screen
+   * while this runs.
    */
-  prepare?: () => Promise<void>
+  prepare?: (device: GPUDevice) => Promise<void>
   /**
    * Skip viewport culling entirely for this scene (every shape is tested and drawn every
    * frame, regardless of the camera's current view) - for a scene specifically stress-testing

@@ -1,7 +1,7 @@
 // The example-scene registry. The picker lists whatever is in here, in this order, and the
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
-import { buildImageScene } from './imageScene'
+import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
@@ -43,7 +43,8 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'images',
     title: 'Images',
     description:
-      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, and zIndex against ordinary shapes.',
+      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, zIndex against ordinary shapes, and an inline SVG rasterized at two different resolutions.',
+    prepare: prepareImageScene,
     build: buildImageScene,
   },
   {

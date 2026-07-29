@@ -156,8 +156,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       commit()
       return
     }
+    const device = deviceRef.current
+    if (!device) return
     def
-      .prepare()
+      .prepare(device)
       .then(() => {
         if (sceneDefRef.current === def) commit()
       })
