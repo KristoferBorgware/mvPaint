@@ -7,13 +7,13 @@ import {
   Transformer,
   Vector3,
   panToAnchor,
+  Shape,
   zoomToward,
   type CameraGestureEvent,
   type MarqueeEvent,
   type Node,
   type Scene,
   type SceneRendererHandle,
-  type Shape,
 } from '@mvpaint/engine'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
 import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
@@ -117,7 +117,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       if (replace && handle && transformer) {
         // Drop the selection first: the transformer holds references to nodes that are about
         // to leave the graph, and a stale selection would keep re-fitting a frame around them.
-        controllerRef.current?.setSelection([])
+        transformer.clear()
         const furniture: (Node | null)[] = [transformer, cullBoundsOverlayRef.current, marqueeOverlayRef.current, handle.camera]
         const keep = new Set<Node>(furniture.filter((n): n is Node => n !== null))
         for (const child of [...sceneGraph.root.children]) {
@@ -164,7 +164,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useImperativeHandle(
     ref,
     () => ({
-      clearSelection: () => controllerRef.current?.setSelection([]),
+      clearSelection: () => transformerRef.current?.clear(),
       markTextDirty: () => handleRef.current?.markTextGeometryDirty(),
     }),
     [],
@@ -262,12 +262,6 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Settle onto the 45-degree marks while rotating, which is what makes it
           // possible to get something exactly upright again by hand.
           rotationSnaps: [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, (5 * Math.PI) / 4, (3 * Math.PI) / 2, (7 * Math.PI) / 4],
-          // No markGeometryDirty() here: every transformer part is a permanent, unit-quad
-          // slot in the mesh batcher (see Transformer's class comment) - selecting or
-          // deselecting never changes the batcher's shape set, so it never needs a rebuild.
-          // Forcing one here would re-tessellate and re-upload EVERY shape sharing the
-          // batch on every selection change, not just the handful of quads that moved.
-          onSelectionChange: (nodes) => onSelectionChangeRef.current?.(nodes),
         })
         controllerRef.current = inputController
 
@@ -279,6 +273,22 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // policy, and lives here so a different host can choose differently.
         const root = handle.scene.root
         const controller = inputController
+
+        // This application keeps its selection IN the transformer: what is framed is what is
+        // selected. A larger editor would keep its own list and push a subset here instead.
+        // No markGeometryDirty() on any of it - every transformer part is a permanent,
+        // unit-quad slot in the mesh batcher (see Transformer's class comment), so changing
+        // what is framed never changes the batcher's shape set.
+        transformer.on('attachchange', () => onSelectionChangeRef.current?.(transformer.nodes))
+
+        // Pressing a shape selects it; shift adds to what is already framed. Done on the
+        // press rather than the click so that dragging a shape picks it up immediately.
+        root.on('pointerdown', (e) => {
+          const hit = e.target
+          if (hit === root || !(hit instanceof Shape)) return
+          if ((e.evt as PointerEvent | undefined)?.shiftKey) transformer.add(hit)
+          else if (!transformer.has(hit)) transformer.attach([hit])
+        })
         let marqueeAdds = false
         let holdTimer: ReturnType<typeof setTimeout> | null = null
         const cancelHold = () => {
@@ -322,15 +332,14 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           marqueeOverlay.update(null, handle.getZoom())
           const covered = ((e as MarqueeEvent).nodes ?? []) as Shape[]
           if (covered.length === 0 && !marqueeAdds) return
-          const merged = marqueeAdds ? [...controller.getSelection()] : []
-          for (const node of covered) if (!merged.includes(node)) merged.push(node)
-          controller.setSelection(merged)
+          if (marqueeAdds) for (const node of covered) transformer.add(node)
+          else transformer.attach(covered)
         })
 
         // A click that hit nothing clears the selection - again a choice, not a given.
         root.on('click tap', (e) => {
           if (e.target !== root) return
-          if (!(e.evt as PointerEvent | undefined)?.shiftKey) controller.setSelection([])
+          if (!(e.evt as PointerEvent | undefined)?.shiftKey) transformer.clear()
         })
 
         // --- driving the camera, which the engine reports on but never moves ---
@@ -400,7 +409,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
             case '=': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() * KEY_ZOOM_STEP)); break
             case '-':
             case '_': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() / KEY_ZOOM_STEP)); break
-            case 'Escape': controller.setSelection([]); return
+            case 'Escape': transformer.clear(); return
             default: return
           }
           ev.preventDefault()

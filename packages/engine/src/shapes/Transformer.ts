@@ -20,7 +20,7 @@
 // its width/height, and never stroked. That matters: width/height/strokeWidth are baked
 // into geometry, so changing them needs a buffer rebuild that only the renderer can
 // trigger, and the transformer has no handle on the renderer. Driving everything through
-// the transform instead means the frame tracks a selection that is being dragged, scaled
+// the transform instead means the frame tracks a set that is being dragged, scaled
 // or spun with no rebuild at all - which is also why the border is four edge quads and
 // each anchor is two stacked quads (an outer one showing through as its border) rather
 // than stroked rectangles.
@@ -28,13 +28,13 @@
 // Anchors are held at a constant SCREEN size: their world size is divided by the camera
 // zoom, so a handle stays comfortably clickable whether the view is zoomed way in or out.
 //
-// Parts stay Shape.visible = true permanently, selection or not - hiding them is done by
+// Parts stay Shape.visible = true permanently, attached or not - hiding them is done by
 // scaling to zero instead (see hideAll()). Toggling visible would drop them out of
 // collectZOrder's traversal (see scene/picking.ts), changing the mesh batcher's shape SET
-// the instant a selection starts or ends - and MeshBatcher.rebuild() re-tessellates and
+// the instant a set is attached or cleared - and MeshBatcher.rebuild() re-tessellates and
 // re-uploads EVERY shape sharing the batch when that set changes, not just the ones that
 // actually differ. On a scene with thousands of other shapes, that turns "select
-// something" into a full-scene rebuild costing orders of magnitude more than the ~20
+// attaching" into a full-scene rebuild costing orders of magnitude more than the ~20
 // unit quads that actually needed it. A permanent, zero-scale slot avoids that entirely:
 // the set never changes, so selecting/deselecting costs nothing beyond these few quads.
 
@@ -57,7 +57,7 @@ export interface TransformerOptions {
   anchorSize?: number
   /** How far past the top edge the rotate handle sits, in screen pixels. Default 24. */
   rotateAnchorOffset?: number
-  /** Extra room between the selection's bounds and the frame, in screen pixels. Default 4. */
+  /** Extra room between the attached nodes' bounds and the frame, in screen pixels. Default 4. */
   padding?: number
   /** Border thickness in screen pixels. Default 1.5. */
   borderWidth?: number
@@ -238,9 +238,9 @@ export class Transformer extends Container {
   }
 
   /**
-   * Re-fits the frame to the current selection and re-lays its handles out. `box` is
+   * Re-fits the frame to the attached nodes and re-lays its handles out. `box` is
    * recomputed by the caller (it needs a font book to measure Text), and `zoom` keeps the
-   * handles a constant size on screen. Call once per frame: the selection may be moving.
+   * handles a constant size on screen. Call once per frame: the nodes may be moving.
    */
   update(box: OrientedBox | null, zoom: number): void {
     this.box = box
@@ -311,7 +311,7 @@ export class Transformer extends Container {
     return best
   }
 
-  /** The selection box grown by the frame's padding, in world units. */
+  /** The attached nodes' box grown by the frame's padding, in world units. */
   private framedBox(box: OrientedBox): OrientedBox {
     const pad = this.padding / this.zoom
     return { ...box, halfW: box.halfW + pad, halfH: box.halfH + pad }

@@ -2,7 +2,7 @@
 // or a GPU (the same split cameraControls.ts and nodeDrag.ts use).
 //
 // The whole design rests on one idea: every gesture is expressed as a single WORLD-space
-// delta matrix, which is then pushed into each selected node. That is what makes
+// delta matrix, which is then pushed into each node being transformed. That is what makes
 // multi-select fall out for free (one delta, applied to every node) and what makes
 // nesting work (a node under a rotated/scaled/flipped parent gets the delta converted
 // into its own parent's frame, rather than the transformer needing to know anything
@@ -61,9 +61,9 @@ export const ANCHOR_DIRECTION: Record<ResizeAnchor, Point2> = {
 }
 
 /**
- * The selection rectangle: a center and half-extents in world units, plus the rotation of
- * its own axes. A single selected node adopts that node's world rotation, so the box hugs
- * a rotated shape; a multi-node selection is axis-aligned (rotation 0), since there is no
+ * The framing rectangle: a center and half-extents in world units, plus the rotation of
+ * its own axes. A single node adopts that node's world rotation, so the box hugs
+ * a rotated shape; a multi-node box is axis-aligned (rotation 0), since there is no
  * one orientation that fits several differently-rotated nodes.
  */
 export interface OrientedBox {
@@ -156,16 +156,16 @@ export function worldCorners(node: Shape, bounds: AABB): Point2[] {
 }
 
 /**
- * The selection box around one or more nodes, oriented to the FIRST node's world
- * rotation - so a lone selected node gets a box that hugs it exactly, and a multi-node
- * selection rotates and resizes as a rigid group around whichever member was selected
+ * The box around one or more nodes, oriented to the FIRST node's world
+ * rotation - so a lone node gets a box that hugs it exactly, and a multi-node
+ * group rotates and resizes rigidly around whichever member came
  * first, rather than snapping back to axis-aligned.
  *
  * That "snapping back" is not just a cosmetic difference: `update()` (see Transformer) is
  * called every frame with a box freshly rebuilt here, including mid-gesture. An
  * axis-aligned multi-node box would recompute as axis-aligned on every frame of a ROTATE
- * drag too, so however much the selected nodes actually turned, the box shown on screen
- * would appear frozen - it never looked like it was rotating with the selection at all,
+ * drag too, so however much the nodes actually turned, the box shown on screen
+ * would appear frozen - it never looked like it was rotating with them at all,
  * even though the nodes underneath genuinely were.
  *
  * `boundsOf` supplies each node's LOCAL bounds (Shape.localBounds() for a mesh shape, the
@@ -209,13 +209,13 @@ export interface ResizeDelta {
 
 /**
  * What a resize drag amounts to: scale factors about a fixed point, in the box's own
- * rotated frame. `box` is the selection box as it stood when the drag STARTED, and
+ * rotated frame. `box` is the framing box as it stood when the drag STARTED, and
  * `pointer` is the current world position - so the result is always measured from the
  * drag's origin and cannot accumulate drift over a long gesture.
  *
  * The anchor opposite the dragged one is what stays put (or the center, when `centered`),
  * which is the behaviour every direct-manipulation editor shares. Dragging an anchor past
- * that fixed point yields a negative factor, mirroring the selection rather than clamping.
+ * that fixed point yields a negative factor, mirroring the group rather than clamping.
  */
 export function resizeFactors(
   box: OrientedBox,
@@ -399,7 +399,7 @@ export function decompose2D(a: number, b: number, c: number, d: number): Decompo
  *
  * The node's new world matrix is `delta * world`, so its new LOCAL matrix is
  * `parentWorld⁻¹ * delta * parentWorld * local` - which is what lets one delta drive a
- * whole multi-node selection, whatever each node's parent does. That product is then
+ * whole multi-node group, whatever each node's parent does. That product is then
  * decomposed back into the fields a Shape stores (see decompose2D). `offsetX/offsetY` is
  * held fixed and folded into the position, since the pivot belongs to the node, not the
  * gesture.

@@ -1,6 +1,6 @@
 // The events the scene raises about itself, rather than about a pointer: a node being
 // dragged or transformed, an attribute changing, a child joining or leaving a container,
-// and the selection or the selection box moving.
+// and the marquee rectangle or the viewport moving.
 //
 // All of them bubble, so a container - usually the scene root - can watch its whole subtree
 // with one listener instead of one per node. None carries `evt`: each is derived from a
@@ -36,14 +36,18 @@ export interface AttrChangeEvent<T = unknown> extends NodeEvent {
   newVal: T
 }
 
+/**
+ * Fired on a Transformer when the set of nodes it is wrapping changes. There is no
+ * selection event to go with it: what is selected is the application's own notion, and only
+ * the application knows when that has changed.
+ */
+export interface AttachChangeEvent extends NodeEvent {
+  nodes: readonly Node[]
+}
+
 /** Fired on a container when a child joins or leaves it. */
 export interface ChildEvent extends NodeEvent {
   child: Node
-}
-
-/** Fired on the scene root whenever the selection changes. */
-export interface SelectionEvent extends NodeEvent {
-  selection: readonly Node[]
 }
 
 /**
@@ -84,7 +88,7 @@ export const SCENE_EVENTS = [
   'transformend',
   'add',
   'remove',
-  'selectionchange',
+  'attachchange',
   'marqueestart',
   'marqueemove',
   'marqueeend',

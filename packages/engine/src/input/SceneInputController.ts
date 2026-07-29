@@ -3,9 +3,15 @@
 // through a SceneRendererHandle. It owns no rendering state of its own.
 //
 // A pointer press resolves in priority order: a transformer handle, then a draggable node,
-// then empty space. What empty space means is not decided here - the press is reported, and
-// anything an application wants from it (pulling out a marquee, clearing what is selected,
+// then empty space. What any of it MEANS is not decided here - the press is reported, and
+// anything an application wants from it (pulling out a marquee, changing what is selected,
 // moving the view) is that application's to arrange, from the events below.
+//
+// There is no selection here. What is selected is an application's own idea, and often a
+// broader one than a frame around some shapes - rows in a panel, a locked layer, a group
+// edited together. Where this needs to know which nodes move as a unit, it asks the
+// Transformer what it is wrapping (see armDrag), because that set is the one thing the
+// engine genuinely does have to know about, and the application decides what goes in it.
 //
 // Gestures resolve against the values captured when the press began, never accumulated
 // per move, so no gesture can drift over a long drag.
@@ -18,7 +24,8 @@
 // The gestures themselves report as scene events (see events/sceneEvents):
 // dragstart/dragmove/dragend and transformstart/transform/transformend on each node taking
 // part, and marqueestart/marqueemove/marqueeend plus panstart/panmove/panend and
-// pinchstart/pinchmove/pinchend on the scene root.
+// pinchstart/pinchmove/pinchend on the scene root. A press that should change what is
+// selected is heard through the ordinary pointer events, on whichever node it landed.
 //
 // Two things are deliberately provided rather than performed:
 //
@@ -56,8 +63,6 @@ import type { NodeEventInit } from '../events/NodeEvent'
 export interface SceneInputControllerOptions {
   /** Max total pointer movement (CSS px) for a gesture to still count as a tap/click. Default 6. */
   tapThreshold?: number
-  /** Called whenever the selection changes, with every selected node (empty when cleared). */
-  onSelectionChange?: (nodes: Shape[]) => void
   /** The transformer whose handles take priority over dragging/selecting. */
   transformer?: Transformer
   /** Set false so a one-pointer drag is never a node drag, whatever it presses on. Default true. */
@@ -91,7 +96,7 @@ interface NodeSnapshot {
   transform: ShapeTransform
 }
 
-/** A one-pointer drag moving the selection. Each node keeps its own start position. */
+/** A one-pointer drag moving nodes. Each keeps its own start position. */
 interface NodeDragSession {
   nodes: Shape[]
   startPositions: { x: number; y: number }[]
@@ -124,7 +129,6 @@ export class SceneInputController {
   private readonly rotationSnapTolerance: number
   private readonly transformer?: Transformer
   private readonly dragNodes: boolean
-  private readonly onSelectionChange: (nodes: Shape[]) => void
   private readonly onDragStart: (nodes: readonly Shape[]) => void
   private readonly onDrag: (nodes: readonly Shape[]) => void
   private readonly onDragEnd: (nodes: readonly Shape[]) => void
@@ -142,7 +146,6 @@ export class SceneInputController {
   private multiTouch = false
   private panningWithButton = false
 
-  private selection: Shape[] = []
   private drag: NodeDragSession | null = null
   private transform: TransformSession | null = null
   /** The rubber-band rectangle. Started by the application, fed from here - see beginMarquee. */
@@ -164,7 +167,6 @@ export class SceneInputController {
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 0.12
     this.transformer = options.transformer
     this.dragNodes = options.dragNodes ?? true
-    this.onSelectionChange = options.onSelectionChange ?? (() => {})
     this.onDragStart = options.onDragStart ?? (() => {})
     this.onDrag = options.onDrag ?? (() => {})
     this.onDragEnd = options.onDragEnd ?? (() => {})
@@ -211,19 +213,6 @@ export class SceneInputController {
     this.marquee.cancel()
     this.drag = null
     this.transform = null
-  }
-
-  /** The currently selected nodes. */
-  getSelection(): readonly Shape[] {
-    return this.selection
-  }
-
-  /** Replaces the selection (and re-points the transformer at it). */
-  setSelection(nodes: readonly Shape[]): void {
-    this.selection = nodes.filter((node) => !this.transformer?.owns(node))
-    this.transformer?.attach(this.selection)
-    this.onSelectionChange([...this.selection])
-    this.fireOnRoot('selectionchange', { selection: this.selection })
   }
 
   // --- scene events ---
@@ -342,7 +331,7 @@ export class SceneInputController {
 
     // Always rebuild from the transforms captured at press time, so the gesture is a
     // function of pointer position alone and repeated moves cannot compound. This has to
-    // put back EVERY transform field: a non-uniform scale on a selection whose members
+    // put back EVERY transform field: a non-uniform scale on a group whose members
     // are rotated differently (an axis-aligned multi-node box around a turned shape)
     // shears those members, and leaving that shear in place would feed it back into the
     // next move and run away within a few pointer events.
@@ -394,20 +383,18 @@ export class SceneInputController {
   // --- node dragging ---
 
   /**
-   * Arms a drag over a draggable node, selecting it first if it wasn't already. `hit` is
-   * whatever the press already hit-tested for (see onPointerDown).
+   * Arms a drag over a draggable node. `hit` is whatever the press already hit-tested for
+   * (see onPointerDown).
    */
-  private armDrag(screenX: number, screenY: number, shiftKey: boolean, hit: PickableNode | null): boolean {
+  private armDrag(screenX: number, screenY: number, hit: PickableNode | null): boolean {
     if (!hit || !hit.draggable) return false
     const anchorWorld = this.worldAt(screenX, screenY)
     if (!anchorWorld) return false
 
-    // Pressing a node already in the selection drags the WHOLE selection; pressing a new
-    // one selects it first (adding to the selection when shift is held).
-    if (!this.selection.includes(hit)) {
-      this.setSelection(shiftKey ? [...this.selection, hit] : [hit])
-    }
-    const nodes = this.selection.includes(hit) ? [...this.selection] : [hit]
+    // The transformer's attached set is what "the group" means here: pressing a node that
+    // is in it drags the whole set, pressing one that is not drags only that node. Neither
+    // changes the set - an application does that, in response to the press it also heard.
+    const nodes = this.transformer?.has(hit) ? [...this.transformer.nodes] : [hit]
 
     this.drag = {
       nodes,
@@ -493,8 +480,9 @@ export class SceneInputController {
     const hit = this.handle.pick(point.x, point.y)
     this.events.down(e, point, hit)
 
-    // Middle-drag pans, which is how a mouse still reaches panning now that its primary
-    // drag rubber-bands a selection.
+    // The middle button is tracked but never grabs content, so its drag always reports as
+    // a pan - the one press whose meaning is fixed here, since there is nothing under it
+    // to grab in the first place.
     if (e.button === 1) {
       this.panningWithButton = true
       this.canvas.setPointerCapture(e.pointerId)
@@ -531,7 +519,7 @@ export class SceneInputController {
         e.preventDefault()
         return
       }
-      if (this.dragNodes && this.armDrag(p.x, p.y, e.shiftKey, hit)) {
+      if (this.dragNodes && this.armDrag(p.x, p.y, hit)) {
         this.restartGesture()
         e.preventDefault()
         return
@@ -639,5 +627,5 @@ export class SceneInputController {
   }
 }
 
-/** Re-exported so hosts can type a selection callback without reaching into scene/picking. */
+/** Re-exported so hosts can type a picked node without reaching into scene/picking. */
 export type { PickableNode }
