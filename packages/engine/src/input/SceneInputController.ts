@@ -358,7 +358,7 @@ export class SceneInputController {
       anchor,
       box,
       startWorld: world,
-      snapshots: transformer.selection.map((node) => ({ node, transform: node.captureTransform() })),
+      snapshots: transformer.nodes.map((node: Shape) => ({ node, transform: node.captureTransform() })),
     }
     this.canvas.style.cursor = anchor === 'rotate' ? 'grabbing' : 'nwse-resize'
     this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node))

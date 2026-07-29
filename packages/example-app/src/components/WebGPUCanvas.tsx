@@ -236,7 +236,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           cullBoundsOverlay.update(handle.getCullMargin() !== 0 ? handle.getCullBounds() : null)
           // Re-fit the frame to whatever is selected: the selection may be moving under
           // a drag, spinning with the animation above, or unchanged - all one code path.
-          const selection = transformer.selection
+          const selection = transformer.nodes
           const box = selection.length > 0 ? boxForNodes(selection, (node) => handle.localBoundsOf(node)) : null
           transformer.update(box, handle.getZoom())
         }

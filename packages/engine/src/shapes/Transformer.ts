@@ -1,12 +1,20 @@
-// Transformer - the classic selection frame: a border around the current selection, eight
+// Transformer - the classic manipulation frame: a border around a set of nodes, eight
 // resize anchors, and a rotate handle above the top edge. It is an ordinary Container of
 // Rects in the scene, so it draws through the same mesh lane as everything else and needs
 // no special-case rendering.
 //
-// It never parents itself to the selected nodes. It sits at the scene root and re-fits
-// itself from their world bounds, which is what lets one frame wrap a multi-node selection
-// whose members live under different (possibly transformed) parents. The gestures
-// themselves live in transformerMath.ts; this file is the scene bookkeeping around them.
+// The ATTACHED SET is what this frame wraps and what a gesture moves, and it belongs to
+// whoever is driving the editor - attach() replaces it wholesale, add()/remove()/toggle()
+// edit it one node at a time. The engine never decides what goes in it. That is worth being
+// precise about: an application's idea of "the selection" may be broader than this (rows in
+// a panel, a locked layer, a group whose members are edited together), so the two are
+// related by the application's choice rather than by definition. Nothing here calls this
+// set a selection for exactly that reason.
+//
+// It never parents itself to the attached nodes. It sits at the scene root and re-fits
+// itself from their world bounds, which is what lets one frame wrap a set whose members
+// live under different (possibly transformed) parents. The gestures themselves live in
+// transformerMath.ts; this file is the scene bookkeeping around them.
 //
 // Every part is a UNIT quad that is only ever moved, turned and scaled - never resized by
 // its width/height, and never stroked. That matters: width/height/strokeWidth are baked
@@ -33,6 +41,7 @@
 import { Container } from './Container'
 import { Rect } from './Rect'
 import type { Shape } from './Shape'
+import { hasListener } from '../events/listenerCensus'
 import type { RGBA } from '../render/meshFormat'
 import {
   RESIZE_ANCHORS,
@@ -97,7 +106,7 @@ export class Transformer extends Container {
   readonly rotateEnabled: boolean
   keepRatio: boolean
 
-  private nodes: Shape[] = []
+  private attached: Shape[] = []
   private box: OrientedBox | null = null
   private zoom = 1
 
@@ -167,31 +176,65 @@ export class Transformer extends Container {
   }
 
   /** The nodes this frame currently wraps. */
-  get selection(): readonly Shape[] {
-    return this.nodes
+  get nodes(): readonly Shape[] {
+    return this.attached
   }
 
   get currentBox(): OrientedBox | null {
     return this.box
   }
 
-  /** Points the frame at a new selection; an empty list hides it. */
+  /** Replaces the attached set; an empty list hides the frame. */
   attach(nodes: readonly Shape[]): void {
-    // Never wrap the frame's own parts, however the caller assembled the selection.
-    this.nodes = nodes.filter((node) => !this.owns(node))
-    if (this.nodes.length === 0) {
-      this.box = null
-      this.hideAll()
-    }
+    // Never wrap the frame's own parts, however the caller assembled the list.
+    const next = nodes.filter((node) => !this.owns(node))
+    if (sameNodes(next, this.attached)) return
+    this.setAttached(next)
   }
 
-  detach(): void {
+  /** Adds one node, if it is not already attached. */
+  add(node: Shape): void {
+    if (this.owns(node) || this.attached.includes(node)) return
+    this.setAttached([...this.attached, node])
+  }
+
+  /** Removes one node, if it is attached. */
+  remove(node: Shape): void {
+    const index = this.attached.indexOf(node)
+    if (index < 0) return
+    const next = [...this.attached]
+    next.splice(index, 1)
+    this.setAttached(next)
+  }
+
+  /** Adds the node if it is absent, removes it if present - a shift-click, in one call. */
+  toggle(node: Shape): void {
+    if (this.attached.includes(node)) this.remove(node)
+    else this.add(node)
+  }
+
+  has(node: Shape): boolean {
+    return this.attached.includes(node)
+  }
+
+  /** Empties the set and hides the frame. */
+  clear(): void {
     this.attach([])
   }
 
   /** True if `node` is one of this transformer's own visuals. */
   owns(node: Shape): boolean {
     return this.parts.includes(node as Rect)
+  }
+
+  /** Commits a new set and announces it. Only ever called with a genuinely different list. */
+  private setAttached(next: Shape[]): void {
+    this.attached = next
+    if (next.length === 0) {
+      this.box = null
+      this.hideAll()
+    }
+    if (hasListener('attachchange')) this.fire('attachchange', { nodes: next }, true)
   }
 
   /**
@@ -202,7 +245,7 @@ export class Transformer extends Container {
   update(box: OrientedBox | null, zoom: number): void {
     this.box = box
     this.zoom = zoom > 0 ? zoom : 1
-    if (!box || this.nodes.length === 0) {
+    if (!box || this.attached.length === 0) {
       this.hideAll()
       return
     }
@@ -239,7 +282,7 @@ export class Transformer extends Container {
    * the overlap at a corner resolves to the corner.
    */
   anchorAt(worldX: number, worldY: number): TransformerAnchor | null {
-    if (!this.box || this.nodes.length === 0) return null
+    if (!this.box || this.attached.length === 0) return null
     const framed = this.framedBox(this.box)
     const reach = (this.anchorSize / 2 + ANCHOR_HIT_SLOP_PX) / this.zoom
 
@@ -316,4 +359,13 @@ export class Transformer extends Container {
       rect.scaleY = 0
     }
   }
+}
+
+/** Same nodes in the same order - what decides whether attach() is a real change. */
+function sameNodes(a: readonly Shape[], b: readonly Shape[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
 }

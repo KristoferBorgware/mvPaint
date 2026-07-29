@@ -4,6 +4,8 @@
 // thin layer of scene bookkeeping over these and isn't covered here. Run with:
 //   npx tsx src/shapes/selfTest.ts
 
+import { resetListenerCensus } from '../events/listenerCensus'
+import type { NodeEvent } from '../events/NodeEvent'
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
@@ -531,7 +533,7 @@ function TWO_PI_PLUS(a: number): number {
   const t = new Transformer()
   t.attach([node])
 
-  const fit = () => t.update(boxForNodes(t.selection, localBoundsOf), 1)
+  const fit = () => t.update(boxForNodes(t.nodes, localBoundsOf), 1)
   const edge = (name: string) => {
     let found: Rect | null = null
     t.traversePreOrder((n) => {
@@ -552,7 +554,7 @@ function TWO_PI_PLUS(a: number): number {
   // re-fitting it is a pure transform change that takes effect immediately.
   applyWorldTransform(node, scaleAbout({ x: 0, y: 0 }, 0, 2, 2))
   fit()
-  const grown = boxForNodes(t.selection, localBoundsOf)!
+  const grown = boxForNodes(t.nodes, localBoundsOf)!
   // The padding is a fixed number of screen pixels, so it is added after the scaling
   // rather than doubling with it.
   const expectedWidth = (grown.halfW + t.padding) * 2 + t.borderWidth
@@ -579,17 +581,68 @@ function TWO_PI_PLUS(a: number): number {
   assert(parts === 4 + 9 * 2, 'four border edges plus two quads for each of the nine handles')
 
   // Handles are found by proximity in world space, and corners beat the edges they touch.
-  const box = boxForNodes(t.selection, localBoundsOf)!
+  const box = boxForNodes(t.nodes, localBoundsOf)!
   assert(t.anchorAt(anchorPosition(box, 'top-right').x, anchorPosition(box, 'top-right').y) === 'top-right', 'a corner handle is picked at its own position')
   assert(t.anchorAt(box.cx, box.cy) === null, 'the middle of the frame is not a handle')
 
-  // Detaching hides the whole frame - via zero scale, not Shape.visible (see Transformer's
+  // Clearing hides the whole frame - via zero scale, not Shape.visible (see Transformer's
   // class comment: staying visible=true keeps every part in the mesh batcher's shape set
-  // permanently, so selecting/deselecting never forces the whole scene's geometry to rebuild).
-  t.detach()
+  // permanently, so attaching/clearing never forces the whole scene's geometry to rebuild).
+  t.clear()
   assert(edge('top').visible, 'transformer parts stay Shape.visible even when hidden')
-  assert(edge('top').scaleX === 0 && edge('top').scaleY === 0, 'clearing the selection hides the frame via zero scale')
+  assert(edge('top').scaleX === 0 && edge('top').scaleY === 0, 'clearing the attached set hides the frame via zero scale')
   assert(t.currentBox === null, 'and drops its box')
+}
+
+// --- Transformer: the attached set, which the application drives one node at a time ---
+{
+  resetListenerCensus()
+  const t = new Transformer()
+  const a = new Rect({ x: 0, y: 0, width: 10, height: 10 })
+  const b = new Rect({ x: 40, y: 0, width: 10, height: 10 })
+  const c = new Rect({ x: 80, y: 0, width: 10, height: 10 })
+  const changes: (readonly Shape[])[] = []
+  t.on('attachchange', (e) => changes.push((e as NodeEvent & { nodes: readonly Shape[] }).nodes))
+
+  assert(t.nodes.length === 0, 'a fresh transformer holds nothing')
+
+  t.add(a)
+  assert(t.nodes.length === 1 && t.has(a), 'add() attaches one node')
+  t.add(b)
+  assert(t.nodes.length === 2 && t.has(b), 'and another alongside it')
+  t.add(a)
+  assert(t.nodes.length === 2, 'adding one already attached changes nothing')
+  assert(changes.length === 2, 'and announces nothing either')
+
+  t.remove(b)
+  assert(t.nodes.length === 1 && !t.has(b), 'remove() detaches just that node')
+  t.remove(b)
+  assert(changes.length === 3, 'removing one that is not attached announces nothing')
+
+  t.toggle(c)
+  assert(t.has(c), 'toggle() attaches a node that was absent')
+  t.toggle(c)
+  assert(!t.has(c), 'and detaches one that was present')
+
+  // attach() replaces wholesale, and only reports a genuine change.
+  const before = changes.length
+  t.attach([a])
+  assert(changes.length === before, 'attaching the set it already holds announces nothing')
+  t.attach([b, c])
+  assert(t.nodes.length === 2 && t.has(b) && t.has(c) && !t.has(a), 'attach() replaces the whole set')
+  assert(changes[changes.length - 1].length === 2, 'and announces what it now holds')
+
+  t.clear()
+  assert(t.nodes.length === 0, 'clear() empties it')
+
+  // The frame's own parts can never end up inside the set it is framing.
+  const ownPart = t.children[0] as Rect
+  t.add(ownPart)
+  assert(t.nodes.length === 0, "the transformer refuses to attach its own visuals")
+  t.attach([ownPart, a])
+  assert(t.nodes.length === 1 && t.nodes[0] === a, 'and filters them out of a wholesale attach too')
+
+  resetListenerCensus()
 }
 
 // --- Shadow: the canvas 2D property model, and the atlas cache key that drives re-baking ---
