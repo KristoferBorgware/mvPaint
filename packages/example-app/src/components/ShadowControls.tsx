@@ -99,7 +99,6 @@ function applyShadow(node: Shape, ui: ShadowUi): void {
 interface ShadowControlsProps {
   selected: readonly Shape[]
   /** Called after editing a Text node, whose runs need the text lane to re-shape them. */
-  onTextChanged: () => void
 }
 
 /**
@@ -111,7 +110,7 @@ interface ShadowControlsProps {
  * mistaken for an edit - otherwise selecting several shapes at once would immediately stamp
  * the first one's shadow onto all of them.
  */
-export function ShadowControls({ selected, onTextChanged }: ShadowControlsProps) {
+export function ShadowControls({ selected }: ShadowControlsProps) {
   const [ui, setUi] = useState<ShadowUi>(DEFAULTS)
   const [editSeq, setEditSeq] = useState(0)
   const uiRef = useRef(ui)
@@ -127,16 +126,12 @@ export function ShadowControls({ selected, onTextChanged }: ShadowControlsProps)
     setUi(readShadow(first, uiRef.current))
   }, [selected])
 
-  // Controls -> selection, on user edits only.
+  // Controls -> selection, on user edits only. Editing a Text rewrites its runs, which the
+  // engine notices on its own - the host used to have to poke the renderer afterwards.
   useEffect(() => {
     if (editSeq === 0) return
-    let touchedText = false
-    for (const node of selectedRef.current) {
-      applyShadow(node, uiRef.current)
-      if (node instanceof Text) touchedText = true
-    }
-    if (touchedText) onTextChanged()
-  }, [editSeq, onTextChanged])
+    for (const node of selectedRef.current) applyShadow(node, uiRef.current)
+  }, [editSeq])
 
   const edit = useCallback((patch: Partial<ShadowUi>) => {
     setUi((current) => ({ ...current, ...patch }))

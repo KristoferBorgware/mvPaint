@@ -70,7 +70,6 @@ export default function App() {
 
   // Stable identities so the child effects don't see a new callback every render.
   const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
-  const handleTextChanged = useCallback(() => canvasRef.current?.markTextDirty(), [])
 
   const selectScene = (next: ExampleScene) => {
     setScene(next)
@@ -212,7 +211,7 @@ export default function App() {
                 </Typography>
               </Stack>
 
-              <ShadowControls selected={selected} onTextChanged={handleTextChanged} />
+              <ShadowControls selected={selected} />
             </Stack>
           </Paper>
         </Collapse>
