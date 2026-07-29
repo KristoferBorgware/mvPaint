@@ -594,6 +594,50 @@ function TWO_PI_PLUS(a: number): number {
   assert(t.currentBox === null, 'and drops its box')
 }
 
+// --- Transformer: the box never describes a set other than the one attached ---
+//
+// It is fitted by the owner once a frame, not here (fitting has to measure the nodes, and
+// measuring a Text needs a font book this shape cannot reach), so between a change to the
+// set and the next refit there is nothing valid to report. Saying so is the point: `nodes`
+// and `currentBox` read together must never describe two different selections, or a
+// transform started in that window moves the new selection about the old one's centre.
+{
+  const first = new Rect({ x: 0, y: 0, width: 100, height: 50 })
+  const second = new Rect({ x: 400, y: 300, width: 60, height: 60 })
+  const t = new Transformer()
+  const fit = () => t.update(boxForNodes(t.nodes, localBoundsOf), 1)
+
+  t.attach([first])
+  fit()
+  const fitted = t.currentBox!
+  assert(fitted !== null && near(fitted.cx, 0) && near(fitted.cy, 0), 'a refit box is fitted to what is attached')
+  assert(t.anchorAt(anchorPosition(fitted, 'top-right').x, anchorPosition(fitted, 'top-right').y) === 'top-right', 'and its handles can be grabbed')
+
+  // Replacing the set invalidates the box rather than leaving the old one to be read.
+  t.attach([second])
+  assert(t.currentBox === null, 'replacing the attached set drops the box fitted to the old one')
+  assert(t.anchorAt(anchorPosition(fitted, 'top-right').x, anchorPosition(fitted, 'top-right').y) === null, 'so no handle of the stale frame can be grabbed')
+  fit()
+  assert(near(t.currentBox!.cx, 400) && near(t.currentBox!.cy, 300), 'the next refit fits the new selection')
+
+  // Adding and removing invalidate it too - the box describes a set, not just a count.
+  t.add(first)
+  assert(t.currentBox === null, 'adding a node drops it as well')
+  fit()
+  const both = t.currentBox!
+  assert(both.halfW > 200, 'a refit spans both nodes')
+  t.remove(first)
+  assert(t.currentBox === null, 'and so does removing one')
+
+  // A no-op call changes nothing, so it must not invalidate a perfectly good box either.
+  fit()
+  const settled = t.currentBox
+  t.attach([second])
+  assert(t.currentBox === settled, 'attaching the set already attached leaves the box alone')
+  t.remove(first)
+  assert(t.currentBox === settled, 'and so does removing a node that is not attached')
+}
+
 // --- Transformer: the attached set, which the application drives one node at a time ---
 {
   resetListenerCensus()

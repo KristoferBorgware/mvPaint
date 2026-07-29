@@ -227,13 +227,27 @@ export class Transformer extends Container {
     return this.parts.includes(node as Rect)
   }
 
-  /** Commits a new set and announces it. Only ever called with a genuinely different list. */
+  /**
+   * Commits a new set and announces it. Only ever called with a genuinely different list.
+   *
+   * The box goes with it, because it was fitted to the set being replaced and cannot be
+   * refitted here: fitting needs to measure the nodes, and measuring a Text needs a font
+   * book this shape has no access to (see update(), which the owner calls once a frame).
+   *
+   * Dropping it is what keeps `nodes` and `currentBox` from disagreeing. Left in place, the
+   * two describe different selections until the next refit, and anything reading both at
+   * once - beginning a transform does exactly that - would move the new selection about the
+   * old one's centre. A null box makes that unrepresentable rather than merely unlikely:
+   * anchorAt() finds no handle to grab and beginTransform() declines to start.
+   *
+   * Nothing on screen changes. The frame's parts keep the transforms update() last gave
+   * them, so they stay where they were drawn until the next frame refits them, exactly as
+   * before - this only stops them being *acted on* while the box is known to be stale.
+   */
   private setAttached(next: Shape[]): void {
     this.attached = next
-    if (next.length === 0) {
-      this.box = null
-      this.hideAll()
-    }
+    this.box = null
+    if (next.length === 0) this.hideAll()
     if (hasListener('attachchange')) this.fire('attachchange', { nodes: next }, true)
   }
 
