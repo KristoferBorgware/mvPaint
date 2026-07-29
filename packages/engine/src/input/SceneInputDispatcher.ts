@@ -162,6 +162,9 @@ export class SceneInputDispatcher {
   private readonly captures = new Map<number, Node>()
   private readonly presses = new Map<number, PressState>()
   private lastClick: { target: Node; time: number } | null = null
+  // Pointers that grabbed a transformer handle. They deliver no node-level pointer events
+  // at all for the rest of the gesture - see onPointerDown.
+  private readonly transformPointers = new Set<number>()
 
   // Gesture state - what the pointer tracking needs to remember.
   private readonly pointers = new Map<number, TrackedPointer>()
@@ -338,6 +341,15 @@ export class SceneInputDispatcher {
 
   // --- transformer handles (resize / rotate) ---
 
+  /** The handle under a screen point, with the world point that found it. */
+  private anchorUnder(screen: ScreenPoint): { anchor: TransformerAnchor; world: Vector2 } | null {
+    if (!this.transformer) return null
+    const world = this.worldAt(screen.x, screen.y)
+    if (!world) return null
+    const anchor = this.transformer.anchorAt(world.x, world.y)
+    return anchor ? { anchor, world } : null
+  }
+
   private beginTransform(anchor: TransformerAnchor, world: Vector2): void {
     const transformer = this.transformer
     const box = transformer?.currentBox
@@ -494,11 +506,35 @@ export class SceneInputDispatcher {
   // --- pointer plumbing ---
 
   private onPointerDown = (e: PointerEvent): void => {
+    const point = this.toCanvasPoint(e)
+
+    // A press on a transformer handle is a press on the TRANSFORMER, not on whatever the
+    // handle is drawn over, so it is resolved before anything is dispatched.
+    //
+    // Reporting the shape behind the handle as pressed is not merely extra information: an
+    // application that selects on press - the ordinary arrangement - would swap the
+    // selection out from under the gesture being started, and the handle would then
+    // transform the shape behind it. Worse, the frame is refit once a frame rather than on
+    // attach, so the new node would be transformed about the OLD selection's centre.
+    //
+    // Cheap to test first: anchorAt() measures against the handles, not the scene, and this
+    // is also the one press that then needs no hit-test at all.
+    const anchor =
+      e.button === 0 && this.grabContent && this.pointers.size === 0 ? this.anchorUnder(point) : null
+    if (anchor) {
+      this.transformPointers.add(e.pointerId)
+      this.canvas?.setPointerCapture(e.pointerId)
+      this.pointers.set(e.pointerId, { x: point.x, y: point.y, downX: point.x, downY: point.y, type: e.pointerType })
+      this.beginTransform(anchor.anchor, anchor.world)
+      this.restartGesture()
+      e.preventDefault()
+      return
+    }
+
     // Events report what the pointer did and go out before any of the gesture branching
     // below decides what to do about it, so the stream a listener sees is the same however
     // the press is subsequently interpreted. The one hit-test serves both this and the drag
     // arming further down - there is no reason to pay for it twice.
-    const point = this.toCanvasPoint(e)
     const hit = this.pick(point.x, point.y)
     this.down(e, point, hit)
 
@@ -533,14 +569,8 @@ export class SceneInputDispatcher {
 
     const world = this.worldAt(p.x, p.y)
 
+    // Handles were resolved at the top of this method, before anything was dispatched.
     if (this.grabContent && world) {
-      const anchor = this.transformer?.anchorAt(world.x, world.y) ?? null
-      if (anchor) {
-        this.beginTransform(anchor, world)
-        this.restartGesture()
-        e.preventDefault()
-        return
-      }
       if (this.dragNodes && this.armDrag(p.x, p.y, hit)) {
         this.restartGesture()
         e.preventDefault()
@@ -663,6 +693,8 @@ export class SceneInputDispatcher {
 
   /** A move. Costs nothing at all unless something is listening for a hover-class event. */
   move(input: PointerInput, screen: ScreenPoint): void {
+    // Mid-transform this pointer belongs to the frame's handle, not to the scene under it.
+    if (this.transformPointers.has(input.pointerId)) return
     if (!hasHoverListeners()) return
     const device = deviceFor(input.pointerType)
     const target = this.captures.get(input.pointerId) ?? this.effectiveTarget(this.pick(screen.x, screen.y))
@@ -680,6 +712,9 @@ export class SceneInputDispatcher {
    * entirely unless a release or click listener exists to receive the outcome.
    */
   up(input: PointerInput, screen: ScreenPoint): void {
+    // A pointer that grabbed a handle never delivered a press, so it has no release and no
+    // click to resolve either - releasing a handle is not a click on the shape behind it.
+    if (this.transformPointers.delete(input.pointerId)) return
     const device = deviceFor(input.pointerType)
     const init = this.initFor(input, screen)
     const target = this.captures.get(input.pointerId) ?? this.effectiveTarget(this.pickForRelease(input, device, screen))
@@ -695,6 +730,7 @@ export class SceneInputDispatcher {
 
   /** The gesture was taken away - by the browser, or by a second finger arriving. No click. */
   cancel(input: PointerInput, screen: ScreenPoint): void {
+    if (this.transformPointers.delete(input.pointerId)) return
     const device = deviceFor(input.pointerType)
     const target = this.captures.get(input.pointerId) ?? this.root
     const init = this.initFor(input, screen)
@@ -757,6 +793,7 @@ export class SceneInputDispatcher {
     this.hoverTargets.clear()
     this.captures.clear()
     this.presses.clear()
+    this.transformPointers.clear()
     this.lastClick = null
   }
 

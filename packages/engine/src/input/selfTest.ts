@@ -1,16 +1,27 @@
-// Self-test for the pan/zoom/pick math (screenToWorld, panToAnchor, zoomToward) and the
-// node-drag math (draggedPosition). Pure camera/geometry, no DOM - SceneInputDispatcher
-// itself is a thin event-wiring layer over these and isn't covered here. Run with:
+// Self-test for the pan/zoom/pick math (screenToWorld, panToAnchor, zoomToward), the
+// node-drag math (draggedPosition), and how SceneInputDispatcher resolves a press.
+//
+// The dispatcher is mostly event wiring over the pure math above, but the ORDER in which it
+// resolves a press is behaviour in its own right: what a press means has to be settled
+// before it is reported, or an application acting on the report changes the state the
+// gesture is about to use. It is driven here through a stub canvas that just collects the
+// listeners it registers - no DOM, no GPU. Run with:
 //   npx tsx src/input/selfTest.ts
 
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Container } from '../shapes/Container'
 import { Rect } from '../shapes/Rect'
 import { Matrix4x4 } from '../math/Matrix4x4'
+import { Vector2 } from '../math/Vector2'
 import { Vector3 } from '../math/Vector3'
 import { screenToWorld, type Viewport } from './viewport'
 import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
+import { SceneInputDispatcher } from './SceneInputDispatcher'
+import { Transformer } from '../shapes/Transformer'
+import { Circle } from '../shapes/Circle'
+import { resetListenerCensus } from '../events/listenerCensus'
+import type { Shape } from '../shapes/Shape'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -185,6 +196,89 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
 {
   assert(new Rect().draggable, 'a shape is draggable by default')
   assert(!new Rect({ draggable: false }).draggable, 'draggable can be turned off per node')
+}
+
+
+// --- resolving a press: a transformer handle is not the shape behind it -----------------
+//
+// Reproduces the reported failure directly. A circle is selected and its rotate handle is
+// pressed; the handle happens to sit over an image stacked behind it. The press must belong
+// to the handle, so nothing about the selection may change - if the press were reported
+// against the shape behind it first, an application that selects on press would swap the
+// selection out from under the gesture, and since the frame is refit once a frame rather
+// than on attach, the newly selected shape would then be rotated about the OLD selection's
+// centre.
+{
+  // A canvas stand-in: the dispatcher only ever adds listeners, captures the pointer, and
+  // sets a cursor on it, and its own coordinates are already client coordinates here.
+  const listeners = new Map<string, (e: never) => void>()
+  const canvas = {
+    addEventListener: (type: string, fn: (e: never) => void) => listeners.set(type, fn),
+    removeEventListener: (type: string) => listeners.delete(type),
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+    hasPointerCapture: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    style: { cursor: '' },
+  }
+
+  const root = new Container()
+  const circle = new Circle({ name: 'circle', x: 0, y: 0, radius: 40 })
+  const behind = new Rect({ name: 'behind', x: 0, y: 0, width: 400, height: 400 })
+  root.addChild(behind)
+  root.addChild(circle)
+
+  const transformer = new Transformer()
+  root.addChild(transformer)
+  transformer.attach([circle])
+  // What the renderer does once a frame: fit the frame around the selection.
+  const box = { cx: 0, cy: 0, halfW: 40, halfH: 40, rotation: 0 }
+  transformer.update(box, 1)
+
+  const rotateAnchor = { x: 0, y: 76 } // above the top edge, where the rotate handle sits
+  assert(transformer.anchorAt(rotateAnchor.x, rotateAnchor.y) === 'rotate', 'the rotate handle is where the test presses')
+
+  resetListenerCensus()
+  const dispatcher = new SceneInputDispatcher(canvas as unknown as HTMLCanvasElement, {
+    root,
+    // Everything under the pointer is the shape stacked behind - the situation that made
+    // the failure visible.
+    pick: () => behind,
+    toWorld: (x, y) => new Vector2(x, y),
+    transformer,
+  })
+
+  const presses: string[] = []
+  root.on('pointerdown', (e) => {
+    presses.push((e.target as { name?: string }).name ?? 'root')
+    // The ordinary application policy: a press selects what it landed on.
+    const hit = e.target as Shape
+    if (hit !== (root as unknown as Shape)) transformer.attach([hit])
+  })
+
+  const press = (type: string, x: number, y: number) =>
+    listeners.get(type)?.({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX: x, clientY: y, shiftKey: false, altKey: false, preventDefault: () => {}, type } as never)
+
+  press('pointerdown', rotateAnchor.x, rotateAnchor.y)
+  assert(presses.length === 0, 'pressing a handle reports no press against the shape behind it')
+  assert(transformer.nodes.length === 1 && transformer.nodes[0] === circle, 'so the selection is left exactly as it was')
+
+  // And the gesture that follows transforms what was selected, about its own centre.
+  press('pointermove', 76, 0) // a quarter turn round the box centre
+  assert(transformer.nodes[0] === circle, 'the rotation stays on the selected node')
+  assert(Math.abs(circle.rotation) > 0.5, 'which really did rotate')
+  assert(near(behind.rotation, 0), 'and the shape behind was not touched')
+
+  press('pointerup', 76, 0)
+  assert(presses.length === 0, 'releasing a handle is not a press or a click on anything either')
+
+  // A press that is NOT on a handle still reports normally - the fix must not swallow the
+  // ordinary case it sits in front of.
+  press('pointerdown', 200, 200)
+  assert(presses.length === 1 && presses[0] === 'behind', 'a press away from the handles reports as usual')
+  press('pointerup', 200, 200)
+  dispatcher.destroy()
+  resetListenerCensus()
 }
 
 console.log(`[input] self-test passed (${count} assertions)`)
