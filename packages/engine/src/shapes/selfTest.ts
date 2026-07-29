@@ -12,6 +12,7 @@ import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
 import { Node } from './Node'
 import { Circle } from './Circle'
+import { meshGeometryEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
 import { Text } from './Text'
@@ -68,6 +69,50 @@ function corners(node: Shape): { x: number; y: number }[] {
   })
 }
 
+
+
+// --- content epochs: how a lane finds out that a node re-shaped or re-tessellated -------
+//
+// A lane packs many nodes into one shared buffer and never revisits them, so a node whose
+// CONTENT changes in place has to say so lane-wide. Without it the buffer keeps the geometry
+// it was packed with, and an animated content change never reaches the screen - which is
+// exactly what froze text following a curve while its offset advanced every frame.
+{
+  const rect = new Rect({ width: 10, height: 10 })
+  const text = new Text({ text: 'hello' })
+
+  // A transform is re-uploaded every frame from the world matrix and never packed into the
+  // buffers, so moving a node must NOT trigger a rebuild of anything.
+  const quietMesh = meshGeometryEpoch()
+  const quietText = textShapingEpoch()
+  rect.x = 40
+  rect.rotation = 1
+  rect.scaleX = 2
+  text.y = -10
+  assert(meshGeometryEpoch() === quietMesh, 'moving a shape does not disturb the mesh epoch')
+  assert(textShapingEpoch() === quietText, 'nor the text epoch')
+
+  // Geometry, though, is packed - so changing it has to be announced.
+  rect.markGeometryDirty()
+  assert(meshGeometryEpoch() > quietMesh, 'a geometry change bumps the mesh epoch')
+  const afterGeometry = meshGeometryEpoch()
+  assert(textShapingEpoch() === quietText, 'and leaves the text epoch alone')
+
+  // Every route into a re-shape counts, whichever one a caller reaches for.
+  text.setText('replaced')
+  assert(textShapingEpoch() > quietText, 'replacing the text bumps the text epoch')
+  let last = textShapingEpoch()
+
+  text.setRuns([{ text: 'runs' }])
+  assert(textShapingEpoch() > last, 'so does replacing the runs')
+  last = textShapingEpoch()
+
+  // The route the curve animation uses: edit a layout option in place, then say so.
+  text.align = 'center'
+  text.markDirty()
+  assert(textShapingEpoch() > last, 'and so does markDirty() after editing a layout option in place')
+  assert(meshGeometryEpoch() === afterGeometry, 'text re-shaping never bumps the mesh epoch')
+}
 
 // --- where each shape's origin sits --------------------------------------------------
 //

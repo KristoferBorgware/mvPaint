@@ -77,6 +77,7 @@
 // shape - a blurred shadow cast from the letterforms themselves.
 
 import { AABB } from '../math/AABB'
+import { bumpMeshGeometryEpoch } from './contentEpoch'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -460,6 +461,9 @@ export abstract class Shape extends Node {
     this.geometryCache = null
     this.pickCache = null
     this.geometryVersionCounter++
+    // The renderer packs many shapes into shared buffers and cannot see this node's flag,
+    // so the change is announced lane-wide too (see contentEpoch.ts).
+    bumpMeshGeometryEpoch()
   }
 
   /**

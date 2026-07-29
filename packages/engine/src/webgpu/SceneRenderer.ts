@@ -13,6 +13,7 @@
 // through the `populate` option.
 
 import { Shape } from '../shapes/Shape'
+import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
 import { Text } from '../shapes/Text'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
@@ -106,6 +107,11 @@ export class SceneRenderer {
   private shadowsEnabled = true
   private geometryDirty = true
   private textGeometryDirty = true
+  // The content epochs the packed buffers were last built from. A node whose geometry or
+  // shaping changes in place bumps these, which is the only way a lane can find out - it
+  // packs many nodes into shared buffers and never revisits them. See shapes/contentEpoch.
+  private builtMeshEpoch = -1
+  private builtTextEpoch = -1
   private imageGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
   // set - so draw() can tell whether culling's output actually changed this frame.
@@ -323,6 +329,9 @@ export class SceneRenderer {
       !this.geometryDirty &&
       !this.textGeometryDirty &&
       !this.imageGeometryDirty &&
+      // The mesh rebuild lives inside the gather branch below, so reusing the gather would
+      // skip it. The text and image lanes rebuild outside it and need no say here.
+      this.builtMeshEpoch === meshGeometryEpoch() &&
       this.cachedGather !== null
 
     let ordered: readonly Shape[]
@@ -436,9 +445,14 @@ export class SceneRenderer {
       // changing as the camera pans/zooms or an object crosses the view boundary - not
       // every frame just because something moved (that's updateObjects(), below, cheap and
       // unconditional either way).
-      if (this.geometryDirty || !sameMembers(visibleMeshShapesLocal, this.visibleMeshShapes)) {
+      if (
+        this.geometryDirty ||
+        this.builtMeshEpoch !== meshGeometryEpoch() ||
+        !sameMembers(visibleMeshShapesLocal, this.visibleMeshShapes)
+      ) {
         this.batcher.rebuild(visibleMeshShapesLocal)
         this.geometryDirty = false
+        this.builtMeshEpoch = meshGeometryEpoch()
       }
       this.visibleMeshShapes = visibleMeshShapesLocal
 
@@ -468,9 +482,14 @@ export class SceneRenderer {
     pass.setPipeline(this.pipeline)
     this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
 
-    if (this.textGeometryDirty || !sameMembers(visibleTexts, this.visibleTexts)) {
+    if (
+      this.textGeometryDirty ||
+      this.builtTextEpoch !== textShapingEpoch() ||
+      !sameMembers(visibleTexts, this.visibleTexts)
+    ) {
       this.textBatcher.rebuild(visibleTexts, this.fontBook)
       this.textGeometryDirty = false
+      this.builtTextEpoch = textShapingEpoch()
     }
     this.visibleTexts = visibleTexts
     this.textBatcher.updateObjects(depths)

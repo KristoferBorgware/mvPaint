@@ -29,7 +29,7 @@ export class Text extends TextBlock {
     return this.shapedCache
   }
 
-  protected override invalidateShaping(): void {
+  protected override dropShapingCache(): void {
     this.shapedCache = null
   }
 }

@@ -102,7 +102,7 @@ export class VectorText extends TextBlock {
     return this.ensureShaping().materials
   }
 
-  protected override invalidateShaping(): void {
+  protected override dropShapingCache(): void {
     this.shapingCache = null
     // The geometry IS the shaping here, so anything that re-shapes also re-tessellates.
     // (As with any other geometry change, the renderer still needs its own rebuild - see

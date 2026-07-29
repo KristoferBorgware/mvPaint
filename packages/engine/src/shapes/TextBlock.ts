@@ -12,6 +12,7 @@
 // in place and calling markDirty() - funnels through that one hook.
 
 import { Shape, type ShapeOptions } from './Shape'
+import { bumpTextShapingEpoch } from './contentEpoch'
 import type { TextAlign, TextDirection, TextLayoutOptions, TextOrientation, TextRun, TextRunStyle } from '../text/layout'
 import type { TextPathOptions } from '../text/textPath'
 
@@ -59,6 +60,20 @@ export abstract class TextBlock extends Shape {
     this.invalidateShaping()
   }
 
+  /**
+   * Drops the cached shaping and announces it lane-wide.
+   *
+   * Both halves are needed. The subclass hook clears what THIS node cached; the epoch is
+   * what the renderer can actually see, since it packs every text node into shared buffers
+   * and has no way to ask each one whether it re-shaped. Without the second half a node
+   * whose content changes in place - runs replaced, or a layout option edited and markDirty
+   * called - keeps drawing its old glyphs until something unrelated forces a rebuild.
+   */
+  protected invalidateShaping(): void {
+    bumpTextShapingEpoch()
+    this.dropShapingCache()
+  }
+
   /** Replace the content with a single styled run (invalidates the cached shaping). */
   setText(text: string, style?: TextRunStyle): void {
     this.runsData = [{ text, style }]
@@ -87,5 +102,5 @@ export abstract class TextBlock extends Shape {
    * layout change; a subclass whose geometry is derived from the shaping (VectorText) also
    * invalidates that here.
    */
-  protected abstract invalidateShaping(): void
+  protected abstract dropShapingCache(): void
 }
