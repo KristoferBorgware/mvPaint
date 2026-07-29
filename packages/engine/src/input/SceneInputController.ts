@@ -1,40 +1,41 @@
 // SceneInputController - wires a canvas to the Pointer Events API (one code path for
-// mouse, touch and pen) plus wheel and keyboard, and drives camera pan/zoom, node dragging
-// and the Transformer through a SceneRendererHandle. It owns no rendering state of its own.
+// mouse, touch and pen) plus the wheel, and drives node dragging and the Transformer
+// through a SceneRendererHandle. It owns no rendering state of its own.
 //
 // A pointer press resolves in priority order: a transformer handle, then a draggable node,
-// then empty space. What empty space means is not decided here - a one-finger drag over it
-// pans the camera, and anything else an application wants from it (pulling out a marquee,
-// clearing what is selected) is that application's to arrange, from the events below.
-//
-// Two pointers always pinch-zoom and pan together, like a map.
+// then empty space. What empty space means is not decided here - the press is reported, and
+// anything an application wants from it (pulling out a marquee, clearing what is selected,
+// moving the view) is that application's to arrange, from the events below.
 //
 // Gestures resolve against the values captured when the press began, never accumulated
 // per move, so no gesture can drift over a long drag.
 //
-// Alongside all of that it feeds a PointerDispatcher (`events`), which turns the same raw
-// input into scene-graph events on whichever node the pointer is over - press, release,
-// move, the hover crossings, click and double click. Those go out before any of the gesture
-// branching here, so what a listener sees does not depend on how a press is subsequently
-// interpreted, and the two are otherwise independent: the dispatcher decides nothing about
-// dragging or the camera.
+// It feeds a PointerDispatcher (`events`), which turns the same raw input into scene-graph
+// events on whichever node the pointer is over - press, release, move, the hover crossings,
+// click and double click. Those go out before any of the gesture branching here, so what a
+// listener sees does not depend on how a press is subsequently interpreted.
 //
-// The gestures themselves also report what they are doing, as scene events (see
-// events/sceneEvents): dragstart/dragmove/dragend and transformstart/transform/transformend
-// on each node taking part, and marqueestart/marqueemove/marqueeend on the scene root.
-// Listening to those is how a host observes all of this without being wired in as a
-// callback at construction time.
+// The gestures themselves report as scene events (see events/sceneEvents):
+// dragstart/dragmove/dragend and transformstart/transform/transformend on each node taking
+// part, and marqueestart/marqueemove/marqueeend plus panstart/panmove/panend and
+// pinchstart/pinchmove/pinchend on the scene root.
 //
-// The marquee (`marquee`, a MarqueeTool) is provided but never triggered from here. An
-// application calls beginMarquee() when it decides a press means one - a selection tool
-// being active, a modifier held, a long press it recognised itself - and this feeds the
-// rectangle until the pointer comes up. See MarqueeTool for why that split.
+// Two things are deliberately provided rather than performed:
+//
+//  - the marquee (`marquee`, a MarqueeTool) is fed from here but never started here; an
+//    application calls beginMarquee() when it decides a press means one.
+//  - viewport gestures are recognised but never applied. A pan or pinch reports the pointer,
+//    the world point that was under it, and how far a pinch has spread - everything
+//    panToAnchor and a zoom need - and the application moves the camera, or does not.
+//    Nothing here reads or writes the camera except to turn screen coordinates into world
+//    ones, so keyboard bindings, zoom limits and what a wheel notch is worth all belong to
+//    whoever is driving.
 
 import type { SceneRendererHandle } from '../webgpu/SceneRenderer'
 import type { PickableNode } from '../scene/picking'
 import type { Shape, ShapeTransform } from '../shapes/Shape'
 import type { Transformer } from '../shapes/Transformer'
-import type { Vector2 } from '../math/Vector2'
+import { Vector2 } from '../math/Vector2'
 import {
   applyWorldTransform,
   resizeFactors,
@@ -46,7 +47,6 @@ import {
   type TransformerAnchor,
 } from '../shapes/transformerMath'
 import { screenToWorld, type Viewport } from './viewport'
-import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
 import { PointerDispatcher } from '../events/PointerDispatcher'
 import { MarqueeTool } from './MarqueeTool'
@@ -54,16 +54,13 @@ import { hasListener } from '../events/listenerCensus'
 import type { NodeEventInit } from '../events/NodeEvent'
 
 export interface SceneInputControllerOptions {
-  /** Zoom factor bounds (same units as SceneRendererHandle.setZoom/getZoom). Default [0.05, 10]. */
-  minZoom?: number
-  maxZoom?: number
   /** Max total pointer movement (CSS px) for a gesture to still count as a tap/click. Default 6. */
   tapThreshold?: number
   /** Called whenever the selection changes, with every selected node (empty when cleared). */
   onSelectionChange?: (nodes: Shape[]) => void
   /** The transformer whose handles take priority over dragging/selecting. */
   transformer?: Transformer
-  /** Set false to always pan the camera on a one-pointer drag, never move a node. Default true. */
+  /** Set false so a one-pointer drag is never a node drag, whatever it presses on. Default true. */
   dragNodes?: boolean
   /** Called when a node drag begins (after the tap threshold is passed), ends, or moves. */
   onDragStart?: (nodes: readonly Shape[]) => void
@@ -76,6 +73,9 @@ export interface SceneInputControllerOptions {
   /** How long two clicks may be apart and still make a double click (ms). Default 400. */
   dblClickWindow?: number
 }
+
+/** Which viewport gesture the current pointers add up to. */
+type GestureKind = 'none' | 'pan' | 'pinch'
 
 interface TrackedPointer {
   x: number
@@ -107,23 +107,7 @@ interface TransformSession {
   snapshots: NodeSnapshot[]
 }
 
-const DEFAULT_MIN_ZOOM = 0.05
-const DEFAULT_MAX_ZOOM = 10
 const DEFAULT_TAP_THRESHOLD = 6
-const WHEEL_ZOOM_SENSITIVITY = 0.002 // ~18% zoom change per 100px of wheel delta
-const KEY_ZOOM_FACTOR = 1.2
-const KEY_PAN_STEP_PX = 40
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
-}
-
-function isEditableTarget(el: Element | null): boolean {
-  if (!el) return false
-  if ((el as HTMLElement).isContentEditable) return true
-  const tag = el.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-}
 
 /** Corner anchors scale both axes at once, so they are the ones keepRatio applies to. */
 function isCornerAnchor(anchor: TransformerAnchor): boolean {
@@ -135,8 +119,6 @@ function isCornerAnchor(anchor: TransformerAnchor): boolean {
 export class SceneInputController {
   private readonly canvas: HTMLCanvasElement
   private readonly handle: SceneRendererHandle
-  private readonly minZoom: number
-  private readonly maxZoom: number
   private readonly tapThreshold: number
   private readonly rotationSnaps?: readonly number[]
   private readonly rotationSnapTolerance: number
@@ -152,9 +134,11 @@ export class SceneInputController {
   readonly events: PointerDispatcher
 
   private readonly pointers = new Map<number, TrackedPointer>()
+  private gestureKind: GestureKind = 'none'
   private gestureAnchorWorld: Vector2 | null = null
+  private gesturePoint: Vector2 | null = null
+  private gestureScale = 1
   private gestureStartDistance = 0
-  private gestureStartZoom = 1
   private multiTouch = false
   private panningWithButton = false
 
@@ -163,13 +147,18 @@ export class SceneInputController {
   private transform: TransformSession | null = null
   /** The rubber-band rectangle. Started by the application, fed from here - see beginMarquee. */
   readonly marquee: MarqueeTool
-  private spaceHeld = false
+
+  /**
+   * When false, a press ignores transformer handles and draggable nodes, leaving the drag
+   * to be reported as a pan instead. Applications switch this off for a "grab the view"
+   * modifier - holding space, a hand tool - which is a binding the engine has no view on.
+   */
+  grabContent = true
+
 
   constructor(canvas: HTMLCanvasElement, handle: SceneRendererHandle, options: SceneInputControllerOptions = {}) {
     this.canvas = canvas
     this.handle = handle
-    this.minZoom = options.minZoom ?? DEFAULT_MIN_ZOOM
-    this.maxZoom = options.maxZoom ?? DEFAULT_MAX_ZOOM
     this.tapThreshold = options.tapThreshold ?? DEFAULT_TAP_THRESHOLD
     this.rotationSnaps = options.rotationSnaps
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 0.12
@@ -205,8 +194,6 @@ export class SceneInputController {
     canvas.addEventListener('pointerleave', this.onPointerLeave)
     canvas.addEventListener('wheel', this.onWheel, { passive: false })
     canvas.addEventListener('contextmenu', this.onContextMenu)
-    window.addEventListener('keydown', this.onKeyDown)
-    window.addEventListener('keyup', this.onKeyUp)
   }
 
   destroy(): void {
@@ -217,8 +204,6 @@ export class SceneInputController {
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave)
     this.canvas.removeEventListener('wheel', this.onWheel)
     this.canvas.removeEventListener('contextmenu', this.onContextMenu)
-    window.removeEventListener('keydown', this.onKeyDown)
-    window.removeEventListener('keyup', this.onKeyUp)
     this.canvas.style.touchAction = this.previousTouchAction
     this.canvas.style.cursor = this.previousCursor
     this.pointers.clear()
@@ -272,47 +257,67 @@ export class SceneInputController {
     return screenToWorld(this.handle.camera, screenX, screenY, this.viewport())
   }
 
-  // --- camera gestures: pan (1 pointer) and pinch zoom+pan (2 pointers) ---
+  // --- viewport gestures: pan (1 pointer) and pinch (2 pointers) ---
+  //
+  // Recognised here, applied nowhere. Each reports the pointer (or the midpoint of two),
+  // the world point that sat under it when the gesture began, and - for a pinch - how far
+  // the two have spread since. That is everything panToAnchor and a zoom need, and it
+  // leaves the application to decide whether a given gesture should move the view at all.
 
   private restartGesture(): void {
     const active = [...this.pointers.values()]
     const viewport = this.viewport()
-    if (active.length === 1) {
+    const next: GestureKind = active.length === 1 ? 'pan' : active.length === 2 ? 'pinch' : 'none'
+
+    if (next !== this.gestureKind && this.gestureKind !== 'none') {
+      this.fireGesture(`${this.gestureKind}end`)
+    }
+    this.gestureKind = next
+
+    if (next === 'pan') {
       this.gestureAnchorWorld = screenToWorld(this.handle.camera, active[0].x, active[0].y, viewport)
-    } else if (active.length === 2) {
+      this.gesturePoint = new Vector2(active[0].x, active[0].y)
+      this.gestureScale = 1
+    } else if (next === 'pinch') {
       const midX = (active[0].x + active[1].x) / 2
       const midY = (active[0].y + active[1].y) / 2
       this.gestureAnchorWorld = screenToWorld(this.handle.camera, midX, midY, viewport)
+      this.gesturePoint = new Vector2(midX, midY)
       this.gestureStartDistance = Math.hypot(active[0].x - active[1].x, active[0].y - active[1].y)
-      this.gestureStartZoom = this.handle.getZoom()
+      this.gestureScale = 1
     } else {
       this.gestureAnchorWorld = null
+      return
     }
+    this.fireGesture(`${next}start`)
   }
 
   private updateGesture(): void {
     if (!this.gestureAnchorWorld) return
     const active = [...this.pointers.values()]
-    const viewport = this.viewport()
 
     if (active.length === 1) {
-      // Anything that grabbed content moves that content, never the camera - including
-      // before a drag passes the tap threshold, so the view can't creep under a click.
+      // Anything that grabbed content moves that content, never the view - including before
+      // a drag passes the tap threshold, so nothing can creep under a click.
       if (this.drag || this.transform || this.marquee.active) return
-      panToAnchor(this.handle.camera, viewport, active[0].x, active[0].y, this.gestureAnchorWorld)
+      this.gesturePoint = new Vector2(active[0].x, active[0].y)
+      this.gestureScale = 1
+      this.fireGesture('panmove')
       return
     }
     if (active.length === 2) {
       const midX = (active[0].x + active[1].x) / 2
       const midY = (active[0].y + active[1].y) / 2
       const distance = Math.hypot(active[0].x - active[1].x, active[0].y - active[1].y)
-      if (this.gestureStartDistance > 1e-3) {
-        const nextZoom = clamp(this.gestureStartZoom * (distance / this.gestureStartDistance), this.minZoom, this.maxZoom)
-        this.handle.camera.viewHeight = Math.max(1e-3, this.canvas.clientHeight / nextZoom)
-        this.handle.setZoom(nextZoom)
-      }
-      panToAnchor(this.handle.camera, viewport, midX, midY, this.gestureAnchorWorld)
+      this.gesturePoint = new Vector2(midX, midY)
+      this.gestureScale = this.gestureStartDistance > 1e-3 ? distance / this.gestureStartDistance : 1
+      this.fireGesture('pinchmove')
     }
+  }
+
+  private fireGesture(type: string): void {
+    if (!this.gestureAnchorWorld || !this.gesturePoint) return
+    this.fireOnRoot(type, { point: this.gesturePoint, anchor: this.gestureAnchorWorld, scale: this.gestureScale })
   }
 
   // --- transformer handles (resize / rotate) ---
@@ -506,8 +511,8 @@ export class SceneInputController {
 
     if (this.pointers.size >= 2) {
       this.multiTouch = true
-      // A second finger means a pinch. Put anything mid-gesture back and let the camera
-      // take over: grabbing content on the way into a two-finger zoom shouldn't move it.
+      // A second finger means a pinch. Put anything mid-gesture back, so content grabbed
+      // on the way into a two-finger gesture is not left moved by it.
       this.endDrag(true)
       this.endTransform()
       this.marquee.cancel()
@@ -518,9 +523,7 @@ export class SceneInputController {
 
     const world = this.worldAt(p.x, p.y)
 
-    // Space+drag is the other desktop pan, matching every editor that rebinds the primary
-    // drag to something else.
-    if (!this.spaceHeld && world) {
+    if (this.grabContent && world) {
       const anchor = this.transformer?.anchorAt(world.x, world.y) ?? null
       if (anchor) {
         this.beginTransform(anchor, world)
@@ -580,7 +583,7 @@ export class SceneInputController {
 
     if (e.button === 1 || this.panningWithButton) {
       this.panningWithButton = false
-      if (this.pointers.size === 0) this.gestureAnchorWorld = null
+      if (this.pointers.size === 0) this.restartGesture()
       return
     }
 
@@ -600,10 +603,12 @@ export class SceneInputController {
       }
 
       this.multiTouch = false
-      this.gestureAnchorWorld = null
-    } else {
-      this.restartGesture()
     }
+
+    // Re-reads whatever pointers are left, which announces the end of the gesture the
+    // released one was part of - including the last one, where there is nothing left to
+    // start in its place.
+    this.restartGesture()
   }
 
   // The pointer left the canvas, so it is no longer over whatever it was over. Not reached
@@ -625,81 +630,12 @@ export class SceneInputController {
     }
   }
 
-  // --- wheel zoom, toward the cursor ---
-
+  // The wheel is reported, not acted on - see the viewport-gesture section above. The
+  // default is still suppressed, because a canvas that scrolls the page under a zoom
+  // gesture is never what was wanted.
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault()
-    const p = this.toCanvasPoint(e)
-    this.events.wheel({ pointerId: -1, pointerType: 'mouse' }, p, e)
-    const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SENSITIVITY)
-    const nextZoom = clamp(this.handle.getZoom() * factor, this.minZoom, this.maxZoom)
-    this.applyAnchoredZoom(p.x, p.y, nextZoom)
-  }
-
-  private applyAnchoredZoom(screenX: number, screenY: number, nextZoom: number): void {
-    const nextViewHeight = this.canvas.clientHeight / nextZoom
-    zoomToward(this.handle.camera, this.viewport(), screenX, screenY, nextViewHeight)
-    this.handle.setZoom(nextZoom)
-  }
-
-  // --- keyboard: arrow-key pan, +/- zoom (about the viewport center), Escape deselects ---
-
-  private onKeyUp = (e: KeyboardEvent): void => {
-    if (e.key === ' ') {
-      this.spaceHeld = false
-      this.canvas.style.cursor = this.previousCursor
-    }
-  }
-
-  private onKeyDown = (e: KeyboardEvent): void => {
-    if (isEditableTarget(document.activeElement)) return
-
-    if (e.key === ' ') {
-      if (!this.spaceHeld) {
-        this.spaceHeld = true
-        this.canvas.style.cursor = 'grab'
-      }
-      e.preventDefault()
-      return
-    }
-
-    const camera = this.handle.camera
-    const viewport = this.viewport()
-    const worldPerPixel = camera.viewHeight / Math.max(1, viewport.height)
-    const step = KEY_PAN_STEP_PX * worldPerPixel
-
-    switch (e.key) {
-      case 'ArrowLeft':
-        camera.eye.x -= step
-        camera.target.x -= step
-        break
-      case 'ArrowRight':
-        camera.eye.x += step
-        camera.target.x += step
-        break
-      case 'ArrowUp':
-        camera.eye.y += step
-        camera.target.y += step
-        break
-      case 'ArrowDown':
-        camera.eye.y -= step
-        camera.target.y -= step
-        break
-      case '+':
-      case '=':
-        this.applyAnchoredZoom(viewport.width / 2, viewport.height / 2, clamp(this.handle.getZoom() * KEY_ZOOM_FACTOR, this.minZoom, this.maxZoom))
-        break
-      case '-':
-      case '_':
-        this.applyAnchoredZoom(viewport.width / 2, viewport.height / 2, clamp(this.handle.getZoom() / KEY_ZOOM_FACTOR, this.minZoom, this.maxZoom))
-        break
-      case 'Escape':
-        this.setSelection([])
-        return
-      default:
-        return
-    }
-    e.preventDefault()
+    this.events.wheel({ pointerId: -1, pointerType: 'mouse' }, this.toCanvasPoint(e), e)
   }
 }
 

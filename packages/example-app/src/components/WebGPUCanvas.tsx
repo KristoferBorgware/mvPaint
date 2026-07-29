@@ -6,6 +6,9 @@ import {
   SceneInputController,
   Transformer,
   Vector3,
+  panToAnchor,
+  zoomToward,
+  type CameraGestureEvent,
   type MarqueeEvent,
   type Node,
   type Scene,
@@ -176,6 +179,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let lastReportedZoom = zoom
     let lastZoomReportTime = 0
     let inputController: SceneInputController | null = null
+    let detachKeyboard: (() => void) | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
     cullBoundsOverlayRef.current = cullBoundsOverlay
     const marqueeOverlay = new MarqueeOverlay()
@@ -328,6 +332,90 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           if (e.target !== root) return
           if (!(e.evt as PointerEvent | undefined)?.shiftKey) controller.setSelection([])
         })
+
+        // --- driving the camera, which the engine reports on but never moves ---
+        //
+        // The engine recognises a pan, a pinch and a wheel notch and says where they are;
+        // how far a notch is worth, how far the view may zoom, and which keys move it are
+        // all decisions, so they are made here.
+        const MIN_ZOOM = 0.05
+        const MAX_ZOOM = 10
+        const WHEEL_SENSITIVITY = 0.002 // ~18% per 100px of wheel delta
+        const KEY_ZOOM_STEP = 1.2
+        const KEY_PAN_STEP_PX = 40
+        const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
+        const viewportOf = () => ({ width: canvas.clientWidth, height: canvas.clientHeight })
+        const applyZoom = (screenX: number, screenY: number, next: number) => {
+          zoomToward(handle.camera, viewportOf(), screenX, screenY, canvas.clientHeight / next)
+          handle.setZoom(next)
+        }
+
+        root.on('panmove', (e) => {
+          const g = e as CameraGestureEvent
+          panToAnchor(handle.camera, viewportOf(), g.point.x, g.point.y, g.anchor)
+        })
+
+        let pinchStartZoom = 1
+        root.on('pinchstart', () => {
+          pinchStartZoom = handle.getZoom()
+        })
+        root.on('pinchmove', (e) => {
+          const g = e as CameraGestureEvent
+          const next = clampZoom(pinchStartZoom * g.scale)
+          handle.camera.viewHeight = Math.max(1e-3, canvas.clientHeight / next)
+          handle.setZoom(next)
+          panToAnchor(handle.camera, viewportOf(), g.point.x, g.point.y, g.anchor)
+        })
+
+        root.on('wheel', (e) => {
+          const raw = e.evt as WheelEvent | undefined
+          if (!raw || !e.screen) return
+          applyZoom(e.screen.x, e.screen.y, clampZoom(handle.getZoom() * Math.exp(-raw.deltaY * WHEEL_SENSITIVITY)))
+        })
+
+        // Keyboard: arrow-pan, +/- zoom about the viewport centre, space to grab the view,
+        // Escape to clear the selection.
+        const editable = (el: Element | null) =>
+          !!el && ((el as HTMLElement).isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))
+        const previousCursor = canvas.style.cursor
+        const onKeyDown = (ev: KeyboardEvent) => {
+          if (editable(document.activeElement)) return
+          if (ev.key === ' ') {
+            if (controller.grabContent) {
+              controller.grabContent = false
+              canvas.style.cursor = 'grab'
+            }
+            ev.preventDefault()
+            return
+          }
+          const viewport = viewportOf()
+          const step = (handle.camera.viewHeight / Math.max(1, viewport.height)) * KEY_PAN_STEP_PX
+          const centre = { x: viewport.width / 2, y: viewport.height / 2 }
+          switch (ev.key) {
+            case 'ArrowLeft': handle.camera.eye.x -= step; handle.camera.target.x -= step; break
+            case 'ArrowRight': handle.camera.eye.x += step; handle.camera.target.x += step; break
+            case 'ArrowUp': handle.camera.eye.y += step; handle.camera.target.y += step; break
+            case 'ArrowDown': handle.camera.eye.y -= step; handle.camera.target.y -= step; break
+            case '+':
+            case '=': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() * KEY_ZOOM_STEP)); break
+            case '-':
+            case '_': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() / KEY_ZOOM_STEP)); break
+            case 'Escape': controller.setSelection([]); return
+            default: return
+          }
+          ev.preventDefault()
+        }
+        const onKeyUp = (ev: KeyboardEvent) => {
+          if (ev.key !== ' ') return
+          controller.grabContent = true
+          canvas.style.cursor = previousCursor
+        }
+        window.addEventListener('keydown', onKeyDown)
+        window.addEventListener('keyup', onKeyUp)
+        detachKeyboard = () => {
+          window.removeEventListener('keydown', onKeyDown)
+          window.removeEventListener('keyup', onKeyUp)
+        }
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -336,6 +424,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
     return () => {
       cancelled = true
+      detachKeyboard?.()
       inputController?.destroy()
       controllerRef.current = null
       transformerRef.current = null

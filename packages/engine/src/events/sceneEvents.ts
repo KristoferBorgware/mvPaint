@@ -58,6 +58,22 @@ export interface MarqueeEvent extends NodeEvent {
   nodes?: readonly Node[]
 }
 
+/**
+ * Fired on the scene root while a viewport gesture is under way - one pointer dragging
+ * (pan) or two spreading and moving together (pinch). The engine recognises these and
+ * reports them; it does not move the camera, because where a gesture should take the view -
+ * or whether it should move it at all - is the application's to decide. Feed `screen` and
+ * `anchor` to panToAnchor, and `scale` to whatever zoom the application keeps.
+ */
+export interface CameraGestureEvent extends NodeEvent {
+  /** Canvas-relative CSS pixels: the pointer, or the midpoint between two of them. */
+  point: Vector2
+  /** The world point that sat under `point` when the gesture began, and should again. */
+  anchor: Vector2
+  /** Pinch only: the pointers' current separation over their separation at the start. 1 on a pan. */
+  scale: number
+}
+
 /** Every scene event with a fixed name. Attribute changes are named after their attribute. */
 export const SCENE_EVENTS = [
   'dragstart',
@@ -72,6 +88,12 @@ export const SCENE_EVENTS = [
   'marqueestart',
   'marqueemove',
   'marqueeend',
+  'panstart',
+  'panmove',
+  'panend',
+  'pinchstart',
+  'pinchmove',
+  'pinchend',
 ] as const
 
 export type SceneEventName = (typeof SCENE_EVENTS)[number]
