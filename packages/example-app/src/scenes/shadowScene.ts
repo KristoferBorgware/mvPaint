@@ -41,8 +41,9 @@ export function buildShadowScene(scene: Scene): SceneContent {
     root.addChild(
       new Rect({
         name: `card-${i}`,
-        x: -260 + i * 130,
-        y: 140 - i * 40,
+        // A Rect's position is its top-left corner, so the card hangs down and right of it.
+        x: -390 + i * 130,
+        y: 230 - i * 40,
         width: 260,
         height: 180,
         fill,
@@ -64,8 +65,8 @@ export function buildShadowScene(scene: Scene): SceneContent {
   root.addChild(
     new Rect({
       name: 'shadow-offset-only',
-      x: -350,
-      y,
+      x: -415,
+      y: y + 65,
       width: 130,
       height: 130,
       fill: [0.85, 0.85, 0.88, 1],
@@ -79,8 +80,8 @@ export function buildShadowScene(scene: Scene): SceneContent {
   root.addChild(
     new Rect({
       name: 'shadow-blur',
-      x: -160,
-      y,
+      x: -225,
+      y: y + 65,
       width: 130,
       height: 130,
       fill: [0.85, 0.85, 0.88, 1],

@@ -160,9 +160,17 @@ export class Transformer extends Container {
     ]
   }
 
-  /** A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds. */
+  /**
+   * A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds.
+   *
+   * Pivoted at its middle rather than its top-left corner, which is where a Rect's origin
+   * otherwise is. Every part below is positioned by its CENTRE - an edge bar spans a side
+   * of the frame, a handle sits on a corner - so centring the pivot is what lets the
+   * placement talk about the middle of a bar directly. The offset is in unscaled local
+   * units and the quad is 1x1, so it stays correct whatever scale the part is given.
+   */
   private makePart(name: string, fill: RGBA, zIndex: number): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 })
+    const rect = new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 })
     // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
     // otherwise they would shadow the very shapes they are meant to manipulate.
     rect.pickable = false

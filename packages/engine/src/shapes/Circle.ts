@@ -1,6 +1,9 @@
-// Circle - a filled, optionally stroked circle. Centered at (x, y) in the Z=0 plane
-// (before any offset), transformed by the common Shape parameters (position, scale,
-// rotation, offset) - a non-uniform scaleX/scaleY turns it into an ellipse. Tessellated
+// Circle - a filled, optionally stroked circle. CENTRED at (x, y) in the Z=0 plane (before
+// any offset), transformed by the common Shape parameters (position, scale, rotation,
+// offset) - a non-uniform scaleX/scaleY turns it into an ellipse. Being centred rather
+// than cornered is the elliptical convention: a radius is measured from the middle, so the
+// middle is the only origin that does not introduce a second reference point. Rect, Image
+// and text hang from their top-left corner instead - see Shape's header. Tessellated
 // in the mesh lane: a triangle fan for the fill (fill color or gradient, via the
 // inherited Shape fill API); the stroke is the same n-point rim contour run through the
 // shared general-purpose stroker, using the inherited stroke/lineJoin/miterLimit (lineCap

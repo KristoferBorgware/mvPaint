@@ -11,7 +11,8 @@ import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
 import { Node } from './Node'
-import { Rect } from './Rect'
+import { Circle } from './Circle'
+import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
 import { Text } from './Text'
 import { Transformer } from './Transformer'
@@ -40,6 +41,16 @@ function assert(cond: boolean, msg: string): void {
 }
 const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
 
+/**
+ * A Rect CENTRED on (x, y). A Rect's own origin is its top-left corner (see Shape's
+ * header), so this applies the pivot offset that puts its middle back on the position -
+ * which is the frame the geometry below is written in.
+ */
+const centredRect = (options: RectOptions = {}): Rect =>
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+
+
 const localBoundsOf = (node: Shape): AABB | null => node.localBounds()
 
 /** World-space corners of a node's local bounds, for checking a transform's effect. */
@@ -55,6 +66,53 @@ function corners(node: Shape): { x: number; y: number }[] {
     const p = w.transformPoint(new Vector3(x, y, 0))
     return { x: p.x, y: p.y }
   })
+}
+
+
+// --- where each shape's origin sits --------------------------------------------------
+//
+// The convention, asserted on the geometry the shapes actually emit: elliptical shapes are
+// centred on their origin, everything cornered hangs from its top-left corner and extends
+// right and downward (the scene is y-up, so downward is -y). Getting this wrong is not a
+// subtle matter of taste - it moves every shape by half its own size, and moves the pivot
+// it rotates about.
+{
+  const b = (shape: Shape) => shape.localBounds()
+
+  const rect = new Rect({ width: 40, height: 20 })
+  assert(near(b(rect).min.x, 0) && near(b(rect).max.x, 40), 'a rect starts at its origin in x and runs right')
+  assert(near(b(rect).max.y, 0) && near(b(rect).min.y, -20), 'and starts at its origin in y and hangs down')
+
+  // The position places that corner, so the shape is entirely below and right of it.
+  const placed = new Rect({ x: 100, y: 200, width: 40, height: 20 })
+  const world = placed.worldMatrix()
+  const topLeft = world.transformPoint(new Vector3(0, 0, 0))
+  assert(near(topLeft.x, 100) && near(topLeft.y, 200), "the node's position IS the rect's top-left corner")
+  const bottomRight = world.transformPoint(new Vector3(40, -20, 0))
+  assert(near(bottomRight.x, 140) && near(bottomRight.y, 180), 'and the far corner is width right, height down')
+
+  // A circle is measured from the middle, so the middle is where it sits.
+  const circle = new Circle({ x: 100, y: 200, radius: 20 })
+  // Symmetric to within the polygon approximation: the rim lands on whole segments, so
+  // opposite extremes need not be the same sample.
+  const cb = b(circle)
+  assert(near(cb.min.x, -cb.max.x, 0.05) && near(cb.min.y, -cb.max.y, 0.05), 'a circle is symmetric about its origin')
+  assert(near(cb.max.x, 20, 0.05), 'reaching its radius from it')
+  const centre = circle.worldMatrix().transformPoint(new Vector3(0, 0, 0))
+  assert(near(centre.x, 100) && near(centre.y, 200), "the node's position IS the circle's centre")
+
+  // Which makes the pivot differ, and that is the part worth stating out loud: turning a
+  // rect half a turn swings it about its corner, while a circle only spins in place.
+  const turned = new Rect({ x: 0, y: 0, width: 40, height: 20, rotation: Math.PI })
+  const swung = turned.worldMatrix().transformPoint(new Vector3(40, -20, 0))
+  assert(near(swung.x, -40) && near(swung.y, 20), 'a rect turns about its corner, swinging its body across the origin')
+
+  // Unless it is told otherwise - the documented way to get the old behaviour back.
+  const pivoted = new Rect({ x: 0, y: 0, width: 40, height: 20, offsetX: 20, offsetY: -10, rotation: Math.PI })
+  const stayed = pivoted.worldMatrix().transformPoint(new Vector3(20, -10, 0))
+  assert(near(stayed.x, 0) && near(stayed.y, 0), 'a centring offset puts the pivot back in the middle')
+  const pb = pivoted.localBounds()
+  assert(near(pb.min.x, 0) && near(pb.max.x, 40), 'and changes nothing about the geometry it emits')
 }
 
 // --- boxFromPoints: fits an oriented box in a turned frame ---
@@ -88,7 +146,9 @@ function corners(node: Shape): { x: number; y: number }[] {
 
 // --- boxForNodes: every selection orients to the FIRST node's rotation, one node or many ---
 {
-  const solo = new Rect({ x: 100, y: 50, width: 40, height: 20, rotation: Math.PI / 4 })
+  // Pivoted at its middle (a Rect's origin is its top-left corner - see Shape's header),
+  // so the node's centre is at (100, 50) whatever it is rotated by.
+  const solo = new Rect({ x: 100, y: 50, width: 40, height: 20, offsetX: 20, offsetY: -10, rotation: Math.PI / 4 })
   const box = boxForNodes([solo], localBoundsOf)!
   assert(near(box.rotation, Math.PI / 4), 'a single node gives a box turned to match it')
   assert(near(box.cx, 100) && near(box.cy, 50), "the box centers on the node's own bounds")
@@ -96,8 +156,8 @@ function corners(node: Shape): { x: number; y: number }[] {
 
   // Two unrotated nodes: happens to look axis-aligned, but only because the FIRST one is
   // unrotated - not because multi-selection is special-cased to axis-aligned.
-  const a = new Rect({ x: -50, y: 0, width: 20, height: 20 })
-  const b = new Rect({ x: 50, y: 30, width: 20, height: 20 })
+  const a = centredRect({ x: -50, y: 0, width: 20, height: 20 })
+  const b = centredRect({ x: 50, y: 30, width: 20, height: 20 })
   const pair = boxForNodes([a, b], localBoundsOf)!
   assert(pair.rotation === 0, "an unrotated first node gives an axis-aligned box")
   assert(near(pair.cx, 0) && near(pair.cy, 15), 'the multi-node box centers on the union')
@@ -108,8 +168,8 @@ function corners(node: Shape): { x: number; y: number }[] {
   // frame (as the renderer does) kept resetting it back to axis-aligned, so the frame
   // never appeared to rotate with the selection even though the nodes genuinely were.
   // Order matters: it's the FIRST selected node, not any rotated node in the set.
-  const rotatedFirst = new Rect({ x: 0, y: 0, width: 20, height: 20, rotation: Math.PI / 4 })
-  const unrotatedSecond = new Rect({ x: 100, y: 0, width: 20, height: 20 })
+  const rotatedFirst = centredRect({ x: 0, y: 0, width: 20, height: 20, rotation: Math.PI / 4 })
+  const unrotatedSecond = centredRect({ x: 100, y: 0, width: 20, height: 20 })
   const orientedToFirst = boxForNodes([rotatedFirst, unrotatedSecond], localBoundsOf)!
   assert(near(orientedToFirst.rotation, Math.PI / 4), 'a multi-node box orients to the FIRST selected node, not axis-aligned')
 
@@ -123,8 +183,8 @@ function corners(node: Shape): { x: number; y: number }[] {
 //     the box every frame (as the renderer does mid-drag) must show the selection turning,
 //     not snap back to axis-aligned - the bug the fix above addresses end to end ---
 {
-  const upright = new Rect({ x: -100, y: 0, width: 120, height: 40 })
-  const turned = new Rect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 })
+  const upright = centredRect({ x: -100, y: 0, width: 120, height: 40 })
+  const turned = centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 })
   const selection = [turned, upright] // turned selected FIRST
 
   const pressBox = boxForNodes(selection, localBoundsOf)!
@@ -255,19 +315,19 @@ function TWO_PI_PLUS(a: number): number {
 // --- applyWorldTransform: a world delta lands correctly on the node's own fields ---
 {
   // Pure translation.
-  const moved = new Rect({ x: 10, y: 20, width: 4, height: 4 })
+  const moved = centredRect({ x: 10, y: 20, width: 4, height: 4 })
   applyWorldTransform(moved, Matrix4x4.translation(new Vector3(5, -3, 0)))
   assert(near(moved.x, 15) && near(moved.y, 17), 'a translation delta moves the node')
   assert(near(moved.rotation, 0) && near(moved.scaleX, 1), 'and leaves rotation/scale alone')
 
   // Rotation about a point the node does not sit on.
-  const spun = new Rect({ x: 10, y: 0, width: 2, height: 2 })
+  const spun = centredRect({ x: 10, y: 0, width: 2, height: 2 })
   applyWorldTransform(spun, rotateAbout({ x: 0, y: 0 }, Math.PI / 2))
   assert(near(spun.x, 0) && near(spun.y, 10), 'rotating about the origin swings the node around it')
   assert(near(spun.rotation, Math.PI / 2), 'and turns the node itself')
 
   // Scaling about a fixed corner: the fixed point must not move, the far side must double.
-  const scaled = new Rect({ x: 0, y: 0, width: 10, height: 10 })
+  const scaled = centredRect({ x: 0, y: 0, width: 10, height: 10 })
   const fixed = { x: -5, y: -5 }
   applyWorldTransform(scaled, scaleAbout(fixed, 0, 2, 2))
   const pts = corners(scaled)
@@ -282,7 +342,7 @@ function TWO_PI_PLUS(a: number): number {
   assert(near(scaled.scaleX, 2) && near(scaled.scaleY, 2), "the node's own scale carries the change")
 
   // A mirroring delta shows up as a negative scale, not a broken rotation.
-  const mirrored = new Rect({ x: 0, y: 0, width: 4, height: 4 })
+  const mirrored = centredRect({ x: 0, y: 0, width: 4, height: 4 })
   applyWorldTransform(mirrored, scaleAbout({ x: 0, y: 0 }, 0, -1, 1))
   assert(mirrored.scaleX < 0 || mirrored.scaleY < 0, 'a mirroring delta produces a negative scale')
 }
@@ -301,7 +361,7 @@ function TWO_PI_PLUS(a: number): number {
   group.matrix = Matrix4x4.translation(new Vector3(100, -40, 0))
     .mul(Matrix4x4.rotationZ(0.6))
     .mul(Matrix4x4.scaling(new Vector3(2, 2, 1)))
-  const child = group.addChild(new Rect({ x: 3, y: 7, width: 10, height: 6, rotation: 0.2 }))
+  const child = group.addChild(centredRect({ x: 3, y: 7, width: 10, height: 6, rotation: 0.2 }))
 
   const before = corners(child)
   const delta = Matrix4x4.translation(new Vector3(25, -12, 0))
@@ -335,7 +395,7 @@ function TWO_PI_PLUS(a: number): number {
 //     approximated. With skewX/skewY on Shape, rotate+skew+scale spans every invertible
 //     2x2 and the result is reproduced to the last decimal ---
 {
-  const node = new Rect({ x: 30, y: -20, width: 80, height: 40, rotation: 0.7 })
+  const node = centredRect({ x: 30, y: -20, width: 80, height: 40, rotation: 0.7 })
   const before = corners(node)
   // Squash x, stretch y, about a point the node does not sit on - the case that shears.
   const pivot = { x: -15, y: 25 }
@@ -355,7 +415,7 @@ function TWO_PI_PLUS(a: number): number {
 
   // The same, in a rotated FRAME rather than along the world axes, on a node that is
   // already skewed - the general case; still exact.
-  const gnarly = new Rect({ x: 5, y: 5, width: 30, height: 70, rotation: -0.4, skewX: 0.3, skewY: -0.15 })
+  const gnarly = centredRect({ x: 5, y: 5, width: 30, height: 70, rotation: -0.4, skewX: 0.3, skewY: -0.15 })
   const g0 = corners(gnarly)
   const gPivot = { x: 12, y: -8 }
   applyWorldTransform(gnarly, scaleAbout(gPivot, 0.9, 1.8, 0.5))
@@ -377,9 +437,9 @@ function TWO_PI_PLUS(a: number): number {
 // --- decompose2D round-trips through Shape's own transform composition ---
 {
   for (const source of [
-    new Rect({ rotation: 0.9, scaleX: 2, scaleY: 0.5 }),
-    new Rect({ rotation: -1.2, scaleX: -1.5, scaleY: 3, skewX: 0.6 }),
-    new Rect({ skewX: -0.4, skewY: 0.25, scaleX: 1.3, scaleY: 1.3 }),
+    centredRect({ rotation: 0.9, scaleX: 2, scaleY: 0.5 }),
+    centredRect({ rotation: -1.2, scaleX: -1.5, scaleY: 3, skewX: 0.6 }),
+    centredRect({ skewX: -0.4, skewY: 0.25, scaleX: 1.3, scaleY: 1.3 }),
   ]) {
     const m = source.localMatrix().m
     const parts = decompose2D(m[0], m[1], m[4], m[5])
@@ -399,6 +459,9 @@ function TWO_PI_PLUS(a: number): number {
 }
 
 // --- skew composes between rotation and scale ---
+//
+// Read straight off localMatrix(), so these are plain Rects: a pivot offset is part of that
+// matrix and would shift every point sampled below.
 {
   // A pure skewX shifts x in proportion to y, leaving y alone.
   const sheared = new Rect({ skewX: 0.5 })
@@ -437,13 +500,13 @@ function TWO_PI_PLUS(a: number): number {
   }
   const group = new TransformGroup()
   group.matrix = Matrix4x4.rotationZ(0.5)
-  const child = group.addChild(new Rect({ rotation: 0.25 }))
+  const child = group.addChild(centredRect({ rotation: 0.25 }))
   assert(near(worldRotationOf(child), 0.75), "world rotation adds the parent's to the node's own")
 }
 
 // --- end to end: a resize gesture on a real node holds its opposite corner still ---
 {
-  const node = new Rect({ x: 0, y: 0, width: 100, height: 50 })
+  const node = centredRect({ x: 0, y: 0, width: 100, height: 50 })
   const box = boxForNodes([node], localBoundsOf)!
   const held = anchorPosition(box, 'bottom-left')
 
@@ -469,8 +532,8 @@ function TWO_PI_PLUS(a: number): number {
 //     intermediate pointer positions must land exactly where going straight there would ---
 {
   const makeSelection = () => [
-    new Rect({ x: -100, y: 0, width: 120, height: 40 }),
-    new Rect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 }),
+    centredRect({ x: -100, y: 0, width: 120, height: 40 }),
+    centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 }),
   ]
 
   // Exactly what the controller does on each pointermove: restore, then apply one delta.
@@ -529,7 +592,7 @@ function TWO_PI_PLUS(a: number): number {
 // --- Transformer: the frame re-fits itself as the selection changes shape, and does it
 //     entirely through transforms so nothing ever needs a geometry rebuild ---
 {
-  const node = new Rect({ x: 0, y: 0, width: 100, height: 50 })
+  const node = centredRect({ x: 0, y: 0, width: 100, height: 50 })
   const t = new Transformer()
   t.attach([node])
 
@@ -602,8 +665,8 @@ function TWO_PI_PLUS(a: number): number {
 // and `currentBox` read together must never describe two different selections, or a
 // transform started in that window moves the new selection about the old one's centre.
 {
-  const first = new Rect({ x: 0, y: 0, width: 100, height: 50 })
-  const second = new Rect({ x: 400, y: 300, width: 60, height: 60 })
+  const first = centredRect({ x: 0, y: 0, width: 100, height: 50 })
+  const second = centredRect({ x: 400, y: 300, width: 60, height: 60 })
   const t = new Transformer()
   const fit = () => t.update(boxForNodes(t.nodes, localBoundsOf), 1)
 
@@ -642,9 +705,9 @@ function TWO_PI_PLUS(a: number): number {
 {
   resetListenerCensus()
   const t = new Transformer()
-  const a = new Rect({ x: 0, y: 0, width: 10, height: 10 })
-  const b = new Rect({ x: 40, y: 0, width: 10, height: 10 })
-  const c = new Rect({ x: 80, y: 0, width: 10, height: 10 })
+  const a = centredRect({ x: 0, y: 0, width: 10, height: 10 })
+  const b = centredRect({ x: 40, y: 0, width: 10, height: 10 })
+  const c = centredRect({ x: 80, y: 0, width: 10, height: 10 })
   const changes: (readonly Shape[])[] = []
   t.on('attachchange', (e) => changes.push((e as NodeEvent & { nodes: readonly Shape[] }).nodes))
 
@@ -691,27 +754,27 @@ function TWO_PI_PLUS(a: number): number {
 
 // --- Shadow: the canvas 2D property model, and the atlas cache key that drives re-baking ---
 {
-  const plain = new Rect({ width: 10, height: 10 })
+  const plain = centredRect({ width: 10, height: 10 })
   assert(!plain.hasShadow(), 'a shape with no shadow fields set casts nothing')
   assert(plain.shadowEnabled && plain.shadowOpacity === 1 && plain.shadowForStrokeEnabled, 'shadow defaults match the canvas library (enabled, opaque, stroke included)')
 
   // A blur alone, or an offset alone, is enough - but a shadow with neither would sit
   // exactly behind the shape and never be visible, so it does not count.
-  assert(new Rect({ shadowBlur: 4 }).hasShadow(), 'blur alone casts a shadow')
-  assert(new Rect({ shadowOffsetY: 3 }).hasShadow(), 'offset alone casts a shadow')
-  assert(new Rect({ shadowSpread: 5 }).hasShadow(), 'spread alone casts a shadow (a crisp halo)')
-  assert(!new Rect({ shadowColor: [0, 0, 0, 1] }).hasShadow(), 'colour alone, with no blur, spread or offset, casts nothing')
+  assert(centredRect({ shadowBlur: 4 }).hasShadow(), 'blur alone casts a shadow')
+  assert(centredRect({ shadowOffsetY: 3 }).hasShadow(), 'offset alone casts a shadow')
+  assert(centredRect({ shadowSpread: 5 }).hasShadow(), 'spread alone casts a shadow (a crisp halo)')
+  assert(!centredRect({ shadowColor: [0, 0, 0, 1] }).hasShadow(), 'colour alone, with no blur, spread or offset, casts nothing')
 
-  assert(!new Rect({ shadowBlur: 4, shadowEnabled: false }).hasShadow(), 'shadowEnabled=false suppresses it')
-  assert(!new Rect({ shadowBlur: 4, shadowOpacity: 0 }).hasShadow(), 'zero opacity suppresses it')
-  assert(!new Rect({ shadowBlur: 4, shadowColor: [0, 0, 0, 0] }).hasShadow(), 'a fully transparent colour suppresses it')
+  assert(!centredRect({ shadowBlur: 4, shadowEnabled: false }).hasShadow(), 'shadowEnabled=false suppresses it')
+  assert(!centredRect({ shadowBlur: 4, shadowOpacity: 0 }).hasShadow(), 'zero opacity suppresses it')
+  assert(!centredRect({ shadowBlur: 4, shadowColor: [0, 0, 0, 0] }).hasShadow(), 'a fully transparent colour suppresses it')
 
   // geometryVersion is what the shadow atlas keys its baked silhouette on: it must move
   // when the geometry does, and stay put when only the transform does - otherwise every
   // drag would re-bake every shadow.
-  assert(new Rect({}).shadowSpread === 0, 'spread defaults to none, so the canvas model is what you get unless you ask')
+  assert(centredRect({}).shadowSpread === 0, 'spread defaults to none, so the canvas model is what you get unless you ask')
 
-  const shape = new Rect({ width: 10, height: 10, shadowBlur: 3 })
+  const shape = centredRect({ width: 10, height: 10, shadowBlur: 3 })
   const v0 = shape.geometryVersion
   shape.x = 500
   shape.rotation = 1
@@ -728,10 +791,10 @@ function TWO_PI_PLUS(a: number): number {
 {
   const root = new Container('root')
   const group = root.addChild(new Container('group'))
-  const a = group.addChild(new Rect({ name: 'box selected', id: 'a' }))
-  const b = group.addChild(new Rect({ name: 'box', id: 'b' }))
+  const a = group.addChild(centredRect({ name: 'box selected', id: 'a' }))
+  const b = group.addChild(centredRect({ name: 'box', id: 'b' }))
   const nested = group.addChild(new Container('nested'))
-  const c = nested.addChild(new Rect({ id: 'c' }))
+  const c = nested.addChild(centredRect({ id: 'c' }))
   const asSortedIds = (nodes: { id: string }[]) =>
     nodes
       .map((n) => n.id)
@@ -781,7 +844,7 @@ function TWO_PI_PLUS(a: number): number {
 
 // --- getAttr/setAttr/attrs: string-keyed access to a node's typed fields ---
 {
-  const rect = new Rect({ x: 1, y: 2, fill: [1, 0, 0, 1] })
+  const rect = centredRect({ x: 1, y: 2, fill: [1, 0, 0, 1] })
 
   assert(rect.getAttr('x') === 1, 'getAttr reads an ordinary field by name')
   rect.setAttr('x', 42)

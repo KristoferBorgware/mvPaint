@@ -134,13 +134,13 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
 
   // Row 1: the picture as it is, then two ways of meeting a frame it does not fit.
   root.addChild(label(-520, 250, 'as-is'))
-  root.addChild(new Image({ name: 'image-plain', texture: checker, x: -450, y: 160, width: 140, height: 140 }))
+  root.addChild(new Image({ name: 'image-plain', texture: checker, x: -520, y: 230, width: 140, height: 140 }))
 
   root.addChild(label(-330, 250, "fill (stretched)"))
-  root.addChild(new Image({ name: 'image-fill', texture: checker, x: -250, y: 160, width: 200, height: 110, fit: 'fill' }))
+  root.addChild(new Image({ name: 'image-fill', texture: checker, x: -350, y: 215, width: 200, height: 110, fit: 'fill' }))
 
   root.addChild(label(-90, 250, 'cover (trimmed)'))
-  root.addChild(new Image({ name: 'image-cover', texture: checker, x: -10, y: 160, width: 200, height: 110, fit: 'cover' }))
+  root.addChild(new Image({ name: 'image-cover', texture: checker, x: -110, y: 215, width: 200, height: 110, fit: 'cover' }))
 
   // A shadow, cast from the quad - see Image's header for why it is the quad and not the alpha.
   root.addChild(label(180, 250, 'shadow'))
@@ -152,6 +152,10 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
       y: 160,
       width: 140,
       height: 140,
+      // Pivoted at its middle so it leans in place; a Rect or Image turns about its
+      // top-left corner otherwise.
+      offsetX: 70,
+      offsetY: -70,
       rotation: 0.12,
       shadowColor: [0, 0, 0, 0.45],
       shadowBlur: 18,
@@ -167,8 +171,8 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
       new Image({
         name: `image-sprite-${i + 1}`,
         texture: strip,
-        x: -470 + i * 90,
-        y: -20,
+        x: -508 + i * 90,
+        y: 18,
         width: 76,
         height: 76,
         crop: { x: i * 64, y: 0, width: 64, height: 64 },
@@ -182,8 +186,8 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
     new Image({
       name: 'image-tiled',
       texture: checker,
-      x: 30,
-      y: -20,
+      x: -60,
+      y: 70,
       width: 180,
       height: 180,
       tileX: 3,
@@ -198,8 +202,8 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
     new Image({
       name: 'image-mirrored',
       texture: checker,
-      x: 250,
-      y: -20,
+      x: 160,
+      y: 70,
       width: 180,
       height: 180,
       tileX: 3,
@@ -212,25 +216,25 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
   // Row 3: flipping, tinting, and filtering.
   root.addChild(label(-520, -150, 'flipX'))
   root.addChild(
-    new Image({ name: 'image-flipped', texture: strip, x: -450, y: -230, width: 120, height: 120, crop: { x: 0, y: 0, width: 64, height: 64 }, flipX: true }),
+    new Image({ name: 'image-flipped', texture: strip, x: -510, y: -170, width: 120, height: 120, crop: { x: 0, y: 0, width: 64, height: 64 }, flipX: true }),
   )
 
   root.addChild(label(-330, -150, 'tint + fade'))
   root.addChild(
-    new Image({ name: 'image-tinted', texture: checker, x: -250, y: -230, width: 120, height: 120, tint: [1, 0.6, 0.3, 0.75] }),
+    new Image({ name: 'image-tinted', texture: checker, x: -310, y: -170, width: 120, height: 120, tint: [1, 0.6, 0.3, 0.75] }),
   )
 
   root.addChild(label(-140, -150, 'nearest (pixel art)'))
-  root.addChild(new Image({ name: 'image-nearest', texture: pixels, x: -50, y: -230, width: 120, height: 120, filter: 'nearest' }))
+  root.addChild(new Image({ name: 'image-nearest', texture: pixels, x: -110, y: -170, width: 120, height: 120, filter: 'nearest' }))
 
   root.addChild(label(60, -150, 'linear (same 8x8)'))
-  root.addChild(new Image({ name: 'image-linear', texture: pixels, x: 150, y: -230, width: 120, height: 120, filter: 'linear' }))
+  root.addChild(new Image({ name: 'image-linear', texture: pixels, x: 90, y: -170, width: 120, height: 120, filter: 'linear' }))
 
   // An image is an ordinary scene node: it stacks with shapes and text by zIndex, and a
   // higher one wins whichever lane drew it.
   root.addChild(label(280, -150, 'zIndex vs shapes'))
-  root.addChild(new Rect({ name: 'image-z-rect', x: 350, y: -230, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1], zIndex: 1 }))
-  root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 390, y: -200, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 }, zIndex: 0 }))
+  root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1], zIndex: 1 }))
+  root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 340, y: -150, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 }, zIndex: 0 }))
   root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: [0.9, 0.3, 0.5, 0.9], zIndex: 2 }))
 
   // Row 4: an SVG as the source. Both quads are the same size on screen and come from the
@@ -239,10 +243,10 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
   // but each one costs geometry, whereas these are a quad apiece however complex the artwork.
   if (svgTextures) {
     root.addChild(label(-520, -340, 'svg rasterized at 24px'))
-    root.addChild(new Image({ name: 'image-svg-coarse', texture: svgTextures.coarse, x: -450, y: -420, width: 130, height: 130 }))
+    root.addChild(new Image({ name: 'image-svg-coarse', texture: svgTextures.coarse, x: -515, y: -355, width: 130, height: 130 }))
 
     root.addChild(label(-330, -340, 'svg rasterized at 256px'))
-    root.addChild(new Image({ name: 'image-svg-fine', texture: svgTextures.fine, x: -250, y: -420, width: 130, height: 130 }))
+    root.addChild(new Image({ name: 'image-svg-fine', texture: svgTextures.fine, x: -315, y: -355, width: 130, height: 130 }))
 
     // Nothing about the source makes it a special kind of image: it tiles, tints and casts a
     // shadow like any other texture.
@@ -251,8 +255,8 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
       new Image({
         name: 'image-svg-tiled',
         texture: svgTextures.fine,
-        x: -50,
-        y: -420,
+        x: -115,
+        y: -355,
         width: 130,
         height: 130,
         tileX: 2,
@@ -271,6 +275,8 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
         y: -420,
         width: 130,
         height: 130,
+        offsetX: 65,
+        offsetY: -65,
         rotation: -0.15,
         shadowColor: [0, 0, 0, 0.45],
         shadowBlur: 16,
@@ -282,7 +288,7 @@ export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
 
   // A spinning image, to show that a transform never rebuilds the lane's geometry.
   const spinner = root.addChild(
-    new Image({ name: 'image-spinning', texture: strip, x: 470, y: 160, width: 110, height: 110, crop: { x: 64, y: 0, width: 64, height: 64 } }),
+    new Image({ name: 'image-spinning', texture: strip, x: 470, y: 160, width: 110, height: 110, offsetX: 55, offsetY: -55, crop: { x: 64, y: 0, width: 64, height: 64 } }),
   )
   root.addChild(label(400, 250, 'spinning'))
 

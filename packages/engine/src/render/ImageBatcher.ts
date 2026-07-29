@@ -69,16 +69,18 @@ export class ImageBatcher {
       const objectId = this.nodes.length
       this.nodes.push(image)
 
-      const hw = image.width / 2
-      const hh = image.height / 2
+      // The node's origin is the picture's top-left corner, so the quad hangs below it -
+      // matching Image.buildGeometry(), which is what picking and the shadow silhouette use.
+      const w = image.width
+      const b = -image.height
       const { u0, v0, u1, v1 } = image.uvRect()
       // v runs down the image while y runs up the scene, so the top-left texel belongs to
       // the quad's +y corner - otherwise every image would come out upside down.
       const corners = [
-        [-hw, -hh, u0, v1],
-        [hw, -hh, u1, v1],
-        [hw, hh, u1, v0],
-        [-hw, hh, u0, v0],
+        [0, b, u0, v1],
+        [w, b, u1, v1],
+        [w, 0, u1, v0],
+        [0, 0, u0, v0],
       ]
       for (const [x, y, u, v] of corners) {
         posUv.push(x, y, u, v)

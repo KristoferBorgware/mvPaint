@@ -104,7 +104,9 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
       case 'rect': {
         const width = randomBetween(16, 90)
         const height = randomBetween(16, 90)
-        node = new Rect({ ...shared, width, height, scaleX: randomBetween(0.7, 1.3), scaleY: randomBetween(0.7, 1.3) })
+        // Pivoted at its middle, so a random rotation spins the rect where it stands
+        // instead of swinging it off its spot about its top-left corner.
+        node = new Rect({ ...shared, width, height, offsetX: width / 2, offsetY: -height / 2, scaleX: randomBetween(0.7, 1.3), scaleY: randomBetween(0.7, 1.3) })
         break
       }
       case 'circle': {

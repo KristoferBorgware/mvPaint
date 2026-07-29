@@ -58,9 +58,13 @@ export class CullBoundsOverlay extends Container {
     this.placeEdge('right', cx + halfW, cy, OUTLINE_STROKE_WIDTH, height + OUTLINE_STROKE_WIDTH)
   }
 
-  /** A unit quad: fill only, never stroked or resized by width/height, so it costs no geometry rebuilds. */
+  /**
+   * A unit quad: fill only, never stroked or resized by width/height, so it costs no
+   * geometry rebuilds. Pivoted at its middle, because placeEdge below positions each bar
+   * by its centre and a Rect's own origin is its top-left corner.
+   */
   private makePart(name: string): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, fill: [...OUTLINE_COLOR], strokeWidth: 0, zIndex: Z_INDEX, scaleX: 0, scaleY: 0 })
+    const rect = new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...OUTLINE_COLOR], strokeWidth: 0, zIndex: Z_INDEX, scaleX: 0, scaleY: 0 })
     rect.pickable = false
     this.addChild(rect)
     return rect

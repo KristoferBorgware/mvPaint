@@ -17,6 +17,9 @@
 // the alpha channel is possible - the bake pass could sample it - but it is its own piece of
 // work rather than a flag.
 //
+// Its TOP-LEFT corner sits at (x, y) and it extends right and down from there, like a Rect -
+// see Shape's header for which shapes are cornered and which centred.
+//
 // Note the name shadows the DOM's `Image` inside any module that imports this one. Load
 // through ImageTexture.load() rather than `new Image()` and it will not come up.
 
@@ -120,13 +123,16 @@ export class Image extends Shape {
    * picking, bounds and the shadow silhouette something real to work from. See the header.
    */
   protected override buildGeometry(sink: MeshSink): void {
-    const hw = this.width / 2
-    const hh = this.height / 2
-    const a = sink.vertex(-hw, -hh, true)
-    const b = sink.vertex(hw, -hh, true)
-    const c = sink.vertex(hw, hh, true)
-    const d = sink.vertex(-hw, hh, true)
-    sink.triangle(a, b, c)
-    sink.triangle(a, c, d)
+    // The origin is the picture's top-left corner and the scene is y-up, so the quad hangs
+    // below it. ImageBatcher lays the drawn quad out over exactly this rectangle - the two
+    // have to agree, or the pixels and the hit test would describe different places.
+    const w = this.width
+    const b = -this.height
+    const p0 = sink.vertex(0, b, true)
+    const p1 = sink.vertex(w, b, true)
+    const p2 = sink.vertex(w, 0, true)
+    const p3 = sink.vertex(0, 0, true)
+    sink.triangle(p0, p1, p2)
+    sink.triangle(p0, p2, p3)
   }
 }

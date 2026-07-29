@@ -10,7 +10,7 @@
 
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Container } from '../shapes/Container'
-import { Rect } from '../shapes/Rect'
+import { Rect , type RectOptions } from '../shapes/Rect'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector2 } from '../math/Vector2'
 import { Vector3 } from '../math/Vector3'
@@ -29,6 +29,16 @@ function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`[input] self-test FAILED: ${msg}`)
 }
 const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
+
+/**
+ * A Rect CENTRED on (x, y). A Rect's own origin is its top-left corner (see Shape's
+ * header), so this applies the pivot offset that puts its middle back on the position -
+ * which is the frame the geometry below is written in.
+ */
+const centredRect = (options: RectOptions = {}): Rect =>
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+
 
 // --- screenToWorld: viewport center maps to the camera's look-at point; corners follow
 //     viewHeight/aspect, with screen y-down flipped to world y-up ---
@@ -114,7 +124,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   }
 
   // No parent: the world delta applies to x/y unchanged.
-  const loose = new Rect({ x: 10, y: 20 })
+  const loose = centredRect({ x: 10, y: 20 })
   const moved = draggedPosition(loose, 10, 20, { x: 0, y: 0 }, { x: 5, y: -3 })
   assert(near(moved.x, 15) && near(moved.y, 17), 'an unparented node takes the world delta directly')
 
@@ -122,7 +132,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   // (Getting this wrong would fling the node by the parent's offset on the first move.)
   const translated = new TransformGroup()
   translated.matrix = Matrix4x4.translation(new Vector3(1000, -500, 0))
-  const inTranslated = translated.addChild(new Rect({ x: 0, y: 0 }))
+  const inTranslated = translated.addChild(centredRect({ x: 0, y: 0 }))
   const t = draggedPosition(inTranslated, 0, 0, { x: 0, y: 0 }, { x: 5, y: -3 })
   assert(near(t.x, 5) && near(t.y, -3), "a parent's translation does not offset the drag delta")
 
@@ -130,7 +140,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   // only 5 units in the child's own coordinates.
   const scaled = new TransformGroup()
   scaled.matrix = Matrix4x4.scaling(new Vector3(2, 2, 1))
-  const inScaled = scaled.addChild(new Rect({ x: 0, y: 0 }))
+  const inScaled = scaled.addChild(centredRect({ x: 0, y: 0 }))
   const s = draggedPosition(inScaled, 0, 0, { x: 0, y: 0 }, { x: 10, y: 10 })
   assert(near(s.x, 5) && near(s.y, 5), "a parent's scale divides the drag delta")
 
@@ -138,7 +148,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   // the pointer UP in world space must still move the node up on screen.
   const flipped = new TransformGroup()
   flipped.matrix = Matrix4x4.scaling(new Vector3(1, -1, 1))
-  const inFlipped = flipped.addChild(new Rect({ x: 0, y: 0 }))
+  const inFlipped = flipped.addChild(centredRect({ x: 0, y: 0 }))
   const f = draggedPosition(inFlipped, 0, 0, { x: 0, y: 0 }, { x: 4, y: 10 })
   assert(near(f.x, 4) && near(f.y, -10), "a parent's Y flip inverts the drag delta's y")
 
@@ -149,7 +159,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
   gnarly.matrix = Matrix4x4.translation(new Vector3(30, -15, 0))
     .mul(Matrix4x4.rotationZ(0.9))
     .mul(Matrix4x4.scaling(new Vector3(1.7, 0.4, 1)))
-  const child = gnarly.addChild(new Rect({ x: 7, y: -2 }))
+  const child = gnarly.addChild(centredRect({ x: 7, y: -2 }))
   const origin = new Vector3(0, 0, 0)
 
   const worldBefore = child.worldMatrix().transformPoint(origin)
@@ -194,8 +204,8 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
 
 // --- draggable: on by default (a drag only ever reaches a pickable node), opt-out per node ---
 {
-  assert(new Rect().draggable, 'a shape is draggable by default')
-  assert(!new Rect({ draggable: false }).draggable, 'draggable can be turned off per node')
+  assert(centredRect().draggable, 'a shape is draggable by default')
+  assert(!centredRect({ draggable: false }).draggable, 'draggable can be turned off per node')
 }
 
 
@@ -224,7 +234,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
 
   const root = new Container()
   const circle = new Circle({ name: 'circle', x: 0, y: 0, radius: 40 })
-  const behind = new Rect({ name: 'behind', x: 0, y: 0, width: 400, height: 400 })
+  const behind = centredRect({ name: 'behind', x: 0, y: 0, width: 400, height: 400 })
   root.addChild(behind)
   root.addChild(circle)
 

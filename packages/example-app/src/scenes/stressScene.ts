@@ -45,7 +45,10 @@ export function buildStressScene(scene: Scene): SceneContent {
     const node =
       i % 2 === 0
         ? root.addChild(new Circle({ name: `stress-${i}`, radius: 22, ...shared }))
-        : root.addChild(new Rect({ name: `stress-${i}`, width: 40, height: 40, ...shared }))
+        : // Pivoted at its middle so the squares sit on the same centres as the circles
+          // they alternate with, and orbit the same way - a Rect's own origin is its
+          // top-left corner.
+          root.addChild(new Rect({ name: `stress-${i}`, width: 40, height: 40, offsetX: 20, offsetY: -20, ...shared }))
     movers.push({ node, baseX, baseY, phase: (i % 17) * 0.37 })
   }
 

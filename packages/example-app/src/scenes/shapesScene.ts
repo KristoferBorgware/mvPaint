@@ -10,6 +10,10 @@ export function buildShapesScene(scene: Scene): SceneContent {
 
   // Two rects side by side, filled + stroked, spinning about their centers. Sized in
   // pixel-equivalent world units.
+  //
+  // A Rect's origin is its top-left corner, so it would otherwise turn about that corner
+  // and swing across the scene; offsetX/offsetY move the pivot back to the middle, which is
+  // what "spinning about their centers" needs. It also means x/y still name the centre.
   const left = scene.root.addChild(
     new Rect({
       name: 'rect-left',
@@ -17,6 +21,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
       y: 0,
       width: 160,
       height: 160,
+      offsetX: 80,
+      offsetY: -80,
       fill: [0.9, 0.28, 0.24, 1],
       stroke: [0.5, 0.1, 0.08, 1],
       strokeWidth: 6,
@@ -25,8 +31,9 @@ export function buildShapesScene(scene: Scene): SceneContent {
   // Linear gradient across the rect's own diagonal, in its local (pre-transform)
   // space - it moves and rotates with the rect.
   left.fillPriority = 'linear-gradient'
-  left.fillLinearGradientStartPoint = { x: -80, y: -80 }
-  left.fillLinearGradientEndPoint = { x: 80, y: 80 }
+  // Local space runs [0, width] x [-height, 0], so the diagonal is bottom-left to top-right.
+  left.fillLinearGradientStartPoint = { x: 0, y: -160 }
+  left.fillLinearGradientEndPoint = { x: 160, y: 0 }
   left.fillLinearGradientColorStops = [
     { offset: 0, color: [1, 0.9, 0.3, 1] },
     { offset: 1, color: [0.9, 0.1, 0.2, 1] },
@@ -38,6 +45,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
       y: 0,
       width: 200,
       height: 130,
+      offsetX: 100,
+      offsetY: -65,
       fill: [0.2, 0.45, 0.9, 1],
       stroke: [0.08, 0.18, 0.5, 1],
       strokeWidth: 6,

@@ -238,10 +238,11 @@ function computeLayout(): LoremLayout {
 export function addPageFrame(root: Container, index: number, layout: LoremLayout): { x: number; y: number } {
   const origin = layout.pageOrigin(index)
 
+  // The page origin IS the sheet's top-left corner, which is where a Rect starts.
   const background = new Rect({
     name: `lorem-page-bg-${index}`,
-    x: origin.x + PAGE_WIDTH / 2,
-    y: origin.y - layout.pageHeight / 2,
+    x: origin.x,
+    y: origin.y,
     width: PAGE_WIDTH,
     height: layout.pageHeight,
     fill: [0.99, 0.99, 1, 1],

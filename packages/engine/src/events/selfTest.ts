@@ -8,7 +8,7 @@ import { MarqueeTool } from '../input/MarqueeTool'
 import { Vector2 } from '../math/Vector2'
 import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
-import { Rect } from '../shapes/Rect'
+import { Rect , type RectOptions } from '../shapes/Rect'
 import { Text } from '../shapes/Text'
 import type { AttrChangeEvent, ChildEvent, MarqueeEvent } from './sceneEvents'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
@@ -21,6 +21,16 @@ function assert(cond: boolean, msg: string): void {
   count++
   if (!cond) throw new Error(`[events] self-test FAILED: ${msg}`)
 }
+
+/**
+ * A Rect CENTRED on (x, y). A Rect's own origin is its top-left corner (see Shape's
+ * header), so this applies the pivot offset that puts its middle back on the position -
+ * which is the frame the geometry below is written in.
+ */
+const centredRect = (options: RectOptions = {}): Rect =>
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+
 
 /**   root
  *     +- group
@@ -444,8 +454,8 @@ function tree() {
     resetListenerCensus()
     const root = new Container('root')
     const group = root.addChild(new Container('group'))
-    const a = group.addChild(new Rect({ name: 'a' }))
-    const b = group.addChild(new Rect({ name: 'b' }))
+    const a = group.addChild(centredRect({ name: 'a' }))
+    const b = group.addChild(centredRect({ name: 'b' }))
     const log: string[] = []
     const base = { root, group, a, b, log }
 
@@ -717,7 +727,7 @@ function tree() {
 {
   resetListenerCensus()
   const root = new Container('root')
-  const rect = root.addChild(new Rect({ x: 1, fill: [1, 0, 0, 1] }))
+  const rect = root.addChild(centredRect({ x: 1, fill: [1, 0, 0, 1] }))
   const seen: AttrChangeEvent[] = []
   const atRoot: string[] = []
   rect.on('xChange', (e) => seen.push(e as AttrChangeEvent))
@@ -794,7 +804,7 @@ function tree() {
 {
   resetListenerCensus()
   const root = new Container('root')
-  const covered = [new Rect({ name: 'a' }), new Rect({ name: 'b' })]
+  const covered = [centredRect({ name: 'a' }), centredRect({ name: 'b' })]
   let resolveCalls = 0
   const tool = new MarqueeTool(root, () => {
     resolveCalls++

@@ -6,7 +6,7 @@
 // covered is the CPU-side sizing and placement those passes are driven by.
 // Run with: npx tsx src/render/selfTest.ts
 
-import { Rect } from '../shapes/Rect'
+import { Rect , type RectOptions } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
 import { Polyline } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
@@ -83,6 +83,16 @@ function capture(shape: Shape): Captured {
 }
 
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
+
+/**
+ * A Rect CENTRED on (x, y). A Rect's own origin is its top-left corner (see Shape's
+ * header), so this applies the pivot offset that puts its middle back on the position -
+ * which is the frame the geometry below is written in.
+ */
+const centredRect = (options: RectOptions = {}): Rect =>
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+
 const hasVertexNear = (verts: CapturedVertex[], x: number, y: number, eps = 1e-6) =>
   verts.some((v) => near(v.x, x, eps) && near(v.y, y, eps))
 
@@ -98,6 +108,8 @@ assert(
 {
   const fill: RGBA = [0.9, 0.2, 0.1, 1]
   const stroke: RGBA = [0, 0, 0, 1]
+  // Geometry is emitted in the shape's own local frame, which a pivot offset never moves,
+  // so this is a plain Rect: its origin IS the top-left corner of what it emits.
   const rect = new Rect({ x: 0, y: 0, width: 4, height: 2, fill, stroke, strokeWidth: 0.4 })
   const { verts, tris } = capture(rect)
 
@@ -105,12 +117,17 @@ assert(
   assert(verts.length === 4 + 40, 'stroked rect: 4 fill + 40 general-stroker vertices')
   assert(tris.length === 2 + 20, 'stroked rect: 2 fill + 20 general-stroker triangles')
 
-  // Fill verts (still emitted first, unchanged) carry no color of their own - just
-  // marked isFill (gradient-eligible) - and sit at (±w/2,±h/2). The shape's fill/stroke
-  // colors are read from the object buffer at fragment time, not from vertex data.
+  // Fill verts (still emitted first, unchanged) carry no color of their own - just marked
+  // isFill (gradient-eligible). A Rect hangs from its top-left corner at the local origin,
+  // so it spans x in [0, width] and y in [-height, 0]. The shape's fill/stroke colors are
+  // read from the object buffer at fragment time, not from vertex data.
   assert(verts.slice(0, 4).every((v) => v.isFill), 'first 4 verts are marked isFill')
-  assert(near(verts[0].x, -2) && near(verts[0].y, -1), 'fill corner at (-w/2,-h/2)')
-  assert(near(verts[2].x, 2) && near(verts[2].y, 1), 'fill corner at (+w/2,+h/2)')
+  assert(near(verts[0].x, 0) && near(verts[0].y, -2), 'fill corner at the bottom-left, (0,-height)')
+  assert(near(verts[2].x, 4) && near(verts[2].y, 0), 'fill corner at the top-right, (width,0)')
+  const xs = verts.slice(0, 4).map((v) => v.x)
+  const ys = verts.slice(0, 4).map((v) => v.y)
+  assert(Math.min(...xs) === 0 && Math.max(...xs) === 4, 'the fill starts at x=0 and runs right')
+  assert(Math.max(...ys) === 0 && Math.min(...ys) === -2, 'and starts at y=0 and hangs downward')
   assert(verts.slice(4).every((v) => !v.isFill), 'stroke verts are never marked isFill (no gradient on stroke)')
   assert(rect.fill === fill && rect.stroke === stroke, 'the shape retains the fill/stroke colors it was constructed with')
 
@@ -119,14 +136,15 @@ assert(
   // via the general engine. The concave (inner) side is the documented simplification
   // (fills to the original path point rather than a true inner-miter intersection), so
   // it lands at each edge's own per-normal offset instead of a symmetric diagonal point.
-  assert(hasVertexNear(verts, -2.2, -1.2), 'outer miter corner at edge + sw/2 (matches the old formula)')
-  assert(hasVertexNear(verts, 1.8, 1.0), 'inner offset along one edge at the (hw,hh) corner')
-  assert(hasVertexNear(verts, 2.0, 0.8), 'inner offset along the other edge at the (hw,hh) corner')
+  // Corners are (0,0), (4,0), (4,-2), (0,-2) - the rectangle hangs from its origin.
+  assert(hasVertexNear(verts, -0.2, -2.2), 'outer miter corner at the bottom-left corner + sw/2 on both axes')
+  assert(hasVertexNear(verts, 3.8, 0.0), 'inner offset along one edge at the top-right corner')
+  assert(hasVertexNear(verts, 4.0, -0.2), 'inner offset along the other edge at the top-right corner')
 }
 
 // --- fill-only rect: 4 verts, 2 triangles (stroke path untouched) ---
 {
-  const rect = new Rect({ width: 3, height: 3, fill: [1, 1, 1, 1], strokeWidth: 0 })
+  const rect = centredRect({ width: 3, height: 3, fill: [1, 1, 1, 1], strokeWidth: 0 })
   const { verts, tris } = capture(rect)
   assert(verts.length === 4, 'fill-only rect has 4 vertices')
   assert(tris.length === 2, 'fill-only rect has 2 triangles')
@@ -171,18 +189,20 @@ assert(
 {
   const rect = new Rect({ x: 5, y: -3, width: 10, height: 10, rotation: 0 })
   const world = rect.worldMatrix()
-  // A local corner at (w/2, h/2) = (5,5) maps to center + corner (translation only).
-  const p = world.transformPoint(new Vector3(5, 5, 0))
-  assert(near(p.x, 10) && near(p.y, 2), 'no scale: corner offset is unscaled (5,5)->(10,2)')
+  // The rectangle's top-right corner is at (width, 0) in its own frame; with no scale or
+  // offset in play, the matrix should do nothing to it but translate.
+  const p = world.transformPoint(new Vector3(10, 0, 0))
+  assert(near(p.x, 15) && near(p.y, -3), 'no scale: corner offset is unscaled (10,0)->(15,-3)')
 }
 
 // --- scaleX/scaleY scale local geometry about the shape's own local origin ---
 {
   const rect = new Rect({ x: 100, y: 50, width: 10, height: 10, scaleX: 2, scaleY: 3 })
   const world = rect.worldMatrix()
-  // Local corner (5,5) scales to (10,15), then translates by (x,y).
-  const p = world.transformPoint(new Vector3(5, 5, 0))
-  assert(near(p.x, 110) && near(p.y, 65), 'scaleX/scaleY scale local geometry independently')
+  // The bottom-right corner is at (10,-10) in the rectangle's own frame; scaling takes it
+  // to (20,-30), and the position then translates it.
+  const p = world.transformPoint(new Vector3(10, -10, 0))
+  assert(near(p.x, 120) && near(p.y, 20), 'scaleX/scaleY scale local geometry independently')
 }
 
 // --- offsetX/offsetY shift the pivot (applied before scale/rotation, translation-only
@@ -245,7 +265,7 @@ assert(
 
 // --- a shape defaults to a solid color fill with empty gradient stops ---
 {
-  const rect = new Rect({ fill: [0.5, 0.5, 0.5, 1] })
+  const rect = centredRect({ fill: [0.5, 0.5, 0.5, 1] })
   assert(rect.fillPriority === 'color', 'default fillPriority is color')
   assert(rect.fillLinearGradientColorStops.length === 0, 'default linear stops are empty')
   assert(rect.fillRadialGradientColorStops.length === 0, 'default radial stops are empty')
@@ -268,7 +288,7 @@ assert(
 // --- stroke/lineJoin/lineCap/miterLimit live on Shape itself now, one declaration
 //     shared by every concrete shape instead of each redeclaring the same fields ---
 {
-  const rect = new Rect()
+  const rect = centredRect()
   const circle = new Circle()
   const polyline = new Polyline({ points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })
   const path = new Path()

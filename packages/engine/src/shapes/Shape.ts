@@ -36,6 +36,22 @@
 // affects buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/
 // lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
 //
+// WHERE THE ORIGIN SITS. A shape's local origin is the point that lands at (x, y), and
+// which point of the shape that is depends on the shape:
+//
+//   - Elliptical shapes - Circle, and anything else defined by a radius - are CENTRED on
+//     it. A radius is measured from the middle, so any other origin would be a second,
+//     contradictory reference point.
+//   - Everything else - Rect, Image, Text, VectorText - hangs from its TOP-LEFT corner,
+//     extending right and downward. The scene is y-up, so such a shape spans x in
+//     [0, width] and y in [-height, 0] in its own local space.
+//   - Polyline and Path have no implied origin at all: their points and contours are
+//     already local coordinates, placed wherever they were authored.
+//
+// The practical consequence is the pivot. Rotation and scale are about the local origin,
+// so a Circle turns about its middle while a Rect turns about its corner. To spin a Rect
+// about its own centre, give it `offsetX: width / 2, offsetY: -height / 2`.
+//
 // localMatrix() composes translate(x, y) * rotate(rotation) * skew * scale(scaleX,
 // scaleY) * translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied
 // first, to the shape's local geometry) before skew/scale/rotation are applied about

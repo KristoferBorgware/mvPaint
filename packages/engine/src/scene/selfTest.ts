@@ -11,7 +11,7 @@ import { Quaternion } from '../math/Quaternion'
 import { Transform } from '../math/Transform'
 import { Vector3 } from '../math/Vector3'
 import { Circle } from '../shapes/Circle'
-import { Rect } from '../shapes/Rect'
+import { Rect , type RectOptions } from '../shapes/Rect'
 import { Text } from '../shapes/Text'
 import { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
@@ -24,6 +24,18 @@ function assert(cond: boolean, msg: string): void {
   count++
   if (!cond) throw new Error(`[scene] self-test FAILED: ${msg}`)
 }
+
+/**
+ * A Rect CENTRED on (x, y). A Rect's own origin is its top-left corner (see Shape's
+ * header), so this applies the pivot offset that puts its middle back on the position -
+ * which is the frame the geometry below is written in.
+ */
+const centredRect = (options: RectOptions = {}): Rect =>
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+
+const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
+
 const eq = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i])
 
@@ -102,18 +114,26 @@ class TransformGroup extends Container {
 
 // --- picking: hitTestShape tests against the shape's own tessellated triangles ---
 {
-  const rect = new Rect({ x: 100, y: 50, width: 40, height: 20 })
+  const rect = centredRect({ x: 100, y: 50, width: 40, height: 20 })
   assert(hitTestShape(rect, 100, 50), 'rect center hits')
   assert(hitTestShape(rect, 119, 59), 'just inside rect corner hits')
   assert(!hitTestShape(rect, 121, 50), 'just outside rect on x misses')
   assert(!hitTestShape(rect, 0, 0), 'far outside rect misses')
 
-  const bounds = shapeLocalBounds(rect)
-  assert(bounds.valid(), 'rect local bounds valid')
-  assert(
-    Math.abs(bounds.min.x + 20) < 1e-6 && Math.abs(bounds.max.x - 20) < 1e-6,
-    'rect local bounds span its own half-width, centered on local origin',
-  )
+  // The two origin conventions, in the bounds themselves. A Rect hangs from its top-left
+  // corner, so unshifted it spans [0, width] and [-height, 0]; a Circle is centred, so it
+  // spans its radius each way. (The rect above is pivoted to its middle, which moves where
+  // it lands in the world but never what it emits in its own frame.)
+  const cornered = shapeLocalBounds(new Rect({ x: 100, y: 50, width: 40, height: 20 }))
+  assert(cornered.valid(), 'rect local bounds valid')
+  assert(near(cornered.min.x, 0) && near(cornered.max.x, 40), 'a rect spans [0, width] from its local origin')
+  assert(near(cornered.max.y, 0) && near(cornered.min.y, -20), 'and hangs down to -height, the scene being y-up')
+
+  // The circle is a polygon, so its bounds sit inside the true radius by the flattening
+  // tolerance - what matters here is that they straddle the origin rather than start at it.
+  const centred = shapeLocalBounds(new Circle({ x: 100, y: 50, radius: 20 }))
+  assert(near(centred.min.x, -20, 0.05) && near(centred.max.x, 20, 0.05), 'a circle spans its radius either side of its local origin')
+  assert(near(centred.min.y, -centred.max.y, 1e-9), 'centred on it in y as well')
 
   const circle = new Circle({ x: 0, y: 0, radius: 30 })
   assert(hitTestShape(circle, 0, 0), 'circle center hits')
@@ -138,7 +158,7 @@ class TransformGroup extends Container {
 
   // A 90deg rotation swaps which world axis lines up with the rect's long (width) side:
   // local = R(-rotation) * (world - center), so R(-90deg) maps (x,y) -> (y,-x).
-  const rotated = new Rect({ x: 0, y: 0, width: 40, height: 10, rotation: Math.PI / 2 })
+  const rotated = centredRect({ x: 0, y: 0, width: 40, height: 10, rotation: Math.PI / 2 })
   assert(hitTestShape(rotated, 0, 19), 'rotated rect hits along its now-vertical long axis')
   assert(!hitTestShape(rotated, 19, 0), 'rotated rect misses where the unrotated rect would have hit')
 }
@@ -146,8 +166,8 @@ class TransformGroup extends Container {
 // --- picking: pickNode finds the topmost hit and respects visible/pickable ---
 {
   const scene = new Scene()
-  const back = scene.root.addChild(new Rect({ name: 'back', x: 0, y: 0, width: 100, height: 100 }))
-  const front = scene.root.addChild(new Rect({ name: 'front', x: 20, y: 0, width: 60, height: 60 }))
+  const back = scene.root.addChild(centredRect({ name: 'back', x: 0, y: 0, width: 100, height: 100 }))
+  const front = scene.root.addChild(centredRect({ name: 'front', x: 20, y: 0, width: 60, height: 60 }))
 
   assert(pickNode(scene, -40, 0) === back, 'point over only the back rect picks it')
   assert(pickNode(scene, 20, 0) === front, 'overlapping point picks the later (topmost) node')
@@ -165,9 +185,9 @@ class TransformGroup extends Container {
 // --- zIndex: overrides insertion order for both stacking (collectZOrder) and picking ---
 {
   const scene = new Scene()
-  const early = scene.root.addChild(new Rect({ name: 'early', x: 0, y: 0, width: 100, height: 100 }))
-  const late = scene.root.addChild(new Rect({ name: 'late', x: 0, y: 0, width: 100, height: 100 }))
-  assert((new Rect()).zIndex === 0, 'zIndex defaults to 0')
+  const early = scene.root.addChild(centredRect({ name: 'early', x: 0, y: 0, width: 100, height: 100 }))
+  const late = scene.root.addChild(centredRect({ name: 'late', x: 0, y: 0, width: 100, height: 100 }))
+  assert((centredRect()).zIndex === 0, 'zIndex defaults to 0')
 
   // Added later (would normally paint on top), but a lower zIndex sends it to the back.
   late.zIndex = -1
@@ -245,14 +265,14 @@ class TransformGroup extends Container {
 {
   const view = new AABB(new Vector3(-50, -50, 0), new Vector3(50, 50, 0))
 
-  const inside = new Rect({ x: 0, y: 0, width: 10, height: 10 })
+  const inside = centredRect({ x: 0, y: 0, width: 10, height: 10 })
   assert(isShapeOnScreen(inside, view), 'a shape inside the view rectangle is on screen')
 
-  const farAway = new Rect({ x: 1000, y: 0, width: 10, height: 10 })
+  const farAway = centredRect({ x: 1000, y: 0, width: 10, height: 10 })
   assert(!isShapeOnScreen(farAway, view), 'a shape far outside the view rectangle is culled')
 
   // Spans x in [35,55] - the view rectangle ends at x=50, so this still overlaps.
-  const straddling = new Rect({ x: 45, y: 0, width: 20, height: 20 })
+  const straddling = centredRect({ x: 45, y: 0, width: 20, height: 20 })
   assert(isShapeOnScreen(straddling, view), 'a shape straddling the view edge still overlaps, not culled')
 
   // Position is a per-frame transform, not baked geometry - moving a shape changes
@@ -269,9 +289,9 @@ class TransformGroup extends Container {
 // --- marquee: nodesInBox picks up everything a dragged rectangle meets ---
 {
   const scene = new Scene()
-  const left = scene.root.addChild(new Rect({ name: 'left', x: -100, y: 0, width: 40, height: 40 }))
-  const right = scene.root.addChild(new Rect({ name: 'right', x: 100, y: 0, width: 40, height: 40 }))
-  const far = scene.root.addChild(new Rect({ name: 'far', x: 0, y: 900, width: 40, height: 40 }))
+  const left = scene.root.addChild(centredRect({ name: 'left', x: -100, y: 0, width: 40, height: 40 }))
+  const right = scene.root.addChild(centredRect({ name: 'right', x: 100, y: 0, width: 40, height: 40 }))
+  const far = scene.root.addChild(centredRect({ name: 'far', x: 0, y: 900, width: 40, height: 40 }))
 
   // A rectangle over just the left shape takes only it - and the drag's corners may be
   // given in any order, since a marquee can be pulled in any direction.
