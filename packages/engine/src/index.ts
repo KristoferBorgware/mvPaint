@@ -34,6 +34,7 @@ export * from './shapes/Circle'
 export * from './shapes/Path'
 export * from './shapes/Polyline'
 export * from './shapes/Rect'
+export * from './shapes/Image'
 export * from './shapes/Text'
 export * from './shapes/TextBlock'
 export * from './shapes/VectorText'
@@ -42,6 +43,9 @@ export type { RGBA, Point2, FillPriority, GradientStop, MeshMaterial, MeshSink }
 export type { LineJoin, LineCap } from './render/stroke'
 
 export * from './svg/loadSvg'
+
+export * from './image/ImageTexture'
+export * from './image/imageUv'
 
 export * from './text/FontAtlas'
 export * from './text/layout'

@@ -51,6 +51,10 @@ export interface ExampleScene {
    * restores it on switching to any scene that doesn't set this.
    */
   disableShadows?: boolean
-  /** Populates `scene.root`. The root is already emptied of the previous scene's content. */
-  build: (scene: Scene) => SceneContent
+  /**
+   * Populates `scene.root`. The root is already emptied of the previous scene's content.
+   * `device` is there for the one thing a scene has to create for itself - an ImageTexture,
+   * since only the scene knows which pictures it wants; scenes without images ignore it.
+   */
+  build: (scene: Scene, device: GPUDevice) => SceneContent
 }

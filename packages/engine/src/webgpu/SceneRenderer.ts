@@ -38,6 +38,9 @@ import { ShadowBatcher } from '../render/ShadowBatcher'
 import { createShadowPipeline } from '../render/ShadowPipeline'
 import { TextBatcher } from '../render/TextBatcher'
 import { createTextPipeline } from '../render/TextPipeline'
+import { createImagePipeline } from '../render/ImagePipeline'
+import { ImageBatcher } from '../render/ImageBatcher'
+import { Image } from '../shapes/Image'
 import { FontBook } from '../text/FontAtlas'
 import { createGpuContext } from '../systems/GpuContext'
 import { CanvasResizer } from '../systems/CanvasResizer'
@@ -72,6 +75,8 @@ export class SceneRenderer {
 
   private readonly textPipeline: GPURenderPipeline
   private readonly textBatcher: TextBatcher
+  private readonly imagePipeline: GPURenderPipeline
+  private readonly imageBatcher: ImageBatcher
   private readonly fontBook: FontBook
 
   private readonly shadowAtlas: ShadowAtlas
@@ -101,10 +106,12 @@ export class SceneRenderer {
   private shadowsEnabled = true
   private geometryDirty = true
   private textGeometryDirty = true
+  private imageGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
   // set - so draw() can tell whether culling's output actually changed this frame.
   private visibleMeshShapes: readonly Shape[] = []
   private visibleTexts: readonly Text[] = []
+  private visibleImages: readonly Image[] = []
   // Last frame's gather-phase output (traversal, depth assignment, culling, overlay
   // split), reused verbatim while cullingEnabled and zSortEnabled are both off and
   // nothing has been marked dirty since - see draw()'s canReuseGather.
@@ -113,6 +120,7 @@ export class SceneRenderer {
     depths: ReadonlyMap<Shape, number>
     meshShapes: readonly Shape[]
     texts: readonly Text[]
+    images: readonly Image[]
     visibleMeshShapes: readonly Shape[]
     visibleMeshDepths: readonly number[]
     overlayStart: number
@@ -138,6 +146,13 @@ export class SceneRenderer {
     const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
     this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
     this.textBatcher = new TextBatcher(device, objectLayout)
+
+    // Image lane: the same shape as the text lane - its own pipeline over a vertex with a
+    // texture coordinate, sharing group(0)/group(1) and the very same group(2) layout, since
+    // a font atlas and a picture are both just a sampled float texture.
+    const imagePipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
+    this.imagePipeline = createImagePipeline(device, format, SAMPLE_COUNT, imagePipelineLayout)
+    this.imageBatcher = new ImageBatcher(device, objectLayout)
 
     // Shadow lane: blurred silhouettes are baked once into a shared atlas (see
     // render/ShadowAtlas.ts), then drawn as one quad each in a single call. Text is not
@@ -254,6 +269,12 @@ export class SceneRenderer {
     this.textGeometryDirty = true
   }
 
+  /** Force an image-lane rebuild on the next draw (after adding/removing an Image, or
+   * changing one's texture, crop, tiling or flip - none of which is a per-frame value). */
+  markImageGeometryDirty(): void {
+    this.imageGeometryDirty = true
+  }
+
   /**
    * Re-bakes any stale shadow silhouette into the shadow atlas. Must run on the SAME
    * command encoder BEFORE the main render pass opens, since baking needs render passes of
@@ -263,6 +284,9 @@ export class SceneRenderer {
   prepareShadows(encoder: GPUCommandEncoder): void {
     if (!this.shadowsEnabled) return
     const ordered = collectZOrder(this.scene, this.zSortEnabled)
+    // Images stay in: an Image emits its quad from buildGeometry() precisely so it has a
+    // silhouette to bake, even though the mesh lane does not DRAW it (see the split below).
+    // The shadow is the quad's, not the alpha channel's - see Image's header.
     const meshShapes = ordered.filter((s) => !(s instanceof Text))
     // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
     // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
@@ -293,12 +317,19 @@ export class SceneRenderer {
     // for a static scene. Reusing last frame's arrays instead of rebuilding them is what
     // lets a scene like the shape stress test skip tens of thousands of shapes' worth of
     // traversal and array-building on every frame it's just sitting there.
-    const canReuseGather = !this.cullingEnabled && !this.zSortEnabled && !this.geometryDirty && !this.textGeometryDirty && this.cachedGather !== null
+    const canReuseGather =
+      !this.cullingEnabled &&
+      !this.zSortEnabled &&
+      !this.geometryDirty &&
+      !this.textGeometryDirty &&
+      !this.imageGeometryDirty &&
+      this.cachedGather !== null
 
     let ordered: readonly Shape[]
     let depths: ReadonlyMap<Shape, number>
     let meshShapes: readonly Shape[]
     let visibleTexts: readonly Text[]
+    let visibleImages: readonly Image[]
     let visibleMeshShapes: readonly Shape[]
     let visibleMeshDepths: readonly number[]
     let overlayStart: number
@@ -309,6 +340,7 @@ export class SceneRenderer {
       depths = g.depths
       meshShapes = g.meshShapes
       visibleTexts = g.texts
+      visibleImages = g.images
       visibleMeshShapes = g.visibleMeshShapes
       visibleMeshDepths = g.visibleMeshDepths
       overlayStart = g.overlayStart
@@ -327,13 +359,18 @@ export class SceneRenderer {
       // alongside meshShapesLocal, parallel by position - see MeshBatcher.updateObjects for
       // why that's worth doing instead of a shape-keyed Map lookup per object.
       const texts: Text[] = []
+      const images: Image[] = []
       const meshShapesLocal: Shape[] = []
       const meshDepthsLocal: number[] = []
       for (let rank = 0; rank < orderedLocal.length; rank++) {
         const shape = orderedLocal[rank]
         const depth = depthForRank(rank, orderedLocal.length)
         depthsLocal.set(shape, depth)
+        // An Image has mesh geometry - that is what its shadow and its hit test are made
+        // of - but the image lane paints those pixels, so it is bucketed out of the mesh
+        // draw here rather than excluded from having geometry at all.
         if (shape instanceof Text) texts.push(shape)
+        else if (shape instanceof Image) images.push(shape)
         else {
           meshShapesLocal.push(shape)
           meshDepthsLocal.push(depth)
@@ -368,6 +405,8 @@ export class SceneRenderer {
         onScreenDepths = meshDepthsLocal
       }
       const visibleTextsLocal = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
+      // An image's quad IS its local bounds, so the ordinary shape cull applies unchanged.
+      const visibleImagesLocal = viewBounds ? images.filter((i) => isShapeOnScreen(i, viewBounds)) : images
 
       // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
       // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
@@ -407,6 +446,7 @@ export class SceneRenderer {
       depths = depthsLocal
       meshShapes = onScreen
       visibleTexts = visibleTextsLocal
+      visibleImages = visibleImagesLocal
       visibleMeshShapes = visibleMeshShapesLocal
       visibleMeshDepths = visibleMeshDepthsLocal
       overlayStart = overlayStartLocal
@@ -416,6 +456,7 @@ export class SceneRenderer {
         depths: depthsLocal,
         meshShapes: onScreen,
         texts: visibleTextsLocal,
+        images: visibleImagesLocal,
         visibleMeshShapes: visibleMeshShapesLocal,
         visibleMeshDepths: visibleMeshDepthsLocal,
         overlayStart: overlayStartLocal,
@@ -435,6 +476,18 @@ export class SceneRenderer {
     this.textBatcher.updateObjects(depths)
     pass.setPipeline(this.textPipeline)
     this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
+
+    // Image lane. Its geometry only changes when the visible SET does, or when a node's
+    // texture/crop/tiling/flip does - all of which come with an explicit dirty mark, since
+    // none of them is a per-frame value the way a transform or a tint is.
+    if (this.imageGeometryDirty || !sameMembers(visibleImages, this.visibleImages)) {
+      this.imageBatcher.rebuild(visibleImages)
+      this.imageGeometryDirty = false
+    }
+    this.visibleImages = visibleImages
+    this.imageBatcher.updateObjects(depths as ReadonlyMap<Image, number>)
+    pass.setPipeline(this.imagePipeline)
+    this.imageBatcher.draw(pass, this.frameUniforms.bindGroup)
 
     // Shadows draw AFTER the content lanes, depth-tested but never depth-writing (see
     // ShadowPipeline). That ordering is what makes them stack: by the time a shadow is
@@ -474,6 +527,7 @@ export class SceneRenderer {
   destroy(): void {
     this.batcher.destroy()
     this.textBatcher.destroy()
+    this.imageBatcher.destroy()
     this.shadowAtlas.destroy()
     this.shadowBatcher.destroy()
     this.fontBook.destroy()
@@ -509,6 +563,10 @@ export interface SceneRendererHandle {
   nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
+  markImageGeometryDirty: () => void
+  /** The GPU device, for building an ImageTexture - the one resource an application has to
+   * create for itself, since only it knows which pictures the scene wants. */
+  device: GPUDevice
   destroy: () => void
 }
 
@@ -522,9 +580,11 @@ export interface CreateSceneRendererOptions {
   onDeviceError?: (message: string) => void
   /**
    * Called once after the scene and camera are ready, before the first frame - build the
-   * initial scene content here (shapes, text, camera framing).
+   * initial scene content here (shapes, text, camera framing). `device` is passed because
+   * this runs before the handle exists, and content with images needs one to build a
+   * texture from.
    */
-  populate?: (scene: Scene, camera: OrthographicCamera) => void
+  populate?: (scene: Scene, camera: OrthographicCamera, device: GPUDevice) => void
   /** Called every frame, before the draw - e.g. to animate scene content. */
   onFrame?: (dt: number) => void
 }
@@ -564,7 +624,7 @@ export async function createSceneRenderer(
     }
   })
 
-  options.populate?.(scene.scene, scene.camera)
+  options.populate?.(scene.scene, scene.camera, gpu.device)
 
   const resizer = new CanvasResizer(canvas)
 
@@ -637,6 +697,10 @@ export async function createSceneRenderer(
     markTextGeometryDirty() {
       scene.markTextGeometryDirty()
     },
+    markImageGeometryDirty() {
+      scene.markImageGeometryDirty()
+    },
+    device: gpu.device,
     destroy() {
       frameRenderer.stop()
       scene.destroy()

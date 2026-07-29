@@ -1,6 +1,7 @@
 // The example-scene registry. The picker lists whatever is in here, in this order, and the
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
+import { buildImageScene } from './imageScene'
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
@@ -37,6 +38,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
       'The same runs and shaping drawn as tessellated glyph outlines through the mesh lane instead of an MSDF atlas - with real blurred shadows and per-glyph picking. Fetches the TTFs on first open.',
     prepare: prepareVectorTextScene,
     build: buildVectorTextScene,
+  },
+  {
+    id: 'images',
+    title: 'Images',
+    description:
+      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, and zIndex against ordinary shapes.',
+    build: buildImageScene,
   },
   {
     id: 'shadows',
