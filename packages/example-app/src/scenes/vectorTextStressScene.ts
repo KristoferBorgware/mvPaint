@@ -18,7 +18,7 @@
 // should do.
 
 import { Text, VectorText, type Scene, type VectorFontBook, loadDefaultVectorFonts } from '@mvpaint/engine'
-import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT, WORDS_PER_PAGE } from './loremStress'
+import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT } from './loremStress'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -42,7 +42,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
       name: 'vector-stress-title',
       x: -PAGE_WIDTH,
       y: layout.gridTop + 70,
-      text: `Outline text: ${PAGE_COUNT} pages, ${PAGE_COUNT * WORDS_PER_PAGE} words, no atlas`,
+      text: `Outline text: ${PAGE_COUNT} pages, ${layout.wordCount.toLocaleString()} words, no atlas`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
   )
