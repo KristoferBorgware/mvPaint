@@ -37,9 +37,8 @@
 // replay, a different event source - without a DOM.
 
 import type { PickableNode } from '../scene/picking'
-import type { Node } from '../shapes/Node'
+import type { Node, NodeTransform } from '../shapes/Node'
 import type { Shape } from '../shapes/Shape'
-import type { NodeTransform } from '../shapes/nodeTransform'
 import { draggableGroup, type TransformableNode } from '../shapes/Group'
 import type { Transformer } from '../shapes/Transformer'
 import { Vector2 } from '../math/Vector2'

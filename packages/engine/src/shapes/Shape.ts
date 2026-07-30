@@ -1,11 +1,15 @@
 // Shape - the base for every drawable scene-graph node (Rect, Circle, Polyline, Path,
-// Text, VectorText). Carries the full common vocabulary every drawable shares: transform
-// (position, scale, rotation, pivot offset), visibility/pickability, stacking order (zIndex), a
-// settable size (width/height), and the complete fill/stroke styling API (flat color or
-// gradient fill; stroke color/width/join/cap/miter limit), all in one place rather than
+// Text, VectorText). Carries everything that affects RENDERING and is common to every
+// drawable: a settable size (width/height), visibility/pickability, stacking order
+// (zIndex), the complete fill/stroke styling API (flat color or gradient fill; stroke
+// color/width/join/cap/miter limit) and the shadow settings - all in one place rather than
 // split by how a shape happens to be drawn. Concrete shapes only add what's genuinely
-// specific to them (Rect: nothing beyond a default size; Circle: radius; Polyline:
-// points; Path: contours; Text/VectorText: runs and block layout).
+// specific to them (Rect: corner rounding; Circle: radius; Polyline: points; Path:
+// contours; Text/VectorText: runs and block layout).
+//
+// The TRANSFORM is not here: it lives on Node (see that file's header), because placing
+// yourself in your parent is not a drawing concern and a Group does it while drawing
+// nothing. x/y/rotation/scale/skew/offset are inherited and behave identically on both.
 //
 // tessellate() caches its output (a list of local-space vertices + triangles) and
 // replays it into whatever sink is asking - the mesh batcher's rebuild - rather than
@@ -52,11 +56,6 @@
 // so a Circle turns about its middle while a Rect turns about its corner. To spin a Rect
 // about its own centre, give it `offsetX: width / 2, offsetY: -height / 2`.
 //
-// localMatrix() composes translate(x, y) * rotate(rotation) * skew * scale(scaleX,
-// scaleY) * translate(-offsetX, -offsetY): offset shifts the shape's own pivot (applied
-// first, to the shape's local geometry) before skew/scale/rotation are applied about
-// that pivot, then the result is placed at (x, y).
-//
 // The shadow* properties mirror the canvas 2D shadow model: shadowColor, shadowBlur,
 // shadowOffsetX/Y, shadowOpacity, shadowEnabled, shadowForStrokeEnabled - plus
 // shadowSpread, which canvas has no equivalent for and which is borrowed from CSS
@@ -78,24 +77,12 @@
 
 import { AABB } from '../math/AABB'
 import { bumpMeshGeometryEpoch } from './contentEpoch'
-import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import type { FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
-import { Node } from './Node'
-import {
-  LocalMatrixCache,
-  TRANSFORM_ATTR_KEYS,
-  applyTransformOptions,
-  captureTransform,
-  restoreTransform,
-  type NodeTransform,
-  type NodeTransformOptions,
-} from './nodeTransform'
+import { Node, type NodeOptions } from './Node'
 
-export interface ShapeOptions extends NodeTransformOptions {
-  name?: string
-  id?: string
+export interface ShapeOptions extends NodeOptions {
   width?: number
   height?: number
   /**
@@ -149,24 +136,6 @@ export abstract class Shape extends Node {
    */
   draggable = true
 
-  x = 0
-  y = 0
-  scaleX = 1
-  scaleY = 1
-  /** Radians, about +Z. */
-  rotation = 0
-  offsetX = 0
-  offsetY = 0
-  /**
-   * Shear: skewX slides x by `skewX` per unit of y, and
-   * skewY slides y by `skewY` per unit of x - so the matrix contributed is
-   * [[1, skewX], [skewY, 1]]. Applied between rotation and scale (see localMatrix), which
-   * is what lets an arbitrary affine transform be represented exactly: rotate+skew+scale
-   * spans every invertible 2x2, so a transformer can non-uniformly scale a ROTATED shape
-   * without the result having to be approximated.
-   */
-  skewX = 0
-  skewY = 0
   zIndex = 0
   /**
    * When true the shape is drawn in the overlay pass, after everything else and without
@@ -262,8 +231,7 @@ export abstract class Shape extends Node {
   private geometryVersionCounter = 0
 
   constructor(options: ShapeOptions = {}) {
-    super(options.name, options.id)
-    applyTransformOptions(this, options)
+    super(options)
     this.width = options.width ?? 0
     this.height = options.height ?? 0
     this.zIndex = options.zIndex ?? 0
@@ -291,7 +259,6 @@ export abstract class Shape extends Node {
       'visible',
       'pickable',
       'draggable',
-      ...TRANSFORM_ATTR_KEYS,
       'zIndex',
       'overlay',
       'shadowColor',
@@ -322,12 +289,6 @@ export abstract class Shape extends Node {
     ]
   }
 
-  private readonly localCache = new LocalMatrixCache()
-
-  override localMatrix(): Matrix4x4 {
-    return this.localCache.matrixFor(this)
-  }
-
   /**
    * Whether this shape casts a shadow at all - the same test the canvas library uses:
    * enabled, not fully transparent, and at least one shadow field actually set (a shadow
@@ -340,22 +301,6 @@ export abstract class Shape extends Node {
       this.shadowColor[3] !== 0 &&
       (this.shadowBlur !== 0 || this.shadowSpread !== 0 || this.shadowOffsetX !== 0 || this.shadowOffsetY !== 0)
     )
-  }
-
-  /**
-   * Every field localMatrix() reads, captured together so a gesture can restore the node
-   * exactly as it was. Enumerating them by hand at each call site is what makes adding a
-   * new transform field silently break gestures: a partial restore leaves the previous
-   * move's value behind, and the next delta compounds onto it instead of replacing it.
-   * Keeping the list in one place is the point.
-   */
-  captureTransform(): NodeTransform {
-    return captureTransform(this)
-  }
-
-  /** Puts the node back exactly as captureTransform() found it. */
-  restoreTransform(t: NodeTransform): void {
-    restoreTransform(this, t)
   }
 
   /**

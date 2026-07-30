@@ -1,8 +1,14 @@
 // Node - the scene-graph base (Node → Container → Shape). A Node has an id, a name
-// (space-separated tags), a parent link, an overridable localMatrix() transform seam
-// (identity by default), and world-transform composition. It has NO children of its own -
-// only Container holds children - but traversal/search live here via the eachChild() seam
-// so any Node can be walked uniformly (a leaf just yields itself).
+// (space-separated tags), a parent link, its own 2D TRANSFORM, and world-transform
+// composition. It has NO children of its own - only Container holds children - but
+// traversal/search live here via the eachChild() seam so any Node can be walked uniformly
+// (a leaf just yields itself).
+//
+// The transform lives here rather than on Shape because placing yourself in your parent is
+// not a drawing concern: a Group places the things inside it and draws nothing at all, and
+// a group and a shape have to compose IDENTICALLY or the same gesture would move them
+// differently. Shape adds what actually affects rendering - size, fill, stroke, shadow,
+// stacking order - on top of this.
 //
 // nodeName/nodeType plus matches()/find()/findOne()/findAncestor(s)() implement CSS-like
 // selectors: '#foo' by id, '.foo' by name, and a bare word by nodeName (the concrete
@@ -35,6 +41,8 @@
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
 import { Matrix4x4 } from '../math/Matrix4x4'
+import { Quaternion } from '../math/Quaternion'
+import { Vector3 } from '../math/Vector3'
 import {
   cloneNodeEvent,
   createNodeEvent,
@@ -57,9 +65,45 @@ interface ListenerEntry {
 /** A selector string (see Node.matches) or a predicate called directly with the node. */
 export type Selector = string | ((node: Node) => boolean)
 
-// A Node with no transform of its own (the base localMatrix()) never changes, so every
-// such node can share one identity instance instead of each allocating its own every call.
-const IDENTITY = Matrix4x4.identity()
+/** Every field localMatrix() reads - a complete transform snapshot. See captureTransform. */
+export interface NodeTransform {
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+  skewX: number
+  skewY: number
+  offsetX: number
+  offsetY: number
+}
+
+/** What any node can be constructed with. Subclass option types extend this. */
+export interface NodeOptions {
+  name?: string
+  id?: string
+  x?: number
+  y?: number
+  scaleX?: number
+  scaleY?: number
+  /** Radians, about +Z. */
+  rotation?: number
+  offsetX?: number
+  offsetY?: number
+  /** Shear: x shifts by skewX per unit y. See Node.skewX. */
+  skewX?: number
+  /** Shear: y shifts by skewY per unit x. See Node.skewY. */
+  skewY?: number
+}
+
+/** [[1, skewX], [skewY, 1]]: x slides by skewX per unit y, y by skewY per unit x. */
+function skewMatrix(skewX: number, skewY: number): Matrix4x4 {
+  const m = Matrix4x4.identity()
+  // Column-major, so column 0 is (1, skewY) and column 1 is (skewX, 1).
+  m.m[1] = skewY
+  m.m[4] = skewX
+  return m
+}
 
 export class Node {
   /** Free-form, not required to be unique. Selector target: '#foo'. */
@@ -83,6 +127,30 @@ export class Node {
   /** When false, events neither fire on this node nor travel through it. See the header. */
   listening = true
 
+  // --- transform (see the header for what localMatrix() composes them into) ------------
+
+  x = 0
+  y = 0
+  scaleX = 1
+  scaleY = 1
+  /** Radians, about +Z. */
+  rotation = 0
+  /**
+   * The node's own pivot, in its local units. Applied FIRST, to the node's own contents,
+   * so skew/scale/rotation then act about that point rather than about the local origin.
+   */
+  offsetX = 0
+  offsetY = 0
+  /**
+   * Shear: skewX slides x by `skewX` per unit of y, and skewY slides y by `skewY` per unit
+   * of x - so the matrix contributed is [[1, skewX], [skewY, 1]]. Applied between rotation
+   * and scale, which is what lets an arbitrary affine transform be represented exactly:
+   * rotate+skew+scale spans every invertible 2x2, so a transformer can non-uniformly scale
+   * a ROTATED node without the result having to be approximated.
+   */
+  skewX = 0
+  skewY = 0
+
   // Allocated on the first on() call rather than in the constructor: most nodes in a large
   // scene never take a listener, and an empty Map each would be pure overhead per node.
   private listeners: Map<string, ListenerEntry[]> | null = null
@@ -99,9 +167,25 @@ export class Node {
   private cachedWorldLocal: Matrix4x4 | null = null
   private cachedWorldParent: Matrix4x4 | null = null
 
-  constructor(name = '', id = '') {
-    this.name = name
-    this.id = id
+  // localMatrix() is memoized the same way and for the same reason: a node that did not
+  // move since the last call hands back the SAME instance, which is what lets the world
+  // cache above (and the render lanes' object cache) short-circuit on identity. The cache
+  // object is reallocated only on a real change, not on every call.
+  private cachedLocal: (NodeTransform & { matrix: Matrix4x4 }) | null = null
+
+  constructor(options: NodeOptions | string = {}, id = '') {
+    const o = typeof options === 'string' ? { name: options, id } : options
+    this.name = o.name ?? ''
+    this.id = o.id ?? ''
+    this.x = o.x ?? 0
+    this.y = o.y ?? 0
+    this.scaleX = o.scaleX ?? 1
+    this.scaleY = o.scaleY ?? 1
+    this.rotation = o.rotation ?? 0
+    this.offsetX = o.offsetX ?? 0
+    this.offsetY = o.offsetY ?? 0
+    this.skewX = o.skewX ?? 0
+    this.skewY = o.skewY ?? 0
   }
 
   hasName(name: string): boolean {
@@ -124,7 +208,7 @@ export class Node {
   /** Attribute keys getAttr()/setAttr()/attrs expose on this node. Override to append the
    * subclass's own keys on top of super.attrKeys(). */
   protected attrKeys(): readonly string[] {
-    return ['id', 'name']
+    return ['id', 'name', 'x', 'y', 'scaleX', 'scaleY', 'rotation', 'offsetX', 'offsetY', 'skewX', 'skewY']
   }
 
   getAttr(key: string): unknown {
@@ -165,10 +249,85 @@ export class Node {
   }
 
   // --- spatial seam ---
-  // Local transform relative to the parent. The base contributes identity; concrete
-  // nodes (Shape, Camera, transform-bearing groups) override it.
+
+  /**
+   * This node's transform relative to its parent:
+   *
+   *   T(x, y) * R(rotation) * skew * S(scaleX, scaleY) * T(-offsetX, -offsetY)
+   *
+   * Read right to left, the order the contents experience: the pivot offset shifts them
+   * first, then skew/scale/rotation act about that pivot, then the result is placed at
+   * (x, y). Each step is skipped when it is the identity, so an unturned, unscaled node
+   * costs one translation rather than four multiplications.
+   *
+   * Overridable - a Camera replaces it with its own view math.
+   */
   localMatrix(): Matrix4x4 {
-    return IDENTITY
+    const c = this.cachedLocal
+    if (
+      c &&
+      c.x === this.x &&
+      c.y === this.y &&
+      c.rotation === this.rotation &&
+      c.scaleX === this.scaleX &&
+      c.scaleY === this.scaleY &&
+      c.skewX === this.skewX &&
+      c.skewY === this.skewY &&
+      c.offsetX === this.offsetX &&
+      c.offsetY === this.offsetY
+    ) {
+      return c.matrix
+    }
+
+    let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
+    if (this.rotation !== 0) {
+      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
+    }
+    if (this.skewX !== 0 || this.skewY !== 0) {
+      m = m.mul(skewMatrix(this.skewX, this.skewY))
+    }
+    if (this.scaleX !== 1 || this.scaleY !== 1) {
+      m = m.mul(Matrix4x4.scaling(new Vector3(this.scaleX, this.scaleY, 1)))
+    }
+    if (this.offsetX !== 0 || this.offsetY !== 0) {
+      m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
+    }
+    this.cachedLocal = { ...this.captureTransform(), matrix: m }
+    return m
+  }
+
+  /**
+   * Every field localMatrix() reads, captured together so a gesture can restore the node
+   * exactly as it was. Enumerating them by hand at each call site is what makes adding a
+   * new transform field silently break gestures: a partial restore leaves the previous
+   * move's value behind, and the next delta compounds onto it instead of replacing it.
+   * Keeping the list in one place is the point.
+   */
+  captureTransform(): NodeTransform {
+    return {
+      x: this.x,
+      y: this.y,
+      rotation: this.rotation,
+      scaleX: this.scaleX,
+      scaleY: this.scaleY,
+      skewX: this.skewX,
+      skewY: this.skewY,
+      offsetX: this.offsetX,
+      offsetY: this.offsetY,
+    }
+  }
+
+  /** Puts the node back exactly as captureTransform() found it. */
+  restoreTransform(t: NodeTransform): void {
+    this.x = t.x
+    this.y = t.y
+    this.rotation = t.rotation
+    this.scaleX = t.scaleX
+    this.scaleY = t.scaleY
+    this.skewX = t.skewX
+    this.skewY = t.skewY
+    this.offsetX = t.offsetX
+    this.offsetY = t.offsetY
   }
 
   // World transform: this node's local matrix composed with all ancestors'. Column-

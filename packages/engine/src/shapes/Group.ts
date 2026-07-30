@@ -37,21 +37,10 @@
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Container } from './Container'
-import { Node } from './Node'
-import {
-  LocalMatrixCache,
-  TRANSFORM_ATTR_KEYS,
-  applyTransformOptions,
-  captureTransform,
-  restoreTransform,
-  type NodeTransform,
-  type NodeTransformOptions,
-} from './nodeTransform'
+import { Node, type NodeOptions } from './Node'
 import { Shape } from './Shape'
 
-export interface GroupOptions extends NodeTransformOptions {
-  name?: string
-  id?: string
+export interface GroupOptions extends NodeOptions {
   /** Hide the whole subtree. Default true (shown). */
   visible?: boolean
   /** Does a drag on a shape inside this group move the group? Default true. */
@@ -80,41 +69,14 @@ export class Group extends Container {
   /** Whether a drag starting on a descendant moves this group. See the header. */
   draggable = true
 
-  x = 0
-  y = 0
-  scaleX = 1
-  scaleY = 1
-  /** Radians, about +Z. */
-  rotation = 0
-  offsetX = 0
-  offsetY = 0
-  /** Shear, applied between rotation and scale. See nodeTransform.ts. */
-  skewX = 0
-  skewY = 0
-
-  private readonly localCache = new LocalMatrixCache()
-
   constructor(options: GroupOptions = {}) {
-    super(options.name, options.id)
-    applyTransformOptions(this, options)
+    super(options)
     this.visible = options.visible ?? true
     this.draggable = options.draggable ?? true
   }
 
   protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'visible', 'draggable', ...TRANSFORM_ATTR_KEYS]
-  }
-
-  override localMatrix(): Matrix4x4 {
-    return this.localCache.matrixFor(this)
-  }
-
-  captureTransform(): NodeTransform {
-    return captureTransform(this)
-  }
-
-  restoreTransform(t: NodeTransform): void {
-    restoreTransform(this, t)
+    return [...super.attrKeys(), 'visible', 'draggable']
   }
 
   /**
@@ -163,9 +125,9 @@ export class Group extends Container {
 }
 
 /**
- * What a transformer can wrap and a gesture can move: something that places itself in its
- * parent. Both kinds carry the same nine transform fields and the same capture/restore
- * pair, which is all the gesture math ever touches (see transformerMath.ts).
+ * What a transformer can wrap and a gesture can move. Every Node carries a transform, so
+ * what narrows this to two kinds is having an EXTENT: a frame has to fit around something,
+ * and a bare Container or a Camera has nothing to measure.
  */
 export type TransformableNode = Shape | Group
 

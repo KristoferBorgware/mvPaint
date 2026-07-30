@@ -3,6 +3,11 @@
 // WebGPU-native, matching src/math. Extends Node, so a camera can live anywhere in
 // the scene graph and picks up a world transform from its ancestors.
 //
+// Where a camera LOOKS is eye/target/up, not the transform it inherits from Node. Nothing
+// reads a camera's own world matrix, so setting camera.x moves the node in the graph
+// without moving the view - eye and target are world positions and are what view() is built
+// from. Place a camera by writing those.
+//
 // view() is overridable so derived cameras (e.g. FreeFloatCamera) supply their own
 // orientation while sharing the projection. The `active` flag marks which camera the
 // scene renders through.

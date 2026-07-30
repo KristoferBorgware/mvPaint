@@ -1063,4 +1063,48 @@ function TWO_PI_PLUS(a: number): number {
   assert(group.rotation === 1, 'and are writable through setAttr')
 }
 
+// --- the transform belongs to Node, so every node in the graph has one -----------------
+//
+// Not just the drawables. A plain Node, a bare Container, a Group and a Shape all compose
+// the same matrix from the same nine fields - which is what lets a gesture move any of them
+// without asking what kind it is, and what makes a Group's placement identical to a Shape's
+// rather than merely similar.
+{
+  const composed = (n: Node) => n.localMatrix().m
+
+  const bare = new Node()
+  bare.x = 12
+  bare.y = -5
+  bare.rotation = 0.4
+  bare.scaleX = 2
+
+  const container = new Container()
+  const group = new Group()
+  const rect = new Rect({ width: 1, height: 1 })
+  for (const other of [container, group, rect]) other.restoreTransform(bare.captureTransform())
+
+  assert(composed(container).every((v, i) => near(v, composed(bare)[i])), 'a Container composes the same matrix a plain Node does')
+  assert(composed(group).every((v, i) => near(v, composed(bare)[i])), 'and so does a Group')
+  assert(composed(rect).every((v, i) => near(v, composed(bare)[i])), 'and a Shape - one implementation, not three that agree')
+
+  // The memoization is on Node too, so identity-keyed caching works for every kind.
+  const held = container.localMatrix()
+  assert(container.localMatrix() === held, 'an unmoved node hands back the same instance')
+  container.skewY = 0.1
+  assert(container.localMatrix() !== held, 'and a moved one does not')
+
+  // A transform reaches its children whatever kind of node is carrying it, because the
+  // composition is on the base class rather than on any one subclass.
+  const holder = new Container()
+  holder.x = 100
+  const child = holder.addChild(new Rect({ width: 10, height: 10 }))
+  assert(near(child.worldMatrix().transformPoint(new Vector3(0, 0, 0)).x, 100), "a plain Container's transform reaches its children")
+
+  // Every node exposes the transform as attributes, so a property inspector needs no
+  // per-class knowledge to drive one.
+  assert(bare.attrs.x === 12 && bare.attrs.skewY === 0, 'the transform is in every node\'s attrs')
+  bare.setAttr('y', 42)
+  assert(bare.y === 42, 'and is writable through setAttr')
+}
+
 console.log(`[shapes] self-test passed (${count} assertions)`)

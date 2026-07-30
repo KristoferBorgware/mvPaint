@@ -36,17 +36,18 @@ them at different moments.
 
 ## The scene graph and transforms
 
-`Node` (`shapes/Node.ts`) is a tree node: name, id, parent, children, event listeners.
-`Shape extends Node` (`shapes/Shape.ts`) adds everything drawable — position, size, rotation,
-scale, skew, pivot offset, zIndex, visibility, pickability, fill/stroke styling, shadow
-settings.
+`Node` (`shapes/Node.ts`) is a tree node: name, id, parent, children, event listeners — **and
+its own 2D transform**: position, rotation, scale, skew, pivot offset. Placing yourself in your
+parent is not a drawing concern, so it belongs to the base rather than to the drawable subclass.
 
-`Group extends Container` (`shapes/Group.ts`) is the other kind of node that places itself. It
-draws nothing and occupies no slot in any render lane; what it contributes is a matrix in the
-middle of the chain, which the composition below already handles, so a shape inside a group
-needs no special case anywhere downstream. Both kinds share one transform implementation
-(`shapes/nodeTransform.ts`) — a group and a shape must compose identically, or the same gesture
-would move them differently.
+`Shape extends Node` (`shapes/Shape.ts`) adds everything that affects **rendering**: size,
+zIndex, visibility, pickability, fill/stroke styling, shadow settings.
+
+`Group extends Container` (`shapes/Group.ts`) is the other kind of node worth placing. It draws
+nothing and occupies no slot in any render lane; what it contributes is a matrix in the middle
+of the chain, which the composition below already handles, so a shape inside a group needs no
+special case anywhere downstream. It inherits the same transform a shape does — the same
+gesture has to move both identically.
 
 ### The local matrix
 
