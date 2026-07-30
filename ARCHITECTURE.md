@@ -34,7 +34,7 @@ them at different moments.
 
 ---
 
-## 1. The scene graph and transforms
+## The scene graph and transforms
 
 `Node` (`shapes/Node.ts`) is a tree node: name, id, parent, children, event listeners.
 `Shape extends Node` (`shapes/Shape.ts`) adds everything drawable — position, size, rotation,
@@ -91,7 +91,7 @@ frame's instance, so the whole per-frame CPU cost collapses into pointer compari
 
 ---
 
-## 2. Geometry construction
+## Geometry construction
 
 ### The sink
 
@@ -137,7 +137,7 @@ to point-in-triangle tests — which is why a mousemove over a hovered shape red
 
 ---
 
-## 3. One frame, end to end
+## One frame, end to end
 
 `systems/FrameRenderer.ts` owns the loop and the boilerplate:
 
@@ -167,7 +167,7 @@ scope.
 
 ---
 
-## 4. The gather
+## The gather
 
 The first thing `SceneRenderer.draw()` does each frame, before any drawing.
 
@@ -208,7 +208,7 @@ re-traversing itself sixty times a second.
 
 ---
 
-## 5. The buffers
+## The buffers
 
 ### Frequency model (bind groups)
 
@@ -261,7 +261,7 @@ records, one per material, and its vertices pick within that block.
 
 ---
 
-## 6. The shaders
+## The shaders
 
 The vertex shader, in the mesh lane and in the same shape everywhere else:
 
@@ -283,7 +283,7 @@ so the gradient rotates and scales with the shape for nothing.
 
 ---
 
-## 7. The four lanes
+## The four lanes
 
 All four share group 0, the depth buffer, the sample count and the render pass. They differ
 only in vertex format and fragment maths.
@@ -307,7 +307,7 @@ every one of them under everything, which is only right for a single-layer scene
 
 ---
 
-## 8. What happens when a property changes
+## What happens when a property changes
 
 The most subtle part of the system, and the one most worth understanding before changing
 anything.
@@ -366,7 +366,85 @@ object buffer and its bind group. Expensive, and rare.
 
 ---
 
-## 9. Shadows
+## Why text repacks more often than shapes do
+
+The rule above is single: a rebuild is needed when a value **baked into the vertex buffer**
+changes, because everything in the object record is rewritten every frame anyway. What makes
+the two lanes feel so different is only *which* of their values sit where.
+
+```
+Shape (mesh):   position f32x2 · packedId u32                              12 B
+Text:           position f32x2 · uv f32x2 · color f32x4 · packedId u32     36 B
+```
+
+### Shape
+
+**Repacks** — everything `buildGeometry()` reads: `Circle.radius`; `Polyline.points`;
+`Path.contours` and `Path.filled`; `strokeWidth`, `lineJoin`, `lineCap`, `miterLimit`; a Rect's
+or Image's `width`/`height`. Toggling `visible` also repacks, though by a different route — an
+invisible shape never enters the ordered list at all (`scene/picking.ts`), so the visible set
+changes and `sameMembers` catches it without any epoch.
+
+**Free** — the transform (`x`, `y`, `rotation`, `scale`, `skew`, `offset`), `zIndex` via depth,
+`fill` and `stroke` colours, and every gradient parameter.
+
+### Text
+
+**Repacks** — very nearly everything: the string and its runs; `fontStyle`, `fontSize`,
+`letterSpacing`, `baselineShift`; `align`, `maxWidth`, `lineHeight`, `direction`, `orientation`,
+`textPath`; `underline`, `strikethrough` and `highlight`, which add and remove whole quads;
+`shadow` and `glow`, which add a duplicate copy of every glyph; faux italic, whose shear is
+baked into each corner by `quadCorner()`; and `color`, which is packed per vertex.
+
+**Free** — the node's transform, `zIndex` via depth, per-run gradient parameters, and
+`strokeColor`, `strokeWidth`, `distanceRange` and `dilate`.
+
+### The two inversions
+
+| | Shape | Text |
+| --- | --- | --- |
+| `strokeWidth` | **repacks** — the stroker emits real triangles for the outline | **free** — a distance threshold the fragment shader compares against: `obj.strokeWidth * screenPerWorld` |
+| fill colour | **free** — `fillColor` at byte 272 of the object record | **repacks** — packed into every vertex |
+
+Exactly opposite, on both. That is the point worth carrying away: the rule has nothing to do
+with what a property is called or how structural it feels. `strokeWidth` sounds geometric, and
+is, for a shape — but for text it is a number compared against a signed distance, so changing it
+costs four bytes. `color` sounds cosmetic, and is, for a shape — but for text it lives in the
+vertex stream, so changing it repacks the lane.
+
+### Why the difference exists at all
+
+A shape has **one geometry and one transform**. Every vertex of a rect is affected by `x` in
+exactly the same way, so `x` factors out of the vertex data into a single matrix the shader
+applies to all of them. The geometry is *invariant* under the transform, and that invariance is
+what makes the indirection possible in the first place.
+
+A text node has **many glyphs at many different places**, and those places are the output of
+shaping. There is no per-node value from which a shader could derive where glyph 47 sits.
+Change the font size and every glyph moves by a different amount; change the wrap width and some
+jump to another line. **The layout is the geometry.** So under a non-instanced design it has to
+be in the vertex stream.
+
+Put the other way round: for a shape, the thing that varies per frame is shared by all its
+vertices; for text, the thing that varies is different for every quad.
+
+`VectorText` has the same property for the same reason. It draws through the *mesh* lane, but
+its glyph outlines are baked, so re-shaping repacks the mesh buffer exactly as re-shaping
+repacks the text buffer.
+
+This is also why a missing rebuild signal went unnoticed for so long. The mesh lane's repack
+list is short and mostly one-time — few applications animate a circle's radius — while the text
+lane's is "nearly everything about the text", so any animated text content lands in it. The gap
+was invisible for the whole life of the mesh lane and surfaced the moment a scene animated a
+`textPath` offset.
+
+If the per-glyph placement were moved into a storage buffer and the quads drawn with
+instancing, re-shaping would land in the cheap per-frame path too, and the text lane would
+behave like the mesh lane in this respect. Nothing needs that today.
+
+---
+
+## Shadows
 
 Different from everything else, because a blurred silhouette cannot be computed per-fragment
 cheaply.
@@ -396,7 +474,7 @@ so a rotated shape's shadow still falls in the direction the notional light come
 
 ---
 
-## 10. A worked example
+## A worked example
 
 You write:
 
@@ -429,7 +507,7 @@ only for slot 37.
 
 ---
 
-## 11. Where to look
+## Where to look
 
 | Concern | Files |
 | --- | --- |
