@@ -265,6 +265,7 @@ export class MeshBatcher {
     this.vertexBuffer = null
     if (vtx.byteLength > 0) {
       this.vertexBuffer = this.device.createBuffer({
+        label: 'mesh-vertices',
         size: vtx.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
       })
@@ -275,6 +276,7 @@ export class MeshBatcher {
     this.indexBuffer = null
     if (idx.byteLength > 0) {
       this.indexBuffer = this.device.createBuffer({
+        label: 'mesh-indices',
         size: idx.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
       })
@@ -284,6 +286,7 @@ export class MeshBatcher {
     // Object storage buffer (min one slot so the binding is never zero-sized).
     this.objectBuffer?.destroy()
     this.objectBuffer = this.device.createBuffer({
+      label: 'mesh-objects',
       size: Math.max(1, this.objectCount) * OBJECT_STRIDE,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })

@@ -99,6 +99,7 @@ export class ShadowBatcher {
     this.vertexBuffer = null
     if (vtx.byteLength > 0) {
       this.vertexBuffer = this.device.createBuffer({
+        label: 'shadow-vertices',
         size: vtx.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
       })
@@ -109,6 +110,7 @@ export class ShadowBatcher {
     this.indexBuffer = null
     if (idx.byteLength > 0) {
       this.indexBuffer = this.device.createBuffer({
+        label: 'shadow-indices',
         size: idx.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
       })
@@ -117,6 +119,7 @@ export class ShadowBatcher {
 
     this.objectBuffer?.destroy()
     this.objectBuffer = this.device.createBuffer({
+      label: 'shadow-objects',
       size: Math.max(1, this.casters.length) * SHADOW_OBJECT_STRIDE,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })

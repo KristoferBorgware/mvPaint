@@ -196,9 +196,12 @@ export class SceneRenderer {
     this.textBatcher = new TextBatcher(device, objectLayout)
 
     // Image lane: the same shape as the text lane - its own pipeline over a vertex with a
-    // texture coordinate, sharing group(0)/group(1) and the very same group(2) layout, since
-    // a font atlas and a picture are both just a sampled float texture.
-    const imagePipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
+    // texture coordinate, sharing group(0)/group(1) and the same KIND of group(2), since a font
+    // atlas and a picture are both just a sampled float texture. Not the same layout, though:
+    // the text lane's group(2) is a 2d-array (one layer per font style, so all four draw at
+    // once), while a picture is a plain 2d.
+    const imageAtlasLayout = createAtlasBindGroupLayout(device)
+    const imagePipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, imageAtlasLayout)
     this.imagePipeline = createImagePipeline(device, format, SAMPLE_COUNT, imagePipelineLayout)
     this.imageBatcher = new ImageBatcher(device, objectLayout)
 

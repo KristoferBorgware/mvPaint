@@ -1,10 +1,13 @@
 // TextBatcher - the text lane's counterpart to MeshBatcher. It shapes every Text node into
 // glyph + decoration quads, packs them into shared vertex/index buffers, and records one
 // material per run (transform + fill/gradient + per-letter stroke) in a per-object storage
-// buffer. Quads are emitted in painter order; a run of consecutive quads that sample the same
-// atlas becomes one draw range, so a mixed-style paragraph draws in as few binds as possible.
-// Materials (static) are separated from the per-frame transform refresh, so moving or animating
-// a Text updates only the object buffer, never the geometry.
+// buffer. Materials (static) are separated from the per-frame transform refresh, so moving or
+// animating a Text updates only the object buffer, never the geometry.
+//
+// Quads are emitted in painter order and drawn as ONE range, whatever styles they mix. Every
+// Inter style shares a single texture_2d_array with a layer each, and a run's layer travels in
+// its object record (see text/FontAtlas.ts), so there is no per-atlas segmentation left to do:
+// this lane binds group(2) exactly once and issues exactly one drawIndexed per span of nodes.
 
 import type { Shape } from '../shapes/Shape'
 import type { Text } from '../shapes/Text'
@@ -14,6 +17,7 @@ import { quadCorner } from '../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
 import {
   TEXT_GLYPH_BIT,
+  TEXT_OBJECT_ATLAS_LAYER_OFFSET,
   TEXT_OBJECT_DEPTH_OFFSET,
   TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
@@ -33,12 +37,6 @@ import {
   TEXT_VERTEX_STRIDE,
 } from './textFormat'
 
-interface DrawRange {
-  atlasIndex: number
-  firstIndex: number
-  indexCount: number
-}
-
 interface ObjectRecord {
   node: Text
   material: TextMaterial
@@ -55,7 +53,6 @@ export class TextBatcher {
 
   private indexCount = 0
   private objectRecords: ObjectRecord[] = []
-  private ranges: DrawRange[] = []
   // Cumulative index count after each Text handed to rebuild(), aligned with that argument
   // by position (an invisible node contributes nothing but still takes a slot). This is what
   // lets any run of nodes be drawn on its own, which is how the renderer interleaves the
@@ -75,7 +72,6 @@ export class TextBatcher {
     let vertexCount = 0
     let objectBase = 0
     this.objectRecords = []
-    this.ranges = []
     this.nodeIndexEnds = []
 
     for (const text of texts) {
@@ -105,15 +101,7 @@ export class TextBatcher {
         push(q.x1, q.y0, q.u1, q.v1)
         push(q.x0, q.y0, q.u0, q.v1)
 
-        const firstIndex = indices.length
         indices.push(b, b + 1, b + 2, b, b + 2, b + 3)
-
-        const last = this.ranges[this.ranges.length - 1]
-        if (last && last.atlasIndex === q.atlasIndex && last.firstIndex + last.indexCount === firstIndex) {
-          last.indexCount += 6
-        } else {
-          this.ranges.push({ atlasIndex: q.atlasIndex, firstIndex, indexCount: 6 })
-        }
       }
       objectBase += shaped.materials.length
       this.nodeIndexEnds.push(indices.length)
@@ -136,6 +124,7 @@ export class TextBatcher {
     this.vertexBuffer = null
     if (vtx.byteLength > 0) {
       this.vertexBuffer = this.device.createBuffer({
+        label: 'text-vertices',
         size: vtx.byteLength,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
       })
@@ -146,6 +135,7 @@ export class TextBatcher {
     this.indexBuffer = null
     if (idx.byteLength > 0) {
       this.indexBuffer = this.device.createBuffer({
+        label: 'text-indices',
         size: idx.byteLength,
         usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
       })
@@ -154,6 +144,7 @@ export class TextBatcher {
 
     this.objectBuffer?.destroy()
     this.objectBuffer = this.device.createBuffer({
+      label: 'text-objects',
       size: Math.max(1, this.objectRecords.length) * TEXT_OBJECT_STRIDE,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
@@ -212,20 +203,21 @@ export class TextBatcher {
       u32[base + TEXT_OBJECT_HAS_STROKE_OFFSET / 4] = material.strokeWidth > 0 ? 1 : 0
       f32[base + TEXT_OBJECT_DISTANCE_RANGE_OFFSET / 4] = material.distanceRange
       f32[base + TEXT_OBJECT_DILATE_OFFSET / 4] = material.dilate
+      u32[base + TEXT_OBJECT_ATLAS_LAYER_OFFSET / 4] = material.atlasIndex
     })
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)
   }
 
-  /** Draw each atlas range with its atlas bound (group 2); groups 0/1 are set once. */
+  /** Draw the whole lane: one bind of the shared atlas array, one indexed draw. */
   draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, fontBook: FontBook): void {
     this.drawRange(pass, frameBindGroup, fontBook, 0, this.nodeIndexEnds.length)
   }
 
   /**
-   * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order. The atlas
-   * runs are clipped to that span rather than rebuilt, so a partial draw costs the same
-   * per-run bind as a whole one and never more runs than the whole lane would.
+   * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order - which is how
+   * the renderer interleaves the lanes back to front. One draw, whatever styles the span
+   * mixes: every style is a layer of the one bound texture (see text/FontAtlas.ts).
    */
   drawRange(
     pass: GPURenderPassEncoder,
@@ -243,15 +235,10 @@ export class TextBatcher {
 
     pass.setBindGroup(0, frameBindGroup)
     pass.setBindGroup(1, this.objectBindGroup)
+    pass.setBindGroup(2, fontBook.bindGroup)
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setIndexBuffer(this.indexBuffer, 'uint32')
-    for (const range of this.ranges) {
-      const first = Math.max(range.firstIndex, start)
-      const last = Math.min(range.firstIndex + range.indexCount, end)
-      if (last <= first) continue
-      pass.setBindGroup(2, fontBook.atlasByIndex(range.atlasIndex).bindGroup)
-      pass.drawIndexed(last - first, 1, first)
-    }
+    pass.drawIndexed(end - start, 1, start)
   }
 
   destroy(): void {

@@ -24,7 +24,7 @@ import { quadCorner } from './textQuad'
 import type { FontStyle } from './FontAtlas'
 // Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts also pulls in `?url` PNG
 // imports only a bundler can resolve, which would break this file running under plain node.
-import { msdfFontProvider } from './msdfProvider'
+import { ATLAS_LAYER_SIZE, msdfFontProvider } from './msdfProvider'
 import { contoursFromCommands } from './glyphOutline'
 import { VectorFontBook } from './VectorFont'
 import { VectorText } from '../shapes/VectorText'
@@ -41,11 +41,17 @@ function assert(cond: boolean, msg: string): void {
 }
 
 const STYLE_ORDER: FontStyle[] = ['regular', 'bold', 'italic', 'bold-italic']
+const STYLE_JSONS: Record<FontStyle, MsdfFontJson> = {
+  regular: regularJson as unknown as MsdfFontJson,
+  bold: boldJson as unknown as MsdfFontJson,
+  italic: italicJson as unknown as MsdfFontJson,
+  'bold-italic': boldItalicJson as unknown as MsdfFontJson,
+}
 const METRICS: Record<FontStyle, FontMetrics> = {
-  regular: normalizeMetrics(regularJson as unknown as MsdfFontJson),
-  bold: normalizeMetrics(boldJson as unknown as MsdfFontJson),
-  italic: normalizeMetrics(italicJson as unknown as MsdfFontJson),
-  'bold-italic': normalizeMetrics(boldItalicJson as unknown as MsdfFontJson),
+  regular: normalizeMetrics(STYLE_JSONS.regular, ATLAS_LAYER_SIZE),
+  bold: normalizeMetrics(STYLE_JSONS.bold, ATLAS_LAYER_SIZE),
+  italic: normalizeMetrics(STYLE_JSONS.italic, ATLAS_LAYER_SIZE),
+  'bold-italic': normalizeMetrics(STYLE_JSONS['bold-italic'], ATLAS_LAYER_SIZE),
 }
 
 // A GPU-free FontProvider backed by the real normalized metrics (all four styles present).
@@ -95,6 +101,53 @@ const finite = (n: number) => Number.isFinite(n)
   assert(m.size === 42 && m.distanceRange === 4, 'generation size 42, distance range 4')
   assert(m.glyphs.size >= 90, 'the printable-ASCII charset is present (>= 90 glyphs)')
   assert(m.kernings.size > 0, 'kerning pairs were captured')
+}
+
+// --- the shared atlas layer: all four styles in one texture, so all four draw in one call ---
+//
+// Array layers must be identically sized, so each style's own (smaller) packed image is copied
+// into the top-left of a layer sized for the largest, and uvs are measured against the LAYER.
+// Getting that wrong would sample the neighbouring style's glyphs, which is exactly the sort of
+// thing that looks almost right on screen.
+{
+  const sizes = STYLE_ORDER.map((s) => STYLE_JSONS[s].common)
+  assert(
+    ATLAS_LAYER_SIZE.width === Math.max(...sizes.map((c) => c.scaleW)) &&
+      ATLAS_LAYER_SIZE.height === Math.max(...sizes.map((c) => c.scaleH)),
+    'the layer is sized for the largest style, so every image fits',
+  )
+  assert(
+    sizes.some((c) => c.scaleW !== ATLAS_LAYER_SIZE.width || c.scaleH !== ATLAS_LAYER_SIZE.height),
+    'and the styles really do differ in size - otherwise this test proves nothing',
+  )
+
+  for (const style of STYLE_ORDER) {
+    const json = STYLE_JSONS[style]
+    const metrics = METRICS[style]
+    assert(
+      metrics.atlasWidth === ATLAS_LAYER_SIZE.width && metrics.atlasHeight === ATLAS_LAYER_SIZE.height,
+      `${style}: metrics report the layer size, which is what the shader divides distanceRange by`,
+    )
+    // Every uv stays inside the region actually copied into the layer - never out in the
+    // transparent remainder, and never past 1.
+    const maxU = json.common.scaleW / ATLAS_LAYER_SIZE.width
+    const maxV = json.common.scaleH / ATLAS_LAYER_SIZE.height
+    const strays = [...metrics.glyphs.values()].filter(
+      (g) => !(g.u0 >= 0 && g.v0 >= 0 && g.u1 <= maxU && g.v1 <= maxV),
+    )
+    assert(strays.length === 0, `${style}: every glyph's uv rect lies within the copied image, not the padding`)
+  }
+
+  // A glyph's uv rect must cover the same TEXELS it did before the styles were pooled - the
+  // pixel rect from the JSON. Normalizing against a bigger layer changes the numbers and must
+  // not change which texels they address.
+  const boldA = METRICS.bold.glyphs.get(65)!
+  const rawA = (STYLE_JSONS.bold.chars as { id: number; x: number; y: number; width: number }[]).find((c) => c.id === 65)!
+  assert(
+    Math.abs(boldA.u0 * ATLAS_LAYER_SIZE.width - rawA.x) < 1e-6 &&
+      Math.abs(boldA.u1 * ATLAS_LAYER_SIZE.width - (rawA.x + rawA.width)) < 1e-6,
+    "bold 'A' still addresses exactly the pixel column range the generator packed it into",
+  )
 }
 
 // --- shaping: one glyph quad per visible char, one material per run, left-to-right order ---

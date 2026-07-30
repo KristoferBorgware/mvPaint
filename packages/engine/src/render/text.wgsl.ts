@@ -33,11 +33,15 @@ struct ObjectData {
   hasStroke : u32,
   distanceRange : f32,
   dilate : f32,
+  atlasLayer : u32,
 };
 
 @group(0) @binding(0) var<uniform> frame : Frame;
 @group(1) @binding(0) var<storage, read> objects : array<ObjectData>;
-@group(2) @binding(0) var atlasTex : texture_2d<f32>;
+// All four Inter styles in one texture, one layer each - so a paragraph that mixes them is
+// still a single draw. Which layer a glyph reads is a per-run value in its object record; see
+// text/FontAtlas.ts.
+@group(2) @binding(0) var atlasTex : texture_2d_array<f32>;
 @group(2) @binding(1) var atlasSampler : sampler;
 
 struct VertexInput {
@@ -163,7 +167,7 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
 
   // Derivative-based quantities (texture sample + fwidth) must run in uniform control flow, so
   // they are evaluated before any branch on the per-fragment glyph flag.
-  let msd = textureSample(atlasTex, atlasSampler, input.uv).rgb;
+  let msd = textureSample(atlasTex, atlasSampler, input.uv, obj.atlasLayer).rgb;
   let uvDeriv = fwidth(input.uv);
   let localDeriv = fwidth(input.localPos);
 
@@ -182,6 +186,10 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     // Glyph coverage from the median distance, anti-aliased over the field's screen-px range.
     // The dilate term widens coverage (faux bold, and the spread of glow/shadow copies).
     let sd = median(msd);
+    // textureDimensions of an array texture is one LAYER's size, which is exactly what the uvs
+    // are measured against too (see text/msdfMetrics.ts) - so packing a smaller font image into
+    // a larger shared layer scales uvDeriv down and unitRange up by the same factor, and the
+    // screen-pixel range below comes out unchanged.
     let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
     let screenTexSize = vec2<f32>(1.0) / uvDeriv;
     let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);

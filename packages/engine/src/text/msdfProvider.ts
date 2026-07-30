@@ -4,7 +4,7 @@
 // node - by the self-test, or by any app code that wants to run the shaper before a device
 // exists - without pulling in a `?url` PNG import only a bundler can resolve.
 
-import { normalizeMetrics, type MsdfFontJson } from './msdfMetrics'
+import { normalizeMetrics, type AtlasLayerSize, type MsdfFontJson } from './msdfMetrics'
 import type { FontProvider } from './layout'
 
 import interRegularJson from './fonts/inter-regular.json'
@@ -28,6 +28,23 @@ export const STYLE_JSON: readonly StyleJson[] = [
   { style: 'italic', json: interItalicJson as unknown as MsdfFontJson },
   { style: 'bold-italic', json: interBoldItalicJson as unknown as MsdfFontJson },
 ]
+
+/**
+ * The size of one layer of the shared atlas array: big enough for the largest of the four
+ * styles, since array layers must all be the same size. Each font's own image is copied into
+ * the top-left of its layer and every uv is measured against THIS, not against the individual
+ * image (see normalizeMetrics) - which is what lets one texture, and so one draw call, serve
+ * regular, bold, italic and bold-italic at once.
+ *
+ * Derived rather than hard-coded, so regenerating the atlases at different sizes stays correct
+ * without anybody having to remember this exists. The packer emits tight bounds per style, and
+ * they differ (280x285 through 306x324 at the time of writing); the padding that costs is a
+ * few percent of a texture that is under two megabytes.
+ */
+export const ATLAS_LAYER_SIZE: AtlasLayerSize = {
+  width: Math.max(...STYLE_JSON.map((s) => s.json.common.scaleW)),
+  height: Math.max(...STYLE_JSON.map((s) => s.json.common.scaleH)),
+}
 
 /**
  * The style-fallback ladder shared by FontBook.resolve and msdfFontProvider: try the exact
@@ -70,7 +87,7 @@ let defaultMsdfProvider: FontProvider | null = null
  */
 export function msdfFontProvider(): FontProvider {
   if (!defaultMsdfProvider) {
-    const metrics = STYLE_JSON.map((s) => normalizeMetrics(s.json))
+    const metrics = STYLE_JSON.map((s) => normalizeMetrics(s.json, ATLAS_LAYER_SIZE))
     defaultMsdfProvider = {
       resolve: (style) => {
         const r = resolveStyle(style, (i) => metrics[i])

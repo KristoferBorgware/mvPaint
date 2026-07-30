@@ -44,17 +44,26 @@ export function createMeshPipelineLayout(
 }
 
 /**
- * group(2): the MSDF font atlas - a sampled texture + its sampler - read by the text lane's
- * fragment shader only. The mesh lane never binds group(2); it belongs solely to text.
+ * group(2): a sampled texture + its sampler, read by a fragment shader only. The mesh lane
+ * never binds group(2); the text, image and shadow lanes each do, and share this one shape of
+ * layout because a font atlas, a picture and a blurred silhouette are all just a float texture.
+ *
+ * `viewDimension` is where they part company. The text lane binds a '2d-array': all four Inter
+ * styles live in one texture, one layer each, selected per glyph from the object record - which
+ * is what lets a mixed-style paragraph draw in a single call instead of one per style (see
+ * text/FontAtlas.ts). The image and shadow lanes bind a plain '2d'.
  */
-export function createAtlasBindGroupLayout(device: GPUDevice): GPUBindGroupLayout {
+export function createAtlasBindGroupLayout(
+  device: GPUDevice,
+  viewDimension: GPUTextureViewDimension = '2d',
+): GPUBindGroupLayout {
   return device.createBindGroupLayout({
-    label: 'atlas',
+    label: viewDimension === '2d' ? 'atlas' : `atlas:${viewDimension}`,
     entries: [
       {
         binding: 0,
         visibility: GPUShaderStage.FRAGMENT,
-        texture: { sampleType: 'float' },
+        texture: { sampleType: 'float', viewDimension },
       },
       {
         binding: 1,

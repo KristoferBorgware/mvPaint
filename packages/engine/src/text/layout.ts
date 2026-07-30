@@ -125,6 +125,13 @@ export interface TextMaterial {
   /** Extra coverage in world px (faux bold, glow spread) - a hard distance offset. */
   dilate: number
   distanceRange: number
+  /**
+   * Which layer of the shared atlas array this run's glyphs sample - the resolved style, after
+   * any fallback. A run has exactly one font, so this belongs to the material alongside the
+   * distanceRange it is read from, and the whole lane draws in one call regardless of how many
+   * styles a paragraph mixes (see text/FontAtlas.ts).
+   */
+  atlasIndex: number
 }
 
 export interface ShapedText {
@@ -179,7 +186,7 @@ interface ResolveResult {
   materials: TextMaterial[]
 }
 
-function solidMaterial(dilate: number, distanceRange: number): TextMaterial {
+function solidMaterial(dilate: number, distanceRange: number, atlasIndex: number): TextMaterial {
   // Color rides the per-vertex channel; the material stays a solid (fillType 'color').
   return {
     fillPriority: 'color',
@@ -192,6 +199,7 @@ function solidMaterial(dilate: number, distanceRange: number): TextMaterial {
     strokeWidth: 0,
     dilate,
     distanceRange,
+    atlasIndex,
   }
 }
 
@@ -229,17 +237,18 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
       dilate: boldDilate,
       distanceRange: metrics.distanceRange,
+      atlasIndex: r.atlasIndex,
     })
 
     let glowMaterial = -1
     if (style.glow) {
       glowMaterial = materials.length
-      materials.push(solidMaterial(style.glow.radius + boldDilate, metrics.distanceRange))
+      materials.push(solidMaterial(style.glow.radius + boldDilate, metrics.distanceRange, r.atlasIndex))
     }
     let shadowMaterial = -1
     if (style.shadow) {
       shadowMaterial = materials.length
-      materials.push(solidMaterial(boldDilate, metrics.distanceRange))
+      materials.push(solidMaterial(boldDilate, metrics.distanceRange, r.atlasIndex))
     }
 
     resolved.push({

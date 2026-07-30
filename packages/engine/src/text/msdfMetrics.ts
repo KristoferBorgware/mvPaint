@@ -42,6 +42,12 @@ export interface MsdfFontJson {
   decoration: BmDecoration
 }
 
+/** The size of one layer of the shared atlas array, which every uv is measured against. */
+export interface AtlasLayerSize {
+  width: number
+  height: number
+}
+
 /** A glyph normalized for shaping: atlas uv rect (0..1) plus placement in generation-size px. */
 export interface Glyph {
   u0: number
@@ -61,6 +67,12 @@ export interface FontMetrics {
   lineHeight: number
   /** Distance from a line's top to the baseline. */
   base: number
+  /**
+   * The size the uv rects above are measured against - the shared ARRAY LAYER's size, not
+   * this font's own packed image, which is usually smaller and sits in the layer's top-left
+   * corner (see normalizeMetrics). The shader divides distanceRange by the same figure, which
+   * is why it can read it straight from textureDimensions().
+   */
   atlasWidth: number
   atlasHeight: number
   /** SDF spread in atlas px; the shader converts it to screen px for anti-aliasing. */
@@ -75,10 +87,19 @@ function kerningKey(first: number, second: number): number {
   return first * 0x110000 + second
 }
 
-/** Build lookup structures (glyph map + kerning map, uv rects) from the raw atlas JSON. */
-export function normalizeMetrics(json: MsdfFontJson): FontMetrics {
-  const sw = json.common.scaleW
-  const sh = json.common.scaleH
+/**
+ * Build lookup structures (glyph map + kerning map, uv rects) from the raw atlas JSON.
+ *
+ * `layer` is the size of one layer of the shared atlas array - the styles are packed into a
+ * single texture_2d_array so all four can be drawn in one call, and array layers must all be
+ * the same size, so each font's own (smaller) image is copied into the top-left corner of its
+ * layer and the rest is left transparent. Measuring uv against the LAYER rather than against
+ * this font's own image is what makes those uvs address the right texels; the JSON's own
+ * scaleW/scaleH stay what they always were, the extent of the pixels that were copied in.
+ */
+export function normalizeMetrics(json: MsdfFontJson, layer: AtlasLayerSize): FontMetrics {
+  const sw = layer.width
+  const sh = layer.height
   const glyphs = new Map<number, Glyph>()
   for (const c of json.chars) {
     glyphs.set(c.id, {

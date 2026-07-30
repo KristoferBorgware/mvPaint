@@ -273,7 +273,7 @@ precisely so groups 0 and 1 can be bound once and reused across lanes.
 | --- | --- | --- |
 | **0** | `viewProjection` mat4 + `resolution` vec2 (80 bytes, uniform) | once per frame |
 | **1** | array of object records (read-only storage) | per frame, changed slots only |
-| **2** | texture + sampler (font atlas, image, shadow atlas) | per draw range |
+| **2** | texture + sampler (font atlas array, image, shadow atlas) | per draw range |
 
 ### Vertex buffers
 
@@ -306,9 +306,10 @@ the mesh lane, `isGlyph` in the text lane.
 
 `depth` sits in what would otherwise be alignment padding, so it costs nothing.
 
-The text record is also 304 bytes — the same transform and gradient fields, extended with a
-per-letter outline colour and width and the atlas distance range. The image record is 96 (model,
-tint, depth) and the shadow record 128.
+The text record is 320 bytes — the same transform and gradient fields, extended with a
+per-letter outline colour and width, the atlas distance range, and which layer of the shared
+font atlas array the run samples. The image record is 96 (model, tint, depth) and the shadow
+record 128.
 
 An "object" is a **(shape, material) pair**, not a shape. A shape claims a contiguous block of
 records, one per material, and its vertices pick within that block.
@@ -348,6 +349,31 @@ only in vertex format and fragment maths.
 | **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | never — see below |
 | **Image** | `textureSample(...) * tint` | never — see below |
 | **Shadow** | sample the pre-blurred silhouette, tint it | never; a shadow is translucent by definition |
+
+### What group(2) costs, and the font atlas array
+
+Everything above is about *pipeline* switches. The other thing that ends a draw call is a
+**group(2) rebind** — a different texture — and WebGPU has no bindless: no `binding_array`, no
+descriptor indexing, one texture per bind group. A draw call per distinct texture is a floor
+that no amount of shader merging gets under.
+
+Which makes it worth not having distinct textures. All four Inter styles live in **one
+`texture_2d_array`**, a layer each, behind one bind group; a run's layer travels in its object
+record (`text/FontAtlas.ts`). The text lane used to segment its draws per atlas, so a paragraph
+alternating regular and bold paid a bind and a draw per switch — four pages of mixed-style
+lorem ipsum cost **108 draws against 4 distinct atlases**. It is now 1.
+
+Array layers must be identically sized and the generator packs each style to its own tight
+bounds (280×285 through 306×324), so each image is copied into the top-left of a layer sized
+for the largest and uvs are measured against the **layer**, not the image
+(`text/msdfMetrics.ts`). The padding costs about 11% of a texture under two megabytes. The
+shader needs no adjustment for it: `textureDimensions` is the layer size and `distanceRange` is
+divided by exactly that, so packing a smaller image into a bigger layer scales `fwidth(uv)`
+down and `unitRange` up by the same factor and the screen-pixel range comes out unchanged.
+
+The image lane has the same opportunity and has not taken it: its textures are the
+application's, of any size and format, so pooling them means a real atlas allocator rather than
+four fixed layers. That is why `images` is still the scene with the most draw calls.
 
 ---
 
@@ -414,20 +440,28 @@ decided by which lane a thing happened to be in.
 Interleaving everything back-to-front fixed that but charged every scene for it: each lane
 change is a draw call, so a scene that alternated kinds paid one draw per object even where
 nothing was translucent at all. Splitting the passes pays that cost only where it buys
-something. Measured on the real app, one full frame each:
+something — and pooling the font atlases (above) removes the binds the split cannot.
 
-| scene | before | after |
-| --- | --: | --: |
-| Shapes & gradients | 2 draws | **2** |
-| Shape stress test (100k) | 4 draws | **4** |
-| MSDF text stress test | 112 draws | **108** |
-| Shadows | 27 draws | **5** |
-| Transparency across lanes | 45 draws | **41** |
-| Stacking order | 4 draws | 5 |
+Draw calls in one full frame, measured on the real app at each stage:
 
-The last row is the honest cost: pulling an opaque shape out of the middle of a back-to-front
-run splits that run in two, so a scene whose mesh lane is nearly all translucent can pay one
-extra draw per lane. It is bounded at that.
+| scene | one interleaved pass | + opaque/translucent split | + pooled font atlas |
+| --- | --: | --: | --: |
+| Shapes & gradients | 2 | 2 | **2** |
+| Shape stress test (100k) | 4 | 4 | **3** |
+| Stacking order | 4 | 5 | **5** |
+| Shadows | 27 | 5 | **5** |
+| MSDF text | 14 | 14 | **3** |
+| MSDF text stress test | 112 | 108 | **3** |
+| Transparency across lanes | 45 | 41 | **32** |
+| Images | 36 | 37 | **37** |
+
+Stacking order is the honest cost of the split: pulling an opaque shape out of the middle of a
+back-to-front run splits that run in two, so a scene whose mesh lane is nearly all translucent
+can pay one extra draw per lane. It is bounded at that. Images is the lane that has not been
+pooled yet, and it shows.
+
+Total indices submitted are unchanged in every scene at every stage — the draws are merged, not
+dropped.
 
 Classifying costs a scan of the visible mesh shapes per gather — around 10 ms at 100k shapes,
 against roughly 88 ms for the viewport-cull scan sitting beside it, and nothing at all on the

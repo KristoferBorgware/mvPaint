@@ -43,7 +43,14 @@ export const TEXT_VERTEX_LAYOUT: GPUVertexBufferLayout = {
 //   292 hasStroke: u32
 //   296 distanceRange: f32 (atlas SDF spread in texels)
 //   300 dilate: f32 (world px; widens glyph coverage - faux bold, glow/shadow spread)
-//   304 end
+//   304 atlasLayer: u32 (which style's layer of the shared atlas array this run samples)
+//   308 (12 bytes padding, to the record's 16-byte alignment)
+//   320 end
+//
+// atlasLayer lives here rather than in the vertex because it is a property of the RUN, not of
+// the glyph: a material is created per run and a run has exactly one resolved font (see
+// text/layout.ts's resolveRuns, which reads distanceRange off the very same atlas). Records
+// are per run, so the 16 bytes this costs are counted in hundreds, not in glyphs.
 export const TEXT_OBJECT_FILL_TYPE_OFFSET = 64
 export const TEXT_OBJECT_STOP_COUNT_OFFSET = 68
 export const TEXT_OBJECT_GRADIENT_START_OFFSET = 72
@@ -58,4 +65,5 @@ export const TEXT_OBJECT_STROKE_WIDTH_OFFSET = 288
 export const TEXT_OBJECT_HAS_STROKE_OFFSET = 292
 export const TEXT_OBJECT_DISTANCE_RANGE_OFFSET = 296
 export const TEXT_OBJECT_DILATE_OFFSET = 300
-export const TEXT_OBJECT_STRIDE = 304 // bytes
+export const TEXT_OBJECT_ATLAS_LAYER_OFFSET = 304
+export const TEXT_OBJECT_STRIDE = 320 // bytes
