@@ -5,7 +5,6 @@ import { Container } from '../shapes/Container'
 import { Group } from '../shapes/Group'
 import { Node } from '../shapes/Node'
 import { Scene } from './Scene'
-import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
@@ -96,21 +95,6 @@ class TransformGroup extends Container {
 
   assert(root.removeChild(a) && root.children.length === 1, 'removeChild detaches')
   assert(a.parent === null, 'removeChild clears parent')
-}
-
-// --- Scene resolves the active camera anywhere in the tree ---
-{
-  const scene = new Scene()
-  const rig = scene.root.addChild(new Container('rig'))
-  const cam = rig.addChild(new OrthographicCamera('main-cam'))
-  cam.active = true
-
-  assert(scene.activeCamera === null, 'no active camera before refresh')
-  assert(scene.refreshActiveCamera() === cam, 'refresh finds the active camera')
-  assert(scene.activeCamera === cam, 'active camera cached')
-
-  cam.active = false
-  assert(scene.refreshActiveCamera() === null, 'no active camera when flag cleared')
 }
 
 // --- picking: hitTestShape tests against the shape's own tessellated triangles ---

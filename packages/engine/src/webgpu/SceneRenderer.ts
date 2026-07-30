@@ -1,4 +1,4 @@
-// SceneRenderer - the 2D shape scene. It owns a Scene tree (root -> camera), the mesh lane
+// SceneRenderer - the 2D shape scene. It owns a Scene tree, the mesh lane
 // and text lane pipelines/batchers, and renders by collecting visible shapes/text each
 // frame, assigning each a depth from its zIndex rank (see scene/picking.ts) so the two
 // lanes' draw calls resolve their stacking order correctly via the depth buffer instead
@@ -11,11 +11,17 @@
 // It does NOT own the GPU context, resize observer, frame loop, or any scene content -
 // those are wired by createSceneRenderer() below, with content supplied by the caller
 // through the `populate` option.
+//
+// Nor does it own the CAMERA. Where a scene is looked at from is an application's business,
+// so a Camera2D is supplied (createSceneRenderer's `camera` option, or setCamera later) and
+// can be swapped or shared at any time. Supplying none is a valid choice rather than a
+// missing one: the scene then renders through a default camera, which puts world (0, 0) at
+// the viewport's top-left corner at one world unit per CSS pixel.
 
 import { Shape } from '../shapes/Shape'
 import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
 import { Text } from '../shapes/Text'
-import { OrthographicCamera } from '../camera/OrthographicCamera'
+import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
@@ -63,10 +69,12 @@ function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
 }
 
 export class SceneRenderer {
-  /** The scene graph: root -> camera, root -> content added by the caller. */
+  /** The scene graph: the content added by the caller, and nothing else. */
   readonly scene = new Scene()
-  /** The active 2D orthographic camera (looks down -Z; X right, Y up). */
-  readonly camera: OrthographicCamera
+
+  // The view this scene is drawn through. Never null - an application that supplies no
+  // camera gets the default one, rather than a frame that silently draws nothing.
+  private activeCamera: Camera2D
 
   private readonly pipeline: GPURenderPipeline
   /** Same mesh pipeline with the depth test/write off - see createMeshPipeline's `overlay`. */
@@ -86,7 +94,6 @@ export class SceneRenderer {
   private readonly shadowPipeline: GPURenderPipeline
   private shadowGeometryDirty = true
 
-  private zoom = 1 // camera zoom factor: >1 zooms in (shapes larger), <1 zooms out
   // Debug/testing knob: grows (or shrinks, if negative) the culling view rectangle by
   // this many world units on every side, so popping at the view edge - or the cull
   // itself - can be seen and tuned live. 0 = cull exactly at the camera's view rectangle.
@@ -137,7 +144,13 @@ export class SceneRenderer {
   // active camera isn't an OrthographicCamera (no rectangular frustum to show).
   private lastCullBounds: AABB | null = null
 
-  constructor(device: GPUDevice, format: GPUTextureFormat, canvas: HTMLCanvasElement, fontBook: FontBook) {
+  constructor(
+    device: GPUDevice,
+    format: GPUTextureFormat,
+    canvas: HTMLCanvasElement,
+    fontBook: FontBook,
+    camera?: Camera2D | null,
+  ) {
     this.canvas = canvas
     this.fontBook = fontBook
     const frameLayout = createFrameBindGroupLayout(device)
@@ -175,23 +188,30 @@ export class SceneRenderer {
     this.shadowPipeline = createShadowPipeline(device, format, SAMPLE_COUNT, shadowPipelineLayout)
     this.shadowBatcher = new ShadowBatcher(device, shadowObjectLayout)
 
-    // 2D orthographic camera looking down -Z, parented to the scene root. viewHeight is
-    // set from the canvas's CSS height every frame (see draw()), so 1 world unit = 1 CSS
-    // pixel on every device - device pixel ratio only changes how many physical pixels
-    // render each logical one, never the logical (world-unit) size.
-    this.camera = new OrthographicCamera('camera')
-    this.camera.active = true
-    this.scene.root.addChild(this.camera)
-    this.scene.refreshActiveCamera()
+    this.activeCamera = camera ?? new Camera2D()
+  }
+
+  /** The camera this scene is currently drawn through. */
+  get camera(): Camera2D {
+    return this.activeCamera
+  }
+
+  /**
+   * Replaces the camera. Passing null goes back to a fresh default one - world (0, 0) at
+   * the viewport's top-left, one world unit per CSS pixel - so there is always a view, and
+   * "no camera" is a framing rather than a failure.
+   */
+  setCamera(camera: Camera2D | null): void {
+    this.activeCamera = camera ?? new Camera2D()
   }
 
   /** Camera zoom: >1 zooms in (content appears larger), <1 zooms out. */
   setZoom(next: number): void {
-    this.zoom = next > 0 ? next : 1
+    this.activeCamera.zoom = next > 0 ? next : 1
   }
 
   getZoom(): number {
-    return this.zoom
+    return this.activeCamera.zoom
   }
 
   /** Debug/testing knob - see `cullMargin`. */
@@ -302,18 +322,18 @@ export class SceneRenderer {
 
   /** Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both lanes. */
   draw(pass: GPURenderPassEncoder, width: number, height: number): void {
-    const camera = this.scene.activeCamera
-    if (!camera) return
+    const camera = this.activeCamera
 
-    // 1 world unit = 1 CSS pixel at zoom 1: use the canvas's logical (DPR-independent)
-    // height, not the device-pixel backing-store height passed in `height`. Aspect is
-    // unaffected - device pixels and CSS pixels share the same aspect ratio (dpr cancels).
-    // Dividing by zoom shrinks the visible world extent, so content appears larger.
-    if (camera instanceof OrthographicCamera) {
-      camera.viewHeight = Math.max(1, this.canvas.clientHeight / this.zoom)
-    }
+    // The camera is sized in CSS pixels, so it is given the canvas's logical size, not the
+    // device-pixel backing store passed in `width`/`height`. That is what makes 1 world
+    // unit at zoom 1 the same physical size on a retina display as anywhere else: the
+    // device pixel ratio decides how many physical pixels render each logical one and
+    // nothing more. The uniform buffer still carries the backing-store size, which is what
+    // the shaders want.
+    const viewWidth = this.canvas.clientWidth
+    const viewHeight = this.canvas.clientHeight
 
-    this.frameUniforms.write(camera.viewProjection(width / height).toGPU(), width, height)
+    this.frameUniforms.write(camera.viewProjection(viewWidth, viewHeight).toGPU(), width, height)
 
     // Culling and zIndex sort both off means nothing here can change the visible SET on
     // its own: no camera-dependent membership (nothing is ever culled), no zIndex-driven
@@ -388,16 +408,13 @@ export class SceneRenderer {
       }
 
       // Viewport cull: skip anything whose bounds don't overlap the camera's current view
-      // rectangle (see scene/culling.ts) - falls back to "cull nothing" for a
-      // non-orthographic camera (only OrthographicCamera has a rectangular frustum) or when
-      // cullingEnabled is off, which also skips the per-object test itself, not just its
-      // effect. Depths are filtered in step with their shapes via an explicit loop (not
-      // .filter(), which can't keep a second array in sync) whenever culling can actually
-      // drop something.
-      const viewBounds =
-        this.cullingEnabled && camera instanceof OrthographicCamera
-          ? camera.viewBounds(width / height).expanded(this.cullMargin)
-          : null
+      // rectangle (see scene/culling.ts). Switching cullingEnabled off skips the per-object
+      // test itself, not just its effect. Depths are filtered in step with their shapes via
+      // an explicit loop (not .filter(), which can't keep a second array in sync) whenever
+      // culling can actually drop something.
+      const viewBounds = this.cullingEnabled
+        ? camera.viewBounds(viewWidth, viewHeight).expanded(this.cullMargin)
+        : null
       this.lastCullBounds = viewBounds
       let onScreen: Shape[]
       let onScreenDepths: number[]
@@ -558,7 +575,10 @@ export class SceneRenderer {
 export interface SceneRendererHandle {
   /** The scene graph root - add/remove content here, then call markGeometryDirty()/markTextGeometryDirty(). */
   scene: Scene
-  camera: OrthographicCamera
+  /** The view the scene is drawn through - the one supplied, or the default. */
+  camera: Camera2D
+  /** Draw through a different camera; null goes back to the default (0,0 top-left, zoom 1). */
+  setCamera: (camera: Camera2D | null) => void
   setZoom: (zoom: number) => void
   getZoom: () => number
   /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
@@ -604,7 +624,14 @@ export interface CreateSceneRendererOptions {
    * this runs before the handle exists, and content with images needs one to build a
    * texture from.
    */
-  populate?: (scene: Scene, camera: OrthographicCamera, device: GPUDevice) => void
+  populate?: (scene: Scene, camera: Camera2D, device: GPUDevice) => void
+  /**
+   * The camera to draw through. Omit it and the scene renders through a default one, which
+   * puts world (0, 0) at the viewport's top-left corner at one world unit per CSS pixel -
+   * a deliberate framing, not a fallback. Supply one to own the view, and keep the
+   * reference: moving it is how an application pans and zooms.
+   */
+  camera?: Camera2D
   /** Called every frame, before the draw - e.g. to animate scene content. */
   onFrame?: (dt: number) => void
 }
@@ -636,7 +663,7 @@ export async function createSceneRenderer(
   // Catch the most common startup failure - an invalid render pipeline built from a
   // shader/layout mismatch - which is created inside the SceneRenderer constructor.
   gpu.device.pushErrorScope('validation')
-  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fontBook)
+  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fontBook, options.camera)
   gpu.device.popErrorScope().then((error) => {
     if (error) {
       console.error('WebGPU pipeline setup error:', error.message)
@@ -668,7 +695,14 @@ export async function createSceneRenderer(
 
   return {
     scene: scene.scene,
-    camera: scene.camera,
+    // A getter, not a captured reference: setCamera() below can replace it, and a handle
+    // holding the camera from construction would keep handing back the old one.
+    get camera() {
+      return scene.camera
+    },
+    setCamera(camera: Camera2D | null) {
+      scene.setCamera(camera)
+    },
     setZoom(next: number) {
       scene.setZoom(next)
     },

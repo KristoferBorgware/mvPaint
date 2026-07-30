@@ -1,28 +1,10 @@
-// Scene - owns the scene-graph root (a Container) and resolves the active camera by
-// traversing the tree for the Camera whose `active` flag is set.
+// Scene - owns the scene-graph root. Nothing else: a scene is the content, and where it is
+// looked at from is a Camera2D the application supplies to the renderer (see
+// webgpu/SceneRenderer). Keeping the camera out means one scene can be drawn through
+// several at once, and that adding content can never disturb the view.
 
 import { Container } from '../shapes/Container'
-import { Camera } from '../camera/Camera'
 
 export class Scene {
   readonly root = new Container('root')
-
-  private activeCameraNode: Camera | null = null
-
-  /**
-   * Re-resolve the active camera by traversing the graph (pre-order, first match wins).
-   * Call at startup and whenever a camera's `active` flag changes.
-   */
-  refreshActiveCamera(): Camera | null {
-    this.activeCameraNode = null
-    this.root.traversePreOrder((node) => {
-      if (this.activeCameraNode) return
-      if (node instanceof Camera && node.active) this.activeCameraNode = node
-    })
-    return this.activeCameraNode
-  }
-
-  get activeCamera(): Camera | null {
-    return this.activeCameraNode
-  }
 }

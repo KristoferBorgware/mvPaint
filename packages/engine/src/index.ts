@@ -12,11 +12,7 @@ export * from './math/Vector2'
 export * from './math/Vector3'
 export * from './math/Vector4'
 
-export * from './camera/Camera'
-export * from './camera/FreeFloatCamera'
-export * from './camera/FreeFlyController'
-export * from './camera/OrbitCamera'
-export * from './camera/OrthographicCamera'
+export * from './camera/Camera2D'
 
 export * from './events/NodeEvent'
 export * from './events/eventNames'

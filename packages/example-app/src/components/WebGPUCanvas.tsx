@@ -6,8 +6,8 @@ import {
   SceneInputDispatcher,
   screenToWorld,
   Transformer,
-  Vector3,
   panToAnchor,
+  Camera2D,
   Shape,
   outermostGroup,
   type TransformableNode,
@@ -26,6 +26,21 @@ import type { ExampleScene, SceneContent } from '../scenes'
 // state - see the onFrame callback below. A few times a second is imperceptible for a
 // numeric readout but cuts the setState rate during a gesture by an order of magnitude.
 const ZOOM_REPORT_INTERVAL_MS = 100
+
+/**
+ * Points the camera at the world origin, which is where every example scene is built
+ * around. Called on startup and on every scene switch, so a pan left over from the previous
+ * scene never strands the next one off-screen.
+ *
+ * This is the application's framing choice, not the engine's. Left alone, a camera puts
+ * world (0, 0) at the viewport's TOP-LEFT corner at one world unit per CSS pixel - which is
+ * what a document-shaped application would want and what these scenes, laid out in all four
+ * quadrants, would not.
+ */
+function frameSceneOrigin(camera: Camera2D, canvas: HTMLCanvasElement): void {
+  camera.rotation = 0
+  camera.centerOn(0, 0, canvas.clientWidth, canvas.clientHeight)
+}
 
 interface WebGPUCanvasProps {
   /**
@@ -80,9 +95,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const deviceRef = useRef<GPUDevice | null>(null)
   const contentRef = useRef<SceneContent>({})
   const sceneDefRef = useRef(scene)
-  // The camera's framing as the renderer set it up, captured so a scene switch can put the
-  // view back where it started instead of stranding the new scene off-screen.
-  const homeCameraRef = useRef<{ eye: Vector3; target: Vector3 } | null>(null)
+  // The application owns the camera - the engine renders through whatever it is given, and
+  // through a default one (world origin at the top-left, zoom 1) if given none. The example
+  // scenes are all laid out AROUND the origin, so this application puts the origin in the
+  // middle instead; a document editor would more likely keep the default and lay its page
+  // out from (0, 0) downward.
+  const cameraRef = useRef(new Camera2D())
   const speedRef = useRef(speed)
   const onZoomChangeRef = useRef(onZoomChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
@@ -117,7 +135,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         // Drop the selection first: the transformer holds references to nodes that are about
         // to leave the graph, and a stale selection would keep re-fitting a frame around them.
         transformer.clear()
-        const furniture: (Node | null)[] = [transformer, cullBoundsOverlayRef.current, marqueeOverlayRef.current, handle.camera]
+        const furniture: (Node | null)[] = [transformer, cullBoundsOverlayRef.current, marqueeOverlayRef.current]
         const keep = new Set<Node>(furniture.filter((n): n is Node => n !== null))
         for (const child of [...sceneGraph.root.children]) {
           if (!keep.has(child)) sceneGraph.root.removeChild(child)
@@ -130,10 +148,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
       // Re-frame: each scene lays itself out around the origin, so a pan left over from the
       // previous one would otherwise start the new scene half off-screen.
-      if (replace && handle && homeCameraRef.current) {
-        handle.camera.eye = homeCameraRef.current.eye.clone()
-        handle.camera.target = homeCameraRef.current.target.clone()
-      }
+      if (replace && handle && canvasRef.current) frameSceneOrigin(handle.camera, canvasRef.current)
 
       // Every scene switch sets this from the new scene's own preference (default false, i.e.
       // culling on) - not just when disabling it - so leaving a scene that turned it off always
@@ -202,6 +217,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     containerRef.current?.appendChild(stats.dom)
 
     createSceneRenderer(canvas, {
+      camera: cameraRef.current,
       onDeviceError: (message) => onError?.(message),
       populate: (sceneGraph, _camera, device) => {
         sceneGraphRef.current = sceneGraph
@@ -257,8 +273,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           return
         }
         handleRef.current = handle
-        homeCameraRef.current = { eye: handle.camera.eye.clone(), target: handle.camera.target.clone() }
         handle.setZoom(zoom)
+        frameSceneOrigin(handle.camera, canvas)
         handle.setCullMargin(cullMargin)
         inputController = new SceneInputDispatcher(canvas, {
           // A lean surface rather than the whole renderer handle: the dispatcher needs to
@@ -374,9 +390,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         const KEY_PAN_STEP_PX = 40
         const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
         const viewportOf = () => ({ width: canvas.clientWidth, height: canvas.clientHeight })
+        // zoomToward sets the camera's zoom itself and keeps the world point under the
+        // pointer fixed while doing it, so there is nothing else to keep in step.
         const applyZoom = (screenX: number, screenY: number, next: number) => {
-          zoomToward(handle.camera, viewportOf(), screenX, screenY, canvas.clientHeight / next)
-          handle.setZoom(next)
+          zoomToward(handle.camera, viewportOf(), screenX, screenY, next)
         }
 
         root.on('panmove', (e) => {
@@ -391,8 +408,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         root.on('pinchmove', (e) => {
           const g = e as CameraGestureEvent
           const next = clampZoom(pinchStartZoom * g.scale)
-          handle.camera.viewHeight = Math.max(1e-3, canvas.clientHeight / next)
-          handle.setZoom(next)
+          handle.camera.zoom = next
+          // Pinch pins the gesture's own anchor rather than whatever is under the midpoint
+          // right now, so the content follows two fingers spreading apart.
           panToAnchor(handle.camera, viewportOf(), g.point.x, g.point.y, g.anchor)
         })
 
@@ -418,13 +436,15 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
             return
           }
           const viewport = viewportOf()
-          const step = (handle.camera.viewHeight / Math.max(1, viewport.height)) * KEY_PAN_STEP_PX
+          // A fixed number of SCREEN pixels per press, so a key-pan feels the same however
+          // far the view is zoomed in.
+          const step = KEY_PAN_STEP_PX / Math.max(1e-6, handle.camera.zoom)
           const centre = { x: viewport.width / 2, y: viewport.height / 2 }
           switch (ev.key) {
-            case 'ArrowLeft': handle.camera.eye.x -= step; handle.camera.target.x -= step; break
-            case 'ArrowRight': handle.camera.eye.x += step; handle.camera.target.x += step; break
-            case 'ArrowUp': handle.camera.eye.y += step; handle.camera.target.y += step; break
-            case 'ArrowDown': handle.camera.eye.y -= step; handle.camera.target.y -= step; break
+            case 'ArrowLeft': handle.camera.x -= step; break
+            case 'ArrowRight': handle.camera.x += step; break
+            case 'ArrowUp': handle.camera.y += step; break
+            case 'ArrowDown': handle.camera.y -= step; break
             case '+':
             case '=': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() * KEY_ZOOM_STEP)); break
             case '-':

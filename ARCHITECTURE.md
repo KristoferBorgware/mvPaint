@@ -90,6 +90,23 @@ one is the only place grouping is mechanism rather than policy. Which node a cli
 an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
 that wants to ask.
 
+### The camera is not in the graph
+
+`Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*
+the scene, it is the frame the scene is viewed through, and the **application owns it** —
+`createSceneRenderer({ camera })`, or `setCamera` later. Nothing in the graph refers to it and
+it refers to nothing in the graph, so one scene can be drawn through two cameras at once.
+
+It is a rectangle of world placed like any other rectangle here: `x, y` is the world point at
+the viewport's **top-left**, `zoom` is viewport pixels per world unit, and `rotation` turns the
+view about its own centre. Supplying no camera is a framing rather than a failure — the scene
+then renders through a default one, which puts world (0, 0) at the top-left at 1:1.
+
+It still composes a real 4x4 view-projection, and `screenToWorld` still unprojects through the
+inverse, rather than reducing to two multiplies and an add. The render path takes a
+view-projection and nothing else, so keeping that seam is what would let a perspective camera
+slot in without any lane, shader or culling code changing.
+
 ### Two caches, both keyed on identity
 
 ```ts
@@ -216,8 +233,8 @@ else { meshShapes.push(shape); meshDepths.push(depth) }
 `VectorText` deliberately lands in the mesh bucket: it is text drawn *as* geometry, so it wants
 the mesh lane and gets picking, bounds and shadows without a single special case.
 
-**Cull.** For an orthographic camera, drop anything whose world bounds miss the view rectangle
-(plus a debug margin). Depths are filtered in step with their shapes by an explicit loop —
+**Cull.** Drop anything whose world bounds miss the camera's view rectangle (plus a debug
+margin). Depths are filtered in step with their shapes by an explicit loop —
 `.filter()` cannot keep a second array in sync.
 
 **Overlay split.** Overlay shapes (transformer handles, marquee box) are packed **last**, so
@@ -533,7 +550,8 @@ only for slot 37.
 
 | Concern | Files |
 | --- | --- |
-| Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `events/` |
+| Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `shapes/Group.ts`, `events/` |
+| The view: pan, zoom, rotate | `camera/Camera2D.ts`, `input/viewport.ts`, `input/cameraControls.ts` |
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
 | Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
