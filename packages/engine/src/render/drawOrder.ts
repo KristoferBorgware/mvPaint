@@ -25,7 +25,7 @@ import type { Shape } from '../shapes/Shape'
  * index into that lane's own visible list, which is packed in the same order.
  */
 export interface DrawRun {
-  lane: 'mesh' | 'text' | 'image'
+  lane: 'mesh' | 'text' | 'image' | 'shadow'
   from: number
   to: number
 }
@@ -43,24 +43,34 @@ export function buildDrawRuns(
   texts: readonly Shape[],
   images: readonly Shape[],
   depths: ReadonlyMap<Shape, number>,
+  shadows: readonly Shape[] = [],
+  shadowDepthNudge = 0,
 ): DrawRun[] {
   const runs: DrawRun[] = []
   let m = 0
   let t = 0
   let i = 0
+  let s = 0
   // Depth runs the opposite way to rank: rank 0 is furthest back and carries the LARGEST
   // depth (see scene/picking.ts's depthForRank). Furthest first therefore means largest
   // first. Ranks are distinct, so no two nodes can tie.
   const depthOf = (node: Shape | undefined): number => (node === undefined ? -Infinity : (depths.get(node) ?? -Infinity))
 
-  while (m < meshCount || t < texts.length || i < images.length) {
+  while (m < meshCount || t < texts.length || i < images.length || s < shadows.length) {
     const dm = m < meshCount ? (meshDepths[m] ?? depthOf(meshShapes[m])) : -Infinity
     const dt = t < texts.length ? depthOf(texts[t]) : -Infinity
     const di = i < images.length ? depthOf(images[i]) : -Infinity
+    // A shadow sits just BEHIND the shape casting it, which is what the nudge is: far
+    // enough back to lose to its own caster, near enough to stay in front of whatever is
+    // below. Merging on that puts every shadow immediately before the shape that casts it.
+    const ds = s < shadows.length ? depthOf(shadows[s]) + shadowDepthNudge : -Infinity
 
     let lane: DrawRun['lane']
     let cursor: number
-    if (dm >= dt && dm >= di) {
+    if (ds >= dm && ds >= dt && ds >= di) {
+      lane = 'shadow'
+      cursor = s++
+    } else if (dm >= dt && dm >= di) {
       lane = 'mesh'
       cursor = m++
     } else if (dt >= di) {

@@ -69,6 +69,9 @@ function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
   return true
 }
 
+/** Shared empty list, so a shadowless frame allocates nothing to say so. */
+const NO_SHADOWS: readonly Shape[] = []
+
 export class SceneRenderer {
   /** The scene graph: the content added by the caller, and nothing else. */
   readonly scene = new Scene()
@@ -537,8 +540,46 @@ export class SceneRenderer {
     this.visibleImages = visibleImages
     this.imageBatcher.updateObjects(depths as ReadonlyMap<Image, number>)
 
-    // The content lanes, interleaved strictly furthest-first rather than one lane after
-    // another (see DrawRun). Every fragment therefore arrives over what is already behind
+    // Shadows. Packed and updated here, but DRAWN in the interleaved order below like any
+    // other lane: a shadow is a translucent blob that has to composite over whatever is
+    // behind it and under whatever is in front, which is the same problem the content lanes
+    // have. Half a depth step behind its caster (see the nudge) puts it immediately before
+    // that caster in the order, so a shape still paints over its own shadow.
+    //
+    // Skipped entirely when shadowsEnabled is off - see its declaration for why that's
+    // worth having.
+    const shadowCasters = this.shadowsEnabled ? meshShapes.filter((s) => s.hasShadow()) : NO_SHADOWS
+    const shadowNudge = 0.5 / (ordered.length + 1)
+    if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
+      if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
+        this.shadowBatcher.rebuild(shadowCasters)
+        this.shadowGeometryDirty = false
+      }
+      // Also re-reads each shadow's atlas slot, so a silhouette re-baked this frame is
+      // picked up without the geometry above needing to know anything about it.
+      this.shadowBatcher.updateObjects(this.shadowAtlas, depths, shadowNudge)
+    }
+
+    // Shadows change per frame (a blur or an offset can be animated with no dirty mark), so
+    // a run list that includes them cannot come from the gather cache. Scenes big enough for
+    // that cache to matter switch shadows off; every scene that keeps them is small enough
+    // that rebuilding the merge each frame is not worth measuring.
+    const drawRuns =
+      shadowCasters.length > 0
+        ? buildDrawRuns(
+            visibleMeshShapes,
+            overlayStart,
+            visibleMeshDepths,
+            visibleTexts,
+            visibleImages,
+            depths,
+            shadowCasters,
+            shadowNudge,
+          )
+        : runs
+
+    // The content lanes and the shadows, interleaved strictly furthest-first rather than one
+    // lane after another (see DrawRun). Every fragment therefore arrives over what is already behind
     // it, which is the only order alpha blending composites correctly in - a translucent
     // shape now shows the text or image behind it instead of the depth buffer rejecting it
     // for belonging to a lane that draws later.
@@ -547,10 +588,16 @@ export class SceneRenderer {
     // this. It just no longer has to arbitrate between the content lanes: back-to-front
     // means every fragment is at or nearer than what it lands on, so it always passes.
     let boundLane: DrawRun['lane'] | null = null
-    for (const run of runs) {
+    for (const run of drawRuns) {
       if (run.lane !== boundLane) {
         pass.setPipeline(
-          run.lane === 'mesh' ? this.pipeline : run.lane === 'text' ? this.textPipeline : this.imagePipeline,
+          run.lane === 'mesh'
+            ? this.pipeline
+            : run.lane === 'text'
+              ? this.textPipeline
+              : run.lane === 'image'
+                ? this.imagePipeline
+                : this.shadowPipeline,
         )
         boundLane = run.lane
       }
@@ -558,32 +605,10 @@ export class SceneRenderer {
         this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(run.from, run.to))
       } else if (run.lane === 'text') {
         this.textBatcher.drawRange(pass, this.frameUniforms.bindGroup, this.fontBook, run.from, run.to)
-      } else {
+      } else if (run.lane === 'image') {
         this.imageBatcher.drawRange(pass, this.frameUniforms.bindGroup, run.from, run.to)
-      }
-    }
-
-    // Shadows draw AFTER the content lanes, depth-tested but never depth-writing (see
-    // ShadowPipeline). That ordering is what makes them stack: by the time a shadow is
-    // drawn, every shape has already written its depth, so the test alone decides whether
-    // the shadow lands on top of a given shape or is hidden behind it - including the very
-    // shape casting it. Drawing them first instead would paint every shadow under
-    // everything, which is only correct for a single-layer scene. Skipped entirely when
-    // shadowsEnabled is off - see its declaration for why that's worth having.
-    if (this.shadowsEnabled) {
-      const shadowCasters = meshShapes.filter((s) => s.hasShadow())
-      if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
-        if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
-          this.shadowBatcher.rebuild(shadowCasters)
-          this.shadowGeometryDirty = false
-        }
-        // Half a depth step behind the caster: far enough to lose the depth test against its
-        // own shape, near enough to stay in front of whatever sits below it. This also
-        // re-reads each shadow's atlas slot, so a silhouette re-baked this frame is picked up
-        // without the geometry above needing to know anything about it.
-        this.shadowBatcher.updateObjects(this.shadowAtlas, depths, 0.5 / (ordered.length + 1))
-        pass.setPipeline(this.shadowPipeline)
-        this.shadowBatcher.draw(pass, this.frameUniforms.bindGroup, this.shadowAtlas)
+      } else {
+        this.shadowBatcher.drawRange(pass, this.frameUniforms.bindGroup, this.shadowAtlas, run.from, run.to)
       }
     }
 

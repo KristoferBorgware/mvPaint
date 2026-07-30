@@ -184,16 +184,35 @@ export class ShadowBatcher {
 
   /** One indexed draw covering every shadow, with the atlas bound as group(2). */
   draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, atlas: ShadowAtlas): void {
+    this.drawRange(pass, frameBindGroup, atlas, 0, this.casters.length)
+  }
+
+  /**
+   * Draw only the shadows of casters [from, to) of the last rebuild. Every caster packs
+   * exactly one quad - six indices, in caster order - so the span is arithmetic rather
+   * than a lookup, and one bind group covers the whole atlas either way.
+   */
+  drawRange(
+    pass: GPURenderPassEncoder,
+    frameBindGroup: GPUBindGroup,
+    atlas: ShadowAtlas,
+    from: number,
+    to: number,
+  ): void {
     const atlasBindGroup = atlas.bindGroup
     if (!this.vertexBuffer || !this.indexBuffer || !this.objectBindGroup || !atlasBindGroup || this.indexCount === 0) {
       return
     }
+    const first = Math.max(0, from) * 6
+    const count = Math.min(to, this.casters.length) * 6 - first
+    if (count <= 0) return
+
     pass.setBindGroup(0, frameBindGroup)
     pass.setBindGroup(1, this.objectBindGroup)
     pass.setBindGroup(2, atlasBindGroup)
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setIndexBuffer(this.indexBuffer, 'uint32')
-    pass.drawIndexed(this.indexCount)
+    pass.drawIndexed(count, 1, first)
   }
 
   destroy(): void {

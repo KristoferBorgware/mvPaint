@@ -332,12 +332,13 @@ only in vertex format and fragment maths.
 | **Mesh** | flat colour, or an analytic gradient | one per run, plus one for the overlay tail |
 | **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | one per run, split again per font atlas |
 | **Image** | `textureSample(...) * tint` | one per run, split again per (texture, sampler state) |
-| **Shadow** | sample the pre-blurred silhouette, tint it | one, after the content lanes |
+| **Shadow** | sample the pre-blurred silhouette, tint it | one per run, interleaved with the rest |
 
-### Why the content lanes interleave
+### Why the lanes interleave
 
-The three content lanes are **not** drawn one after another. They are merged into a single
-back-to-front sequence and drawn in runs — one draw per *lane change* (`render/drawOrder.ts`).
+The lanes are **not** drawn one after another. All four — mesh, text, image and shadow — are
+merged into a single back-to-front sequence and drawn in runs, one draw per *lane change*
+(`render/drawOrder.ts`).
 
 They used to draw one lane at a time, and the depth buffer was supposed to arbitrate. It
 cannot, for anything translucent. Alpha blending and the depth test know nothing about each
@@ -364,11 +365,16 @@ object — and it pays that to be correct. If that ever becomes real, the fix is
 *opaque* objects per lane (they need no ordering at all) and interleave only the translucent
 ones; nothing today needs it.
 
-The shadow lane is the exception that proves the rule. Shadows are drawn last, depth-**tested**
-but never depth-**writing**, half a depth step behind their caster. By then every shape has
-written its depth, so the test alone decides whether a shadow lands on a given shape or is
-hidden behind it — including the shape casting it. Drawing shadows first instead would paint
-every one of them under everything, which is only right for a single-layer scene.
+Shadows join that order like anything else. A shadow is a translucent blob with exactly the
+problem the content lanes have: it must composite over what is behind it and under what is in
+front. It sits **half a depth step behind its caster**, which places it immediately before
+that caster in the sequence — late enough to land on whatever is below, early enough for its
+own caster to paint over it. It is still depth-**tested** and never depth-**writing**, so it
+occludes nothing.
+
+Drawing shadows last, as they used to be, worked only while everything above them was opaque.
+A translucent panel over a shadow had already written depth by the time the shadow lane ran,
+so the shadow was rejected outright instead of showing through.
 
 ---
 

@@ -835,7 +835,7 @@ assert(
   ] as ('mesh' | 'text' | 'image')[][]) {
     const runs = runsFor(kinds)
     const replayed: string[] = []
-    const next = { mesh: 0, text: 0, image: 0 }
+    const next = { mesh: 0, text: 0, image: 0, shadow: 0 }
     for (const run of runs) {
       assert(run.from === next[run.lane], `${kinds.join('/')}: runs of a lane are contiguous and in order`)
       for (let i = run.from; i < run.to; i++) replayed.push(run.lane)
@@ -844,8 +844,46 @@ assert(
     assert(replayed.join(',') === kinds.join(','), `${kinds.join('/')}: the runs replay the scene order exactly`)
   }
 
+  // A shadow sits half a depth step BEHIND the shape casting it, so it must be drawn
+  // immediately before that shape - late enough to land on whatever is below it, early
+  // enough for its own caster to paint over it. Merging on the nudged depth is what puts
+  // it there; drawing shadows last, as they used to be, is what left them stuck behind
+  // anything translucent that had already written depth.
+  {
+    const back = new Rect({ name: 'back', width: 1, height: 1 })
+    const caster = new Rect({ name: 'caster', width: 1, height: 1 })
+    const front = new Rect({ name: 'front', width: 1, height: 1 })
+    const depths = new Map<Shape, number>([
+      [back, depthForRank(0, 3)],
+      [caster, depthForRank(1, 3)],
+      [front, depthForRank(2, 3)],
+    ])
+    const nudge = 0.5 / 4
+    const runs = buildDrawRuns(
+      [back, caster, front],
+      3,
+      [depths.get(back)!, depths.get(caster)!, depths.get(front)!],
+      [],
+      [],
+      depths,
+      [caster],
+      nudge,
+    )
+    const replayed = runs.flatMap((r) => Array.from({ length: r.to - r.from }, () => r.lane))
+    // Depths are 0.75 / 0.50 / 0.25 back to front, and the shadow sits at 0.50 + 0.125:
+    // between the shape below the caster and the caster itself.
+    assert(
+      replayed.join(',') === 'mesh,shadow,mesh,mesh',
+      "the caster's shadow is drawn between the shape below it and the caster",
+    )
+    assert(runs[0].to === 1, 'the shape furthest back goes first')
+    assert(runs[1].lane === 'shadow' && runs[1].from === 0 && runs[1].to === 1, 'then the one shadow')
+    assert(runs[2].from === 1 && runs[2].to === 3, 'then the caster and everything in front of it')
+  }
+
   // Nothing in, nothing out.
   assert(buildDrawRuns([], 0, [], [], [], new Map()).length === 0, 'an empty scene draws nothing')
+  assert(buildDrawRuns([], 0, [], [], [], new Map(), [], 0.1).length === 0, 'with or without a shadow lane')
 
   // Overlays are excluded by passing a mesh count short of the list: they are a tail past
   // overlayStart and draw last of all, with depth off.
