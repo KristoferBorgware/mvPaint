@@ -187,6 +187,9 @@ requestAnimationFrame tick
   ├─ onPrePass(encoder)          ← shadow silhouette baking, in its own passes
   ├─ beginRenderPass({ colour: MSAA texture, resolveTarget: swapchain, depth: depth24plus })
   │    └─ onFrame({ pass, dt, width, height })    ← SceneRenderer records every draw here
+  │         ├─ pass 1: the opaque half, batched per lane, writing depth
+  │         ├─ pass 2: everything translucent, back to front, depth read-only
+  │         └─ pass 3: the overlay tail, depth off entirely
   ├─ pass.end()
   └─ queue.submit([encoder.finish()])
 ```
@@ -238,12 +241,24 @@ margin). Depths are filtered in step with their shapes by an explicit loop —
 `.filter()` cannot keep a second array in sync.
 
 **Overlay split.** Overlay shapes (transformer handles, marquee box) are packed **last**, so
-they occupy a contiguous tail of the index buffer. That is what lets one buffer be drawn as two
-ranges under two pipelines.
+they occupy a contiguous tail of the index buffer. That is what lets one buffer be drawn as
+several ranges under different pipelines.
+
+**Opacity split.** Ahead of that tail the mesh lane splits again: shapes that provably paint no
+partial alpha are moved to the **front** of the list, so they too occupy a contiguous range and
+can be drawn as a single call (see [The two passes](#the-two-passes)). The partition is stable,
+so the translucent half keeps the back-to-front order it needs — and a lane that is entirely one
+or the other is handed straight back, unreordered and uncopied.
+
+The mesh lane's packed order is therefore `[ opaque | translucent | overlay ]`, and every draw
+in the frame is a half-open range of it.
 
 **The fast path.** When culling and z-sorting are both off and nothing is dirty, the entire
 gather is skipped and last frame's arrays are reused. That is how a 100k-shape scene avoids
-re-traversing itself sixty times a second.
+re-traversing itself sixty times a second. The opacity split is part of what gets reused, and it
+is the one thing here derived from something a caller can change silently — a fill or stroke
+alpha. In that state (culling *and* the z-sort both off), an alpha that crosses 1 needs a
+`markGeometryDirty()` to be noticed; every other state re-gathers, and re-splits, anyway.
 
 ---
 
@@ -327,54 +342,108 @@ so the gradient rotates and scales with the shape for nothing.
 All four share group 0, the depth buffer, the sample count and the render pass. They differ
 only in vertex format and fragment maths.
 
-| Lane | Fragment work | Draw calls |
+| Lane | Fragment work | Can be opaque? |
 | --- | --- | --- |
-| **Mesh** | flat colour, or an analytic gradient | one per run, plus one for the overlay tail |
-| **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | one per run, split again per font atlas |
-| **Image** | `textureSample(...) * tint` | one per run, split again per (texture, sampler state) |
-| **Shadow** | sample the pre-blurred silhouette, tint it | one per run, interleaved with the rest |
+| **Mesh** | flat colour, or an analytic gradient | **yes**, when every material's fill and stroke are at alpha 1 |
+| **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | never — see below |
+| **Image** | `textureSample(...) * tint` | never — see below |
+| **Shadow** | sample the pre-blurred silhouette, tint it | never; a shadow is translucent by definition |
 
-### Why the lanes interleave
+---
 
-The lanes are **not** drawn one after another. All four — mesh, text, image and shadow — are
-merged into a single back-to-front sequence and drawn in runs, one draw per *lane change*
-(`render/drawOrder.ts`).
+## The two passes
 
-They used to draw one lane at a time, and the depth buffer was supposed to arbitrate. It
-cannot, for anything translucent. Alpha blending and the depth test know nothing about each
-other, so a fragment at alpha 0.4 still writes depth — and whatever sat behind it **in a later
-lane** was then rejected outright instead of showing through. Transparency worked in one
-direction and not the other, decided by which lane a thing happened to be in.
+Alpha blending is order-dependent and the depth test is not, and **no single draw order serves
+both**. So the frame is drawn twice over, splitting the scene by whether an object can be
+*proven* to paint only opaque fragments (`render/opacity.ts`).
 
-Back-to-front is the only order alpha blending composites correctly in, so that is the order
-they go in. The depth test still runs, and still resolves the shadow lane against all of it;
-it just no longer has to arbitrate between the content lanes, because every fragment now
-arrives at or nearer than what it lands on and always passes.
+These are phases of the one WebGPU render pass, not separate `beginRenderPass` calls — the
+colour and depth attachments are never rebound, only the pipelines and the draw ranges change.
 
-The cost is proportional to how much the scene alternates. Measured on the merge itself:
+| | order | batching | depth test | depth write |
+| --- | --- | --- | --- | --- |
+| **1. Opaque** | irrelevant | one draw per lane | yes | **yes** |
+| **2. Translucent** | strictly back to front, all lanes merged | one draw per *lane change* | yes | no |
+| **3. Overlay** | packed tail of the mesh buffer | one draw | no (`always`) | no |
 
-| scene | runs | merge cost per gather |
+**Pass 1** needs no ordering at all, because for fully opaque fragments the depth buffer *is*
+the sort: two overlapping solid shapes resolve to the nearer one whichever draws first. So an
+opaque lane collapses to one draw however finely its shapes are stacked among the translucent
+ones. It writes depth, which is what pass 2 then reads.
+
+**Pass 2** is the opposite: back-to-front is the only order alpha blending composites correctly
+in, so the lanes are merged into one furthest-first sequence and drawn in runs, one draw per
+lane change (`render/drawOrder.ts`). It still *tests* depth — an opaque shape in front hides all
+of it — but never *writes* it, because translucent fragments have no business rejecting each
+other.
+
+**Pass 3** is the editor furniture, on top of everything, touching depth not at all.
+
+### Why the split has to be conservative
+
+"Opaque" is a promise that **every** fragment an object can produce comes out at alpha 1,
+because that is what earns it the right to write depth ahead of everything behind it. A wrong
+"translucent" costs one draw call; a wrong "opaque" punches a hole in the picture. So anything
+the CPU cannot prove from the object's own fields is translucent, and two whole lanes fail by
+construction:
+
+- **Text.** An MSDF glyph's alpha *is* its coverage — the shader turns the sampled distance
+  into a soft edge — so every glyph outline is a ring of partial-alpha fragments however solid
+  the run's colour is. (Mesh shapes get their edges from MSAA instead, which resolves per
+  *sample*: a covered sample is fully covered, so a solid fill really is opaque everywhere it
+  draws.)
+- **Images.** What is in a texture is the application's business and is never read back, so
+  nothing on the CPU can rule out an alpha channel. A tint alpha below 1 proves an image
+  translucent; a tint alpha of 1 proves nothing. The cheap fix, should an image-heavy scene
+  ever want the opaque pass, is for the caller to declare it when building the `ImageTexture` —
+  it is the one party that knows.
+
+A mesh shape is opaque when every material it declares has an opaque stroke colour and either a
+flat fill at alpha 1 or a gradient whose every stop is. The stroke is checked whether or not the
+shape strokes anything, since a material carries no stroke *width*; that costs nothing in
+practice, because an unstroked shape keeps the default opaque black.
+
+### What it was before
+
+The lanes used to draw one at a time — all the mesh, then all the text, then all the images —
+and the depth buffer was supposed to arbitrate. It cannot, for anything translucent: a fragment
+at alpha 0.4 still writes depth, so whatever sat behind it **in a later lane** was rejected
+outright instead of showing through. Transparency worked in one direction and not the other,
+decided by which lane a thing happened to be in.
+
+Interleaving everything back-to-front fixed that but charged every scene for it: each lane
+change is a draw call, so a scene that alternated kinds paid one draw per object even where
+nothing was translucent at all. Splitting the passes pays that cost only where it buys
+something. Measured on the real app, one full frame each:
+
+| scene | before | after |
 | --- | --: | --: |
-| 100k shapes, all one lane | **1** | 0.91 ms |
-| 10k shapes, all one lane | **1** | 0.11 ms |
-| 100k alternating mesh/text | 100000 | 9.71 ms |
+| Shapes & gradients | 2 draws | **2** |
+| Shape stress test (100k) | 4 draws | **4** |
+| MSDF text stress test | 112 draws | **108** |
+| Shadows | 27 draws | **5** |
+| Transparency across lanes | 45 draws | **41** |
+| Stacking order | 4 draws | 5 |
 
-Both stress tests are a single run, so nothing changed for them. A page of shapes with text
-over it is two or three. Only a scene that genuinely alternates kinds at every depth pays per
-object — and it pays that to be correct. If that ever becomes real, the fix is to batch the
-*opaque* objects per lane (they need no ordering at all) and interleave only the translucent
-ones; nothing today needs it.
+The last row is the honest cost: pulling an opaque shape out of the middle of a back-to-front
+run splits that run in two, so a scene whose mesh lane is nearly all translucent can pay one
+extra draw per lane. It is bounded at that.
 
-Shadows join that order like anything else. A shadow is a translucent blob with exactly the
-problem the content lanes have: it must composite over what is behind it and under what is in
-front. It sits **half a depth step behind its caster**, which places it immediately before
-that caster in the sequence — late enough to land on whatever is below, early enough for its
-own caster to paint over it. It is still depth-**tested** and never depth-**writing**, so it
-occludes nothing.
+Classifying costs a scan of the visible mesh shapes per gather — around 10 ms at 100k shapes,
+against roughly 88 ms for the viewport-cull scan sitting beside it, and nothing at all on the
+fast path where the whole gather is reused.
 
-Drawing shadows last, as they used to be, worked only while everything above them was opaque.
-A translucent panel over a shadow had already written depth by the time the shadow lane ran,
-so the shadow was rejected outright instead of showing through.
+### Shadows
+
+Shadows join pass 2 like anything else. A shadow is a translucent blob with exactly the problem
+the content lanes have: it must composite over what is behind it and under what is in front. It
+sits **half a depth step behind its caster**, which places it immediately before that caster in
+the sequence — late enough to land on whatever is below, early enough for its own caster to
+paint over it.
+
+Drawing shadows last, as they used to be, worked only while everything above them was opaque. A
+translucent panel over a shadow had already written depth by the time the shadow lane ran, so
+the shadow was rejected outright instead of showing through.
 
 ---
 
@@ -398,6 +467,12 @@ between a ~30 MB copy every frame and a few hundred bytes while dragging one sha
 ### A colour changes
 
 Same path. Solid colours and gradient parameters live in the object record, never in geometry.
+
+One caveat, and only on the fast path: an **alpha** that crosses 1 moves the shape between the
+opaque and translucent halves of the mesh list, and that split is computed in the gather. Every
+ordinary scene re-gathers each frame and picks it up for free. A scene that has switched both
+culling and the z-sort off is reusing last frame's gather wholesale, and needs a
+`markGeometryDirty()` for the change to be seen.
 
 ### Geometry changes — `Circle.radius`, `Polyline.points`, `strokeWidth`, `Path.filled`
 
@@ -556,7 +631,8 @@ scene.root.addChild(new Circle({ x: 100, y: 50, radius: 40, fill: [1, 0, 0, 1] }
 1. The constructor stores fields. No GPU work, no geometry.
 2. The app calls `markGeometryDirty()` on the renderer — the visible set changed.
 3. **Gather.** The circle sorts into z-order at rank *r*, takes `depth = (n - r) / (n + 1)`,
-   buckets into the mesh lane, survives the cull.
+   buckets into the mesh lane, survives the cull. Its fill is at alpha 1 and its stroke colour
+   defaults to opaque, so it classifies as opaque and lands in the head of the mesh list.
 4. **Rebuild.** Set membership changed, so `batcher.rebuild()` runs. `tessellate()` calls
    `buildGeometry()` once: a fan of 101 vertices and 100 triangles around **(0, 0)** — its own
    local space, the segment count chosen from the radius. The batcher rebases the indices, stamps object id 37 into
@@ -565,8 +641,9 @@ scene.root.addChild(new Circle({ x: 100, y: 50, radius: 40, fill: [1, 0, 0, 1] }
 5. **`updateObjects()`.** Slot 37 receives the world matrix (a translation to 100, 50), the
    depth, `fillType = 0`, `fillColor = (1, 0, 0, 1)`. 304 bytes, uploaded inside a merged dirty
    range.
-6. **Draw.** `setBindGroup(0, frame)`, `setBindGroup(1, objects)`, `setVertexBuffer`,
-   `setIndexBuffer`, and one `drawIndexed` covering every mesh shape in the scene.
+6. **Draw.** In the opaque pass: `setBindGroup(0, frame)`, `setBindGroup(1, objects)`,
+   `setVertexBuffer`, `setIndexBuffer`, and one `drawIndexed` covering every opaque mesh shape
+   in the scene.
 7. **Vertex shader.** Reads `objects[37].model`, transforms the local origin-centred positions
    to clip space, overwrites `clip.z` with the object's depth.
 8. **Fragment shader.** `fillType == 0`, so it returns `fillColor`. The depth test decides
@@ -593,6 +670,7 @@ only for slot 37.
 | Pipelines, bind layouts | `render/*Pipeline.ts`, `render/layouts.ts`, `render/depthFormat.ts` |
 | Orchestration | `webgpu/SceneRenderer.ts`, `systems/FrameRenderer.ts`, `systems/GpuContext.ts` |
 | Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
+| Draw order and the two passes | `render/opacity.ts`, `render/drawOrder.ts` |
 | Invalidation | `shapes/contentEpoch.ts` |
 | Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts` |
 

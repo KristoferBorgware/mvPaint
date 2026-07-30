@@ -156,10 +156,14 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     color = sampleGradient(obj, t);
   }
 
-  // A fully transparent fragment (e.g. a selection-highlight's invisible fill) must not
-  // write depth - depthWriteEnabled doesn't look at alpha, so without this a see-through
-  // fragment would still occlude whatever draws after it (the text lane, always second)
-  // at the same pixel, even though it contributes no visible color of its own.
+  // A fully transparent fragment (e.g. a selection-highlight's invisible fill) contributes
+  // nothing at all: straight-alpha blending at alpha 0 leaves the destination byte for byte
+  // as it was. Discarding skips that blend instead of performing it.
+  //
+  // It decides nothing about depth any more. A shape that can paint a transparent fragment
+  // is translucent by definition (see render/opacity.ts), and the translucent pass does not
+  // write depth; the opaque pass, which does, is only ever given shapes that cannot get
+  // here. See webgpu/SceneRenderer's draw() for the two passes.
   if (color.a <= 0.0) {
     discard;
   }

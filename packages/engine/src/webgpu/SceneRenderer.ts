@@ -2,7 +2,22 @@
 // and text lane pipelines/batchers, and renders by collecting visible shapes/text each
 // frame, assigning each a depth from its zIndex rank (see scene/picking.ts) so the two
 // lanes' draw calls resolve their stacking order correctly via the depth buffer instead
-// of "whichever lane draws last always wins". Shapes/text outside the camera's current
+// of "whichever lane draws last always wins".
+//
+// THE FRAME IS DRAWN IN TWO PASSES, for the reason every alpha-blending renderer has:
+// blending is order-dependent and the depth test is not, and one draw order cannot serve
+// both. So draw() splits the scene by whether an object can be proven to paint only opaque
+// fragments (see render/opacity.ts):
+//
+//   1. The OPAQUE pass needs no ordering at all - the depth buffer decides between two
+//      overlapping solid shapes - so each lane draws as a single batch, and writes depth.
+//   2. The TRANSLUCENT pass is strictly furthest-first across all lanes at once (see
+//      render/drawOrder.ts), one draw per lane change, so each fragment lands over what is
+//      already behind it. It tests depth against pass 1 but never writes it.
+//   3. Then the overlay tail, on top of everything, with depth off entirely.
+//
+// Only the mesh lane can currently fill pass 1; text and images are always translucent, and
+// render/opacity.ts says why. Shapes/text outside the camera's current
 // view rectangle are culled before reaching either batcher (see scene/culling.ts) - a
 // rebuild only re-runs when the visible SET changes (content added/removed, or something
 // crossing the view boundary), not on every frame just because something moved. Culling
@@ -25,7 +40,8 @@ import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
-import { buildDrawRuns, type DrawRun } from '../render/drawOrder'
+import { buildDrawRuns, type DrawRun, type LaneName } from '../render/drawOrder'
+import { partitionByOpacity } from '../render/opacity'
 import type { TransformableNode } from '../shapes/Group'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
@@ -80,7 +96,10 @@ export class SceneRenderer {
   // camera gets the default one, rather than a frame that silently draws nothing.
   private activeCamera: Camera2D
 
+  /** The mesh lane's opaque-pass pipeline: depth tested and written. */
   private readonly pipeline: GPURenderPipeline
+  /** Same mesh pipeline with the depth WRITE off - the translucent pass's variant. */
+  private readonly translucentPipeline: GPURenderPipeline
   /** Same mesh pipeline with the depth test/write off - see createMeshPipeline's `overlay`. */
   private readonly overlayPipeline: GPURenderPipeline
   private readonly frameUniforms: FrameUniforms
@@ -138,9 +157,12 @@ export class SceneRenderer {
     depths: ReadonlyMap<Shape, number>
     meshShapes: readonly Shape[]
     texts: readonly Text[]
+    textDepths: readonly number[]
     images: readonly Image[]
+    imageDepths: readonly number[]
     visibleMeshShapes: readonly Shape[]
     visibleMeshDepths: readonly number[]
+    meshTranslucentStart: number
     overlayStart: number
     runs: readonly DrawRun[]
   } | null = null
@@ -162,6 +184,7 @@ export class SceneRenderer {
     const objectLayout = createObjectBindGroupLayout(device)
     const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
     this.pipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout)
+    this.translucentPipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout, { translucent: true })
     this.overlayPipeline = createMeshPipeline(device, format, SAMPLE_COUNT, pipelineLayout, { overlay: true })
     this.frameUniforms = new FrameUniforms(device, frameLayout)
     this.batcher = new MeshBatcher(device, objectLayout)
@@ -349,6 +372,13 @@ export class SceneRenderer {
     // for a static scene. Reusing last frame's arrays instead of rebuilding them is what
     // lets a scene like the shape stress test skip tens of thousands of shapes' worth of
     // traversal and array-building on every frame it's just sitting there.
+    //
+    // The opaque/translucent split (see render/opacity.ts) is part of what gets reused, and
+    // it is the one thing here derived from something a caller can change silently: a fill
+    // or stroke alpha. Recomputing it every frame would mean classifying every visible shape
+    // every frame, which is precisely the per-object scan this cache exists to avoid - so in
+    // this state (culling AND the zIndex sort both off), an alpha that crosses 1 needs a
+    // markGeometryDirty() to be noticed. Every other state re-gathers, and re-splits, anyway.
     const canReuseGather =
       !this.cullingEnabled &&
       !this.zSortEnabled &&
@@ -364,9 +394,12 @@ export class SceneRenderer {
     let depths: ReadonlyMap<Shape, number>
     let meshShapes: readonly Shape[]
     let visibleTexts: readonly Text[]
+    let visibleTextDepths: readonly number[]
     let visibleImages: readonly Image[]
+    let visibleImageDepths: readonly number[]
     let visibleMeshShapes: readonly Shape[]
     let visibleMeshDepths: readonly number[]
+    let meshTranslucentStart: number
     let overlayStart: number
     let runs: readonly DrawRun[]
 
@@ -376,9 +409,12 @@ export class SceneRenderer {
       depths = g.depths
       meshShapes = g.meshShapes
       visibleTexts = g.texts
+      visibleTextDepths = g.textDepths
       visibleImages = g.images
+      visibleImageDepths = g.imageDepths
       visibleMeshShapes = g.visibleMeshShapes
       visibleMeshDepths = g.visibleMeshDepths
+      meshTranslucentStart = g.meshTranslucentStart
       overlayStart = g.overlayStart
       runs = g.runs
     } else {
@@ -441,12 +477,18 @@ export class SceneRenderer {
       const visibleTextsLocal = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
       // An image's quad IS its local bounds, so the ordinary shape cull applies unchanged.
       const visibleImagesLocal = viewBounds ? images.filter((i) => isShapeOnScreen(i, viewBounds)) : images
+      // Depths lifted out of the map into arrays aligned with each lane's own packed list -
+      // the draw-order merge below walks them once per object per frame, and a hash lookup
+      // in that loop is the same avoidable cost it is in MeshBatcher.updateObjects.
+      const visibleTextDepthsLocal = visibleTextsLocal.map((t) => depthsLocal.get(t)!)
+      const visibleImageDepthsLocal = visibleImagesLocal.map((i) => depthsLocal.get(i)!)
 
       // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
-      // is what lets one batch be drawn as two ranges: the scene, then (after the text lane)
-      // the overlay with depth off, so editor furniture sits on top without occluding. Same
-      // one-pass bucketing as above, depths carried alongside; the overlay tail is only
-      // appended (a second, usually empty pair of arrays) when there's actually one to append.
+      // is what lets ONE batch serve every pass: each draw is a half-open range of the same
+      // buffer, and the tail is the one drawn with depth off so editor furniture sits on top
+      // without occluding. Same one-pass bucketing as above, depths carried alongside; the
+      // overlay tail is only appended (a second, usually empty pair of arrays) when there's
+      // actually one to append.
       const normal: Shape[] = []
       const normalDepths: number[] = []
       const overlays: Shape[] = []
@@ -461,9 +503,16 @@ export class SceneRenderer {
           normalDepths.push(onScreenDepths[i])
         }
       }
-      const visibleMeshShapesLocal = overlays.length > 0 ? normal.concat(overlays) : normal
-      const visibleMeshDepthsLocal = overlays.length > 0 ? normalDepths.concat(overlayDepths) : normalDepths
-      const overlayStartLocal = normal.length
+      // Before that tail, the lane splits again: the shapes that provably paint no partial
+      // alpha (see render/opacity.ts) are moved to the FRONT of the list, so they too occupy
+      // a contiguous range and can be drawn as one call in the opaque pass. Both halves keep
+      // their rank order, which is what the translucent one needs and what lets a scene that
+      // is entirely one or the other be handed back untouched.
+      const split = partitionByOpacity(normal, normalDepths)
+      const visibleMeshShapesLocal = overlays.length > 0 ? split.shapes.concat(overlays) : split.shapes
+      const visibleMeshDepthsLocal = overlays.length > 0 ? split.depths.concat(overlayDepths) : split.depths
+      const meshTranslucentStartLocal = split.translucentStart
+      const overlayStartLocal = split.shapes.length
 
       // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
       // objects belong in them changes - content added/removed, or the visible set itself
@@ -481,25 +530,25 @@ export class SceneRenderer {
       }
       this.visibleMeshShapes = visibleMeshShapesLocal
 
-      // The order the lanes are actually drawn in: furthest first, whatever lane that is.
-      // Overlays are excluded (the mesh list carries them as a tail past overlayStart) -
-      // they draw last of all, with depth off.
-      const runsLocal = buildDrawRuns(
-        visibleMeshShapesLocal,
-        overlayStartLocal,
-        visibleMeshDepthsLocal,
-        visibleTextsLocal,
-        visibleImagesLocal,
-        depthsLocal,
-      )
+      // The translucent pass's order: furthest first, whatever lane that is. The mesh lane
+      // contributes only its translucent middle - its opaque head is drawn as one batch in
+      // the first pass, and its overlay tail last of all with depth off.
+      const runsLocal = buildDrawRuns({
+        mesh: { depths: visibleMeshDepthsLocal, from: meshTranslucentStartLocal, to: overlayStartLocal },
+        text: { depths: visibleTextDepthsLocal, from: 0, to: visibleTextsLocal.length },
+        image: { depths: visibleImageDepthsLocal, from: 0, to: visibleImagesLocal.length },
+      })
 
       ordered = orderedLocal
       depths = depthsLocal
       meshShapes = onScreen
       visibleTexts = visibleTextsLocal
+      visibleTextDepths = visibleTextDepthsLocal
       visibleImages = visibleImagesLocal
+      visibleImageDepths = visibleImageDepthsLocal
       visibleMeshShapes = visibleMeshShapesLocal
       visibleMeshDepths = visibleMeshDepthsLocal
+      meshTranslucentStart = meshTranslucentStartLocal
       overlayStart = overlayStartLocal
       runs = runsLocal
 
@@ -508,9 +557,12 @@ export class SceneRenderer {
         depths: depthsLocal,
         meshShapes: onScreen,
         texts: visibleTextsLocal,
+        textDepths: visibleTextDepthsLocal,
         images: visibleImagesLocal,
+        imageDepths: visibleImageDepthsLocal,
         visibleMeshShapes: visibleMeshShapesLocal,
         visibleMeshDepths: visibleMeshDepthsLocal,
+        meshTranslucentStart: meshTranslucentStartLocal,
         overlayStart: overlayStartLocal,
         runs: runsLocal,
       }
@@ -566,33 +618,46 @@ export class SceneRenderer {
     // that rebuilding the merge each frame is not worth measuring.
     const drawRuns =
       shadowCasters.length > 0
-        ? buildDrawRuns(
-            visibleMeshShapes,
-            overlayStart,
-            visibleMeshDepths,
-            visibleTexts,
-            visibleImages,
-            depths,
-            shadowCasters,
-            shadowNudge,
-          )
+        ? buildDrawRuns({
+            mesh: { depths: visibleMeshDepths, from: meshTranslucentStart, to: overlayStart },
+            text: { depths: visibleTextDepths, from: 0, to: visibleTexts.length },
+            image: { depths: visibleImageDepths, from: 0, to: visibleImages.length },
+            shadow: {
+              depths: shadowCasters.map((s) => (depths.get(s) ?? 0.5) + shadowNudge),
+              from: 0,
+              to: shadowCasters.length,
+            },
+          })
         : runs
 
-    // The content lanes and the shadows, interleaved strictly furthest-first rather than one
-    // lane after another (see DrawRun). Every fragment therefore arrives over what is already behind
-    // it, which is the only order alpha blending composites correctly in - a translucent
-    // shape now shows the text or image behind it instead of the depth buffer rejecting it
-    // for belonging to a lane that draws later.
+    // PASS 1 - the opaque half, which needs no ordering at all: every fragment it paints is
+    // fully opaque (see render/opacity.ts), so the depth buffer alone decides which of two
+    // overlapping shapes wins, and one draw covers the lot however finely they are stacked
+    // among the translucent ones. It WRITES depth, which is what lets the second pass skip
+    // whatever these have hidden.
     //
-    // The depth test still runs, and still resolves the shadow lane below against all of
-    // this. It just no longer has to arbitrate between the content lanes: back-to-front
-    // means every fragment is at or nearer than what it lands on, so it always passes.
-    let boundLane: DrawRun['lane'] | null = null
+    // Only the mesh lane has an opaque half to draw: text and images can never prove
+    // themselves opaque, and each has exactly one, depth-read-only pipeline for that reason.
+    if (meshTranslucentStart > 0) {
+      pass.setPipeline(this.pipeline)
+      this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, meshTranslucentStart))
+    }
+
+    // PASS 2 - everything translucent, and the shadows, interleaved strictly furthest-first
+    // rather than one lane after another (see drawOrder.ts). Every fragment therefore arrives
+    // over what is already behind it, which is the only order alpha blending composites
+    // correctly in - a translucent shape shows the text or image behind it instead of the
+    // depth buffer rejecting it for belonging to a lane that draws later.
+    //
+    // Depth is still TESTED here, against what pass 1 wrote, so an opaque shape in front
+    // still hides all of this. It is not WRITTEN: back-to-front already resolves these
+    // against each other, and writing would make them reject one another instead of blending.
+    let boundLane: LaneName | null = null
     for (const run of drawRuns) {
       if (run.lane !== boundLane) {
         pass.setPipeline(
           run.lane === 'mesh'
-            ? this.pipeline
+            ? this.translucentPipeline
             : run.lane === 'text'
               ? this.textPipeline
               : run.lane === 'image'

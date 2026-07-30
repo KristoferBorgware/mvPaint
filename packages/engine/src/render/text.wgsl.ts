@@ -200,10 +200,11 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     }
   }
 
-  // A fully transparent fragment - most commonly a glyph quad's margin outside the
-  // actual glyph ink, where MSDF coverage alpha is 0 - must not write depth.
-  // depthWriteEnabled doesn't look at alpha, so without this every glyph's bounding quad
-  // would occlude whatever's behind it at a different zIndex, not just its visible ink.
+  // A fully transparent fragment - most commonly a glyph quad's margin outside the actual
+  // glyph ink, where MSDF coverage alpha is 0 - contributes nothing: blending at alpha 0
+  // leaves the destination exactly as it was. Discarding skips that blend instead of
+  // performing it. Nothing behind the quad depends on it: text is drawn entirely in the
+  // translucent pass and never writes depth at all (see render/TextPipeline.ts).
   if (color.a <= 0.0) {
     discard;
   }

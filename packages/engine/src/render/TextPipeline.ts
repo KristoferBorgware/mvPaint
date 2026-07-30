@@ -3,6 +3,13 @@
 // depth buffer, so a shape can sit in front of text or vice versa - see
 // scene/picking.ts), and a pipeline layout that adds the atlas bind group (group 2) to
 // the shared frame/object groups.
+//
+// Text is drawn entirely in the translucent pass, so there is only ever this one variant
+// and it does not write depth. An MSDF glyph's alpha IS its coverage - the shader turns
+// the sampled distance into a soft edge - so every glyph outline is a ring of partial-alpha
+// fragments however solid the run's colour is, and none of them may reject what is behind
+// it. See render/opacity.ts for why that rules the whole lane out of the opaque pass, and
+// webgpu/SceneRenderer's draw() for the two passes.
 
 import { textShaderCode } from './text.wgsl'
 import { TEXT_VERTEX_LAYOUT } from './textFormat'
@@ -17,6 +24,7 @@ export function createTextPipeline(
   const module = device.createShaderModule({ code: textShaderCode })
 
   return device.createRenderPipeline({
+    label: 'text',
     layout,
     vertex: {
       module,
@@ -50,7 +58,7 @@ export function createTextPipeline(
     },
     depthStencil: {
       format: DEPTH_FORMAT,
-      depthWriteEnabled: true,
+      depthWriteEnabled: false,
       depthCompare: DEPTH_COMPARE,
     },
     multisample: {

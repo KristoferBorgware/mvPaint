@@ -19,8 +19,8 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
-import { buildDrawRuns } from './drawOrder'
-import { Text } from '../shapes/Text'
+import { buildDrawRuns, type LaneName } from './drawOrder'
+import { isOpaqueShape, partitionByOpacity } from './opacity'
 import { depthForRank } from '../scene/picking'
 import {
   SLOT_GRANULARITY,
@@ -763,47 +763,87 @@ assert(
   )
 }
 
+// --- what may be drawn in the opaque pass ----------------------------------------------
+//
+// The opaque pass writes depth, so a shape only belongs in it if EVERY fragment it can
+// paint comes out at alpha 1. The test is one-sided: a wrong "translucent" costs a draw
+// call, a wrong "opaque" punches a hole in the picture.
+{
+  assert(isOpaqueShape(new Rect({ width: 1, height: 1 })), 'a default shape is opaque - opaque fill, opaque stroke')
+  assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: [1, 0, 0, 0.4] })), 'a translucent fill is not')
+  assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: [1, 0, 0, 0] })), 'nor an invisible one')
+
+  // A material carries no stroke WIDTH, so the stroke colour is checked whether or not the
+  // shape strokes anything. That is the conservative direction, and it costs nothing in
+  // practice because an unstroked shape keeps the default opaque black.
+  assert(
+    !isOpaqueShape(new Rect({ width: 1, height: 1, stroke: [0, 0, 0, 0.5], strokeWidth: 2 })),
+    'a translucent stroke makes the shape translucent',
+  )
+
+  const gradient = (stops: RGBA[]) => {
+    const shape = new Rect({ width: 1, height: 1 })
+    shape.fillPriority = 'linear-gradient'
+    shape.fillLinearGradientColorStops = stops.map((color, i) => ({ offset: i, color }))
+    return shape
+  }
+  assert(isOpaqueShape(gradient([[1, 0, 0, 1], [0, 0, 1, 1]])), 'a gradient of opaque stops is opaque')
+  assert(!isOpaqueShape(gradient([[1, 0, 0, 1], [0, 0, 1, 0.2]])), 'one translucent stop is enough to disqualify it')
+  // An empty stop list resolves to transparent black in the shader, not to the flat fill.
+  assert(!isOpaqueShape(gradient([])), 'a gradient with no stops paints nothing, and is not opaque')
+
+  // The partition keeps both halves in rank order, and hands an unmixed lane straight back.
+  const solid = () => new Rect({ width: 1, height: 1 })
+  const clear = () => new Rect({ width: 1, height: 1, fill: [0, 0, 0, 0.5] })
+  {
+    const shapes = [solid(), solid(), solid()]
+    const split = partitionByOpacity(shapes, [0.9, 0.8, 0.7])
+    assert(split.shapes === shapes && split.translucentStart === 3, 'an all-opaque lane is not copied or reordered')
+
+    const clears = [clear(), clear()]
+    assert(partitionByOpacity(clears, [0.9, 0.8]).shapes === clears, 'nor an all-translucent one')
+
+    const sorted = [solid(), clear(), clear()]
+    assert(partitionByOpacity(sorted, [0.9, 0.8, 0.7]).shapes === sorted, 'nor one that already reads opaque-first')
+    assert(partitionByOpacity(sorted, [0.9, 0.8, 0.7]).translucentStart === 1, 'the boundary is still reported')
+  }
+  {
+    // The mixed case: opaque shapes move to the front, and each half keeps its own order,
+    // which is what the translucent pass's back-to-front requirement rests on.
+    const a = solid()
+    const b = clear()
+    const c = solid()
+    const d = clear()
+    const split = partitionByOpacity([a, b, c, d], [0.9, 0.8, 0.7, 0.6])
+    assert(split.translucentStart === 2, 'both opaque shapes end up in the head')
+    assert(split.shapes[0] === a && split.shapes[1] === c, 'the opaque half keeps its relative order')
+    assert(split.shapes[2] === b && split.shapes[3] === d, 'and so does the translucent half')
+    assert(
+      split.depths.join(',') === [0.9, 0.7, 0.8, 0.6].join(','),
+      'depths are carried across with their shapes rather than left behind',
+    )
+  }
+}
+
 // --- the draw order that makes transparency work across lanes --------------------------
 //
 // Lanes used to draw one after another, which made stacking depend on which lane a thing
 // was in: a translucent shape writes depth like any other fragment, so anything behind it
 // in a later-drawn lane was rejected instead of showing through. buildDrawRuns merges the
-// lanes into one furthest-first sequence, so every fragment lands over what is behind it.
+// translucent objects of every lane into one furthest-first sequence, so each of them lands
+// over what is behind it. (The opaque ones are drawn first, per lane, and are not in here.)
 {
-  // Stand-ins for the three lanes. Only their identity and their depth matter here; the
-  // merge never looks at geometry.
-  const mesh = (n: number) => new Rect({ name: `m${n}`, width: 1, height: 1 })
-  const text = (n: number) => new Text({ name: `t${n}`, text: 'x' })
-  // An Image needs a GPU texture to construct, and the merge never touches one - it reads
-  // nothing but each node's depth - so a plain Shape stands in for the image lane here.
-
   /** Builds a scene-wide order and hands back what buildDrawRuns makes of it. */
-  const runsFor = (kinds: ('mesh' | 'text' | 'image')[]) => {
-    const meshes: Shape[] = []
-    const texts: Shape[] = []
-    const images: Shape[] = []
-    const depths = new Map<Shape, number>()
-    const meshDepths: number[] = []
-    kinds.forEach((kind, rank) => {
-      // Rank 0 is furthest back and carries the LARGEST depth - the same relationship
-      // depthForRank produces.
-      const depth = depthForRank(rank, kinds.length)
-      if (kind === 'mesh') {
-        const s = mesh(rank)
-        meshes.push(s)
-        meshDepths.push(depth)
-        depths.set(s, depth)
-      } else if (kind === 'text') {
-        const s = text(rank)
-        texts.push(s)
-        depths.set(s, depth)
-      } else {
-        const s = mesh(rank)
-        images.push(s)
-        depths.set(s, depth)
-      }
+  const runsFor = (kinds: LaneName[]) => {
+    const depths: Record<LaneName, number[]> = { mesh: [], text: [], image: [], shadow: [] }
+    // Rank 0 is furthest back and carries the LARGEST depth - the same relationship
+    // depthForRank produces.
+    kinds.forEach((kind, rank) => depths[kind].push(depthForRank(rank, kinds.length)))
+    return buildDrawRuns({
+      mesh: { depths: depths.mesh, from: 0, to: depths.mesh.length },
+      text: { depths: depths.text, from: 0, to: depths.text.length },
+      image: { depths: depths.image, from: 0, to: depths.image.length },
     })
-    return buildDrawRuns(meshes, meshes.length, meshDepths, texts, images, depths)
   }
 
   // A scene of one kind is still one draw, which is what keeps the stress tests unaffected.
@@ -817,10 +857,10 @@ assert(
   assert(layered.map((r) => r.lane).join(',') === 'image,mesh,text', 'in the order they are stacked, furthest first')
   assert(layered[1].from === 0 && layered[1].to === 2, "each run indexes its own lane's list")
 
-  // The whole point: a run boundary happens at every lane CHANGE, so an alternating scene
-  // costs one draw per object - and gets the right answer, which it did not before.
+  // A run boundary happens at every lane CHANGE, so translucent content that alternates
+  // lanes costs one draw per object - and gets the right answer, which it did not before.
   const alternating = runsFor(['mesh', 'text', 'mesh', 'text', 'mesh'])
-  assert(alternating.length === 5, 'a scene that alternates lanes pays one draw per object')
+  assert(alternating.length === 5, 'translucent content that alternates lanes pays one draw per object')
   assert(alternating.map((r) => r.lane).join(',') === 'mesh,text,mesh,text,mesh', 'never reordered into lane batches')
   assert(alternating[2].from === 1 && alternating[2].to === 2, 'the second mesh run picks up where the first left off')
 
@@ -832,7 +872,7 @@ assert(
     ['text', 'text', 'image', 'image', 'mesh', 'mesh'],
     ['image'],
     ['text', 'mesh'],
-  ] as ('mesh' | 'text' | 'image')[][]) {
+  ] as LaneName[][]) {
     const runs = runsFor(kinds)
     const replayed: string[] = []
     const next = { mesh: 0, text: 0, image: 0, shadow: 0 }
@@ -850,25 +890,12 @@ assert(
   // it there; drawing shadows last, as they used to be, is what left them stuck behind
   // anything translucent that had already written depth.
   {
-    const back = new Rect({ name: 'back', width: 1, height: 1 })
-    const caster = new Rect({ name: 'caster', width: 1, height: 1 })
-    const front = new Rect({ name: 'front', width: 1, height: 1 })
-    const depths = new Map<Shape, number>([
-      [back, depthForRank(0, 3)],
-      [caster, depthForRank(1, 3)],
-      [front, depthForRank(2, 3)],
-    ])
+    const meshDepths = [depthForRank(0, 3), depthForRank(1, 3), depthForRank(2, 3)]
     const nudge = 0.5 / 4
-    const runs = buildDrawRuns(
-      [back, caster, front],
-      3,
-      [depths.get(back)!, depths.get(caster)!, depths.get(front)!],
-      [],
-      [],
-      depths,
-      [caster],
-      nudge,
-    )
+    const runs = buildDrawRuns({
+      mesh: { depths: meshDepths, from: 0, to: 3 },
+      shadow: { depths: [meshDepths[1] + nudge], from: 0, to: 1 },
+    })
     const replayed = runs.flatMap((r) => Array.from({ length: r.to - r.from }, () => r.lane))
     // Depths are 0.75 / 0.50 / 0.25 back to front, and the shadow sits at 0.50 + 0.125:
     // between the shape below the caster and the caster itself.
@@ -882,23 +909,23 @@ assert(
   }
 
   // Nothing in, nothing out.
-  assert(buildDrawRuns([], 0, [], [], [], new Map()).length === 0, 'an empty scene draws nothing')
-  assert(buildDrawRuns([], 0, [], [], [], new Map(), [], 0.1).length === 0, 'with or without a shadow lane')
+  assert(buildDrawRuns({}).length === 0, 'an empty scene draws nothing')
+  assert(buildDrawRuns({ mesh: { depths: [], from: 0, to: 0 } }).length === 0, 'nor does an empty lane')
+  assert(
+    buildDrawRuns({ shadow: { depths: [0.5], from: 1, to: 1 } }).length === 0,
+    'an empty slice of a non-empty lane draws nothing either',
+  )
 
-  // Overlays are excluded by passing a mesh count short of the list: they are a tail past
-  // overlayStart and draw last of all, with depth off.
-  const withOverlayTail = (() => {
-    const a = new Rect({ width: 1, height: 1 })
-    const b = new Rect({ width: 1, height: 1 })
-    const overlay = new Rect({ width: 1, height: 1, overlay: true })
-    const depths = new Map<Shape, number>([
-      [a, 0.9],
-      [b, 0.8],
-      [overlay, 0.1],
-    ])
-    return buildDrawRuns([a, b, overlay], 2, [0.9, 0.8, 0.1], [], [], depths)
-  })()
-  assert(withOverlayTail.length === 1 && withOverlayTail[0].to === 2, 'the overlay tail is left out of the interleaved order')
+  // Both of the mesh lane's other parts are excluded by the slice it is given: the opaque
+  // head (drawn first, batched, writing depth) and the overlay tail (drawn last, depth off).
+  const middleOnly = buildDrawRuns({
+    mesh: { depths: [0.9, 0.8, 0.7, 0.6], from: 1, to: 3 },
+    text: { depths: [0.75], from: 0, to: 1 },
+  })
+  assert(
+    middleOnly.map((r) => `${r.lane}:${r.from}-${r.to}`).join(',') === 'mesh:1-2,text:0-1,mesh:2-3',
+    "the mesh lane's opaque head and overlay tail stay out, and its middle still interleaves by depth",
+  )
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

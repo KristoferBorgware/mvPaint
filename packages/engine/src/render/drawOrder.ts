@@ -1,4 +1,4 @@
-// The order the content lanes are actually drawn in.
+// The order the lanes are actually drawn in.
 //
 // Lanes used to draw one after another, each in a single call: all the mesh shapes, then
 // all the text, then all the images. That is fewer draw calls, but it makes stacking depend
@@ -7,80 +7,89 @@
 // sits behind it in a LATER lane is then rejected outright rather than showing through it.
 // Transparency worked in one direction and not the other, for no reason a caller could see.
 //
-// So the lanes are interleaved instead: strictly furthest first, whatever lane that is.
-// Every fragment then arrives over what is already behind it, which is the only order alpha
-// blending composites correctly in. The depth test still runs and still resolves the shadow
-// lane against all of it; it just no longer has to arbitrate between the content lanes,
-// because back-to-front means every fragment is at or nearer than what it lands on.
+// Drawing everything strictly furthest-first fixes that, but charges every scene for it:
+// each lane CHANGE is a draw call, so a scene that alternates kinds all the way down pays
+// one draw per object even where nothing is translucent at all.
 //
-// The cost is one draw per lane CHANGE rather than one per lane. A scene that is all one
-// kind - either stress test - still yields exactly one run. A page of shapes with text over
-// it yields two or three. Only a scene that genuinely alternates kinds all the way down
-// pays per object, and it pays that to be correct.
+// So the frame is split in two instead (see webgpu/SceneRenderer's draw()):
+//
+//   1. THE OPAQUE PASS. Objects that provably paint no partial alpha (see
+//      render/opacity.ts). Order is irrelevant - the depth buffer resolves them - so each
+//      lane draws as one batch, and each writes depth.
+//   2. THE TRANSLUCENT PASS. Everything else, strictly furthest first, whatever lane that
+//      is - which is what this function builds. Depth is still TESTED, so an opaque object
+//      in front still hides what is behind it; depth is not WRITTEN, so translucent objects
+//      never reject each other and each one blends over what is already there.
+//
+// The cost of interleaving is therefore paid only by the objects that need it. A stress
+// field of solid shapes is one draw. A page of opaque shapes with text over it is two,
+// however finely the two are stacked together. Only genuinely translucent content
+// alternating between lanes pays per object, and it pays that to be correct.
 
-import type { Shape } from '../shapes/Shape'
+/** The lanes that can appear in the interleaved order, in tie-break priority. */
+export type LaneName = 'shadow' | 'mesh' | 'text' | 'image'
 
 /**
  * One uninterrupted stretch of a single lane in the back-to-front draw order. `from`/`to`
- * index into that lane's own visible list, which is packed in the same order.
+ * index into that lane's own packed list, which is in the same order.
  */
 export interface DrawRun {
-  lane: 'mesh' | 'text' | 'image' | 'shadow'
+  lane: LaneName
   from: number
   to: number
 }
 
+/** The part of one lane's packed list that takes part in the merge. */
+export interface LaneSlice {
+  /** Every packed entry's depth, index-aligned with the lane's own list. */
+  depths: readonly number[]
+  /** The half-open span of that list to merge; anything outside it is drawn elsewhere. */
+  from: number
+  to: number
+}
+
+export type LaneSlices = Partial<Record<LaneName, LaneSlice>>
+
+// Ties go to the lane listed first. Ranks are distinct so the content lanes never tie with
+// each other; a shadow only ever ties with its own caster, and drawing it first is what
+// puts it behind. See SceneRenderer's shadow nudge.
+const MERGE_ORDER: readonly LaneName[] = ['shadow', 'mesh', 'text', 'image']
+
 /**
- * Merges the three lanes' visible lists - each already in ascending zIndex rank - into one
- * back-to-front sequence, coalescing neighbours from the same lane. Rank 0 is furthest back
- * and every list is a subsequence of the same global order, so a three-way merge on rank
- * reproduces that order exactly.
+ * Merges each lane's slice - all already in ascending zIndex rank - into one back-to-front
+ * sequence, coalescing neighbours from the same lane into a single run. Rank 0 is furthest
+ * back and carries the LARGEST depth (see scene/picking.ts's depthForRank), so furthest
+ * first means largest first, and every slice is a subsequence of the same global order.
  */
-export function buildDrawRuns(
-  meshShapes: readonly Shape[],
-  meshCount: number,
-  meshDepths: readonly number[],
-  texts: readonly Shape[],
-  images: readonly Shape[],
-  depths: ReadonlyMap<Shape, number>,
-  shadows: readonly Shape[] = [],
-  shadowDepthNudge = 0,
-): DrawRun[] {
+export function buildDrawRuns(lanes: LaneSlices): DrawRun[] {
+  const names: LaneName[] = []
+  const slices: LaneSlice[] = []
+  const cursors: number[] = []
+  for (const name of MERGE_ORDER) {
+    const slice = lanes[name]
+    if (!slice || slice.to <= slice.from) continue
+    names.push(name)
+    slices.push(slice)
+    cursors.push(slice.from)
+  }
+
   const runs: DrawRun[] = []
-  let m = 0
-  let t = 0
-  let i = 0
-  let s = 0
-  // Depth runs the opposite way to rank: rank 0 is furthest back and carries the LARGEST
-  // depth (see scene/picking.ts's depthForRank). Furthest first therefore means largest
-  // first. Ranks are distinct, so no two nodes can tie.
-  const depthOf = (node: Shape | undefined): number => (node === undefined ? -Infinity : (depths.get(node) ?? -Infinity))
-
-  while (m < meshCount || t < texts.length || i < images.length || s < shadows.length) {
-    const dm = m < meshCount ? (meshDepths[m] ?? depthOf(meshShapes[m])) : -Infinity
-    const dt = t < texts.length ? depthOf(texts[t]) : -Infinity
-    const di = i < images.length ? depthOf(images[i]) : -Infinity
-    // A shadow sits just BEHIND the shape casting it, which is what the nudge is: far
-    // enough back to lose to its own caster, near enough to stay in front of whatever is
-    // below. Merging on that puts every shadow immediately before the shape that casts it.
-    const ds = s < shadows.length ? depthOf(shadows[s]) + shadowDepthNudge : -Infinity
-
-    let lane: DrawRun['lane']
-    let cursor: number
-    if (ds >= dm && ds >= dt && ds >= di) {
-      lane = 'shadow'
-      cursor = s++
-    } else if (dm >= dt && dm >= di) {
-      lane = 'mesh'
-      cursor = m++
-    } else if (dt >= di) {
-      lane = 'text'
-      cursor = t++
-    } else {
-      lane = 'image'
-      cursor = i++
+  for (;;) {
+    let best = -1
+    let bestDepth = 0
+    for (let k = 0; k < slices.length; k++) {
+      const cursor = cursors[k]
+      if (cursor >= slices[k].to) continue
+      const depth = slices[k].depths[cursor]
+      if (best < 0 || depth > bestDepth) {
+        best = k
+        bestDepth = depth
+      }
     }
+    if (best < 0) break
 
+    const cursor = cursors[best]++
+    const lane = names[best]
     const last = runs[runs.length - 1]
     if (last && last.lane === lane) last.to = cursor + 1
     else runs.push({ lane, from: cursor, to: cursor + 1 })

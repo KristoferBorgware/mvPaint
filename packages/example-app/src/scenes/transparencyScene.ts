@@ -7,17 +7,18 @@
 // anything that differs between the two halves is the lanes' doing rather than the shapes'.
 //
 // WHAT TO LOOK FOR. In every cell the BACK object is opaque and the FRONT one is
-// translucent, so the back object should show through, tinted. Where it does not - where it
-// vanishes inside the overlap instead - the front object has written the depth buffer and
-// rejected the one behind it. Alpha blending and the depth test know nothing about each
-// other: a fragment at alpha 0.4 is still a fragment, and it still writes depth.
+// translucent, so the back object should show through, tinted - in all twelve cells, both
+// ways round, with no cell behaving differently from its mirror.
 //
-// The lanes draw in a fixed order - mesh, then text, then image, then shadows - and each of
-// the first three writes depth. So the back object survives only when the FRONT object
-// belongs to a LATER lane than it. Every cell is labelled with which way round it is.
+// What would break it is a translucent fragment writing depth: alpha blending and the depth
+// test know nothing about each other, so a fragment at alpha 0.4 is still a fragment, and a
+// pipeline that writes depth writes it. Whatever sat behind it would then be rejected
+// outright and vanish inside the overlap rather than showing through. That is what the
+// renderer's two passes are for - translucent objects are drawn last, furthest first,
+// testing depth but never writing it (see the engine's webgpu/SceneRenderer).
 //
-// The bottom row is shadows, which are their own case: the shadow lane draws last and never
-// writes depth, so it is only ever on the receiving end of this.
+// The bottom row is shadows, which are on the receiving end of the same question: a shadow
+// never writes depth either, but it is still tested against what the opaque pass wrote.
 
 import { Circle, Image, ImageTexture, Rect, Text, type Scene } from '@mvpaint/engine'
 import { NAVY, SLATE } from './palette'
@@ -158,7 +159,8 @@ export function buildTransparencyScene(scene: Scene, device?: GPUDevice): SceneC
   // the zIndex swapped so that whichever was behind is now in front. In both cells the
   // FRONT object is the translucent one and the BACK object is opaque, so in both cells the
   // back object should show through. If one half of a pair looks different from the other,
-  // that difference is the lane order, because nothing else about them differs.
+  // that difference is the lane order, because nothing else about them differs - and the
+  // point of the pairing is that it should not.
   const midY = 90
   root.addChild(heading(-540, midY + 110, 'Across two lanes - in every cell the back object should show through'))
 
@@ -196,19 +198,20 @@ export function buildTransparencyScene(scene: Scene, device?: GPUDevice): SceneC
     })
   }
 
-  // Drawn in this order, and each of the three writes depth. A cell works out when its
-  // FRONT object belongs to a lane further down this list than its back object's.
-  const LANE_ORDER: LaneKind[] = ['mesh', 'text', 'image']
-  const drawnAt = (kind: LaneKind) => LANE_ORDER.indexOf(kind)
+  /**
+   * Which pass an object of this kind ends up in. Only the mesh lane can prove itself
+   * opaque, so an opaque mesh shape is the one thing here drawn first, batched, and writing
+   * depth; everything else waits for the translucent pass. Both cells of a pair should look
+   * the same however this falls out, which is what the pairing is testing.
+   */
+  const passOf = (kind: LaneKind, alpha: number) => (kind === 'mesh' && alpha >= 1 ? 'opaque' : 'translucent')
 
   /** Two objects at one centre: `back` opaque and behind, `front` translucent and over it. */
   const cell = (id: string, cx: number, cy: number, back: LaneKind, front: LaneKind) => {
     root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1, 0))
     root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA, 1))
     root.addChild(label(cx - 96, cy - 96, `${front} over ${back}`, NAVY))
-    root.addChild(
-      label(cx - 96, cy - 116, drawnAt(front) > drawnAt(back) ? 'front lane drawn later' : 'front lane drawn first'),
-    )
+    root.addChild(label(cx - 96, cy - 116, `back drawn in the ${passOf(back, 1)} pass`))
   }
 
   ;([
@@ -223,6 +226,9 @@ export function buildTransparencyScene(scene: Scene, device?: GPUDevice): SceneC
   })
 
   // --- row 3: shadows, which never write depth but are still tested against it ----------
+  //
+  // A shadow is merged into the translucent pass half a depth step behind the shape casting
+  // it, so it lands on whatever is below and its own caster paints over it.
   const lowY = -190
   root.addChild(heading(-540, lowY + 96, 'Shadows'))
 
