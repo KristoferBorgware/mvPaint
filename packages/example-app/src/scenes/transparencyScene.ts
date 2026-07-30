@@ -1,0 +1,308 @@
+// Transparency across the render lanes: what you can see through, and what you cannot.
+//
+// Every lane blends straight alpha, so a translucent thing over another thing in the SAME
+// lane composites correctly - the top row shows that for the mesh, text and image lanes in
+// turn. The middle row is the interesting one: the same two objects, in two different
+// lanes, stacked both ways round by zIndex. Each pair is a mirror image of the other, so
+// anything that differs between the two halves is the lanes' doing rather than the shapes'.
+//
+// WHAT TO LOOK FOR. In every cell the BACK object is opaque and the FRONT one is
+// translucent, so the back object should show through, tinted. Where it does not - where it
+// vanishes inside the overlap instead - the front object has written the depth buffer and
+// rejected the one behind it. Alpha blending and the depth test know nothing about each
+// other: a fragment at alpha 0.4 is still a fragment, and it still writes depth.
+//
+// The lanes draw in a fixed order - mesh, then text, then image, then shadows - and each of
+// the first three writes depth. So the back object survives only when the FRONT object
+// belongs to a LATER lane than it. Every cell is labelled with which way round it is.
+//
+// The bottom row is shadows, which are their own case: the shadow lane draws last and never
+// writes depth, so it is only ever on the receiving end of this.
+
+import { Circle, Image, ImageTexture, Rect, Text, type Scene } from '@mvpaint/engine'
+import { NAVY, SLATE } from './palette'
+import type { SceneContent } from './types'
+
+/** How see-through the front object in every pair is. Low enough that a back object hiding
+ * behind it is unmistakable rather than a subtle shift. */
+const FRONT_ALPHA = 0.4
+
+function label(x: number, y: number, text: string, color = SLATE): Text {
+  return new Text({ x, y, text, style: { fontSize: 14, color } })
+}
+
+function heading(x: number, y: number, text: string): Text {
+  return new Text({ x, y, text, style: { fontSize: 17, fontStyle: 'bold', color: NAVY } })
+}
+
+/** A solid checkerboard - opaque everywhere, so it works as a BACK object. */
+function checkerPixels(size: number, squares: number): ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  const step = size / squares
+  for (let y = 0; y < squares; y++) {
+    for (let x = 0; x < squares; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#2f6fb5' : '#e8eef5'
+      ctx.fillRect(x * step, y * step, step, step)
+    }
+  }
+  return ctx.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+/**
+ * A checkerboard whose pale squares are FULLY transparent rather than pale - holes, not
+ * light patches. Used for the last cell: an alpha-0 texel is still a fragment, and whether
+ * it writes depth is a different question from whether it draws any colour.
+ */
+function holedCheckerPixels(size: number, squares: number): ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d context')
+  ctx.clearRect(0, 0, size, size)
+  const step = size / squares
+  for (let y = 0; y < squares; y++) {
+    for (let x = 0; x < squares; x++) {
+      if ((x + y) % 2 !== 0) continue
+      ctx.fillStyle = '#2f6fb5'
+      ctx.fillRect(x * step, y * step, step, step)
+    }
+  }
+  return ctx.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+const CELL_W = 150
+const CELL_H = 100
+
+export function buildTransparencyScene(scene: Scene, device?: GPUDevice): SceneContent {
+  const root = scene.root
+  if (!device) return {}
+
+  const checker = ImageTexture.fromPixels(
+    device,
+    checkerPixels(256, 8).data,
+    256,
+    256,
+    undefined,
+    'transparency-checker',
+  )
+  const holed = ImageTexture.fromPixels(
+    device,
+    holedCheckerPixels(256, 8).data,
+    256,
+    256,
+    undefined,
+    'transparency-holes',
+  )
+
+  // --- row 1: within one lane, which is the control ------------------------------------
+  //
+  // Three overlapping translucent objects of the SAME kind. A lane packs its shapes
+  // back-to-front (ascending zIndex rank), so they composite in the order they are stacked
+  // and every overlap is a real blend. If any of these three cells looks wrong, nothing
+  // below it means anything.
+  const rowY = 330
+  root.addChild(heading(-540, rowY + 40, 'One lane at a time - every overlap should blend'))
+
+  for (let i = 0; i < 3; i++) {
+    root.addChild(
+      new Circle({
+        name: `mesh-blend-${i}`,
+        x: -470 + i * 46,
+        y: rowY - 60 + (i % 2) * 30,
+        radius: 46,
+        fill: [i === 0 ? 0.9 : 0.1, i === 1 ? 0.75 : 0.15, i === 2 ? 0.9 : 0.2, 0.55],
+        zIndex: i,
+      }),
+    )
+  }
+  root.addChild(label(-500, rowY - 160, 'mesh lane'))
+
+  for (let i = 0; i < 3; i++) {
+    root.addChild(
+      new Text({
+        name: `text-blend-${i}`,
+        x: -230 + i * 30,
+        y: rowY - 30 - i * 26,
+        text: 'BLEND',
+        style: { fontSize: 46, fontStyle: 'bold', color: [i === 0 ? 0.9 : 0.15, i === 1 ? 0.7 : 0.2, i === 2 ? 0.9 : 0.25, 0.55] },
+        zIndex: i,
+      }),
+    )
+  }
+  root.addChild(label(-230, rowY - 160, 'text lane'))
+
+  for (let i = 0; i < 3; i++) {
+    root.addChild(
+      new Image({
+        name: `image-blend-${i}`,
+        texture: checker,
+        x: 60 + i * 50,
+        y: rowY - 60 + (i % 2) * 30,
+        width: 110,
+        height: 110,
+        tint: [i === 0 ? 1 : 0.4, i === 1 ? 1 : 0.4, i === 2 ? 1 : 0.5, 0.55],
+        zIndex: i,
+      }),
+    )
+  }
+  root.addChild(label(60, rowY - 160, 'image lane'))
+
+  // --- row 2: the same two objects in two lanes, stacked both ways ----------------------
+  //
+  // Each pair gets two cells that are exact mirrors: same two objects, same overlap, only
+  // the zIndex swapped so that whichever was behind is now in front. In both cells the
+  // FRONT object is the translucent one and the BACK object is opaque, so in both cells the
+  // back object should show through. If one half of a pair looks different from the other,
+  // that difference is the lane order, because nothing else about them differs.
+  const midY = 90
+  root.addChild(heading(-540, midY + 110, 'Across two lanes - in every cell the back object should show through'))
+
+  type LaneKind = 'mesh' | 'text' | 'image'
+
+  /**
+   * One object of the given lane, placed so that two of them at the same centre overlap
+   * across roughly half their area. `alpha` is the whole point: the front object of a pair
+   * gets FRONT_ALPHA, the back one is opaque.
+   */
+  const makeObject = (kind: LaneKind, name: string, cx: number, cy: number, alpha: number, zIndex: number) => {
+    const rgb: [number, number, number] = alpha < 1 ? [0.13, 0.33, 0.78] : [0.87, 0.35, 0.16]
+    if (kind === 'mesh') {
+      return new Circle({ name, x: cx, y: cy, radius: 56, fill: [...rgb, alpha], zIndex })
+    }
+    if (kind === 'text') {
+      return new Text({
+        name,
+        x: cx - 72,
+        y: cy + 24,
+        text: 'ABC',
+        style: { fontSize: 54, fontStyle: 'bold', color: [...rgb, alpha] },
+        zIndex,
+      })
+    }
+    return new Image({
+      name,
+      texture: checker,
+      x: cx - CELL_W / 2,
+      y: cy + CELL_H / 2,
+      width: CELL_W,
+      height: CELL_H,
+      tint: [1, 1, 1, alpha],
+      zIndex,
+    })
+  }
+
+  // Drawn in this order, and each of the three writes depth. A cell works out when its
+  // FRONT object belongs to a lane further down this list than its back object's.
+  const LANE_ORDER: LaneKind[] = ['mesh', 'text', 'image']
+  const drawnAt = (kind: LaneKind) => LANE_ORDER.indexOf(kind)
+
+  /** Two objects at one centre: `back` opaque and behind, `front` translucent and over it. */
+  const cell = (id: string, cx: number, cy: number, back: LaneKind, front: LaneKind) => {
+    root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1, 0))
+    root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA, 1))
+    root.addChild(label(cx - 96, cy - 96, `${front} over ${back}`, NAVY))
+    root.addChild(
+      label(cx - 96, cy - 116, drawnAt(front) > drawnAt(back) ? 'front lane drawn later' : 'front lane drawn first'),
+    )
+  }
+
+  ;([
+    ['mesh', 'image'],
+    ['text', 'image'],
+    ['mesh', 'text'],
+  ] as [LaneKind, LaneKind][]).forEach(([a, b], i) => {
+    const cx = -400 + i * 380
+    // The pair both ways round. Whichever is in front is the translucent one.
+    cell(`${i}a`, cx, midY, a, b)
+    cell(`${i}b`, cx + 180, midY, b, a)
+  })
+
+  // --- row 3: shadows, which never write depth but are still tested against it ----------
+  const lowY = -190
+  root.addChild(heading(-540, lowY + 96, 'Shadows'))
+
+  // A shadow cast by one shape, with a translucent panel laid over where it falls.
+  root.addChild(
+    new Circle({
+      name: 'shadow-caster',
+      x: -430,
+      y: lowY,
+      radius: 46,
+      fill: [0.2, 0.6, 0.45, 1],
+      shadowColor: [0, 0, 0, 0.55],
+      shadowBlur: 26,
+      shadowOffsetX: 26,
+      shadowOffsetY: 26,
+      zIndex: 0,
+    }),
+  )
+  root.addChild(
+    new Rect({
+      name: 'shadow-over-panel',
+      x: -380,
+      y: lowY - 10,
+      width: 150,
+      height: 90,
+      fill: [0.95, 0.75, 0.2, FRONT_ALPHA],
+      zIndex: 1,
+    }),
+  )
+  root.addChild(label(-470, lowY - 116, 'a shadow under a translucent panel'))
+
+  // The same shadow, but the thing laid over it is an image with real holes in it. An
+  // alpha-0 texel still produces a fragment; whether it writes depth decides whether the
+  // shadow survives inside the holes.
+  root.addChild(
+    new Circle({
+      name: 'shadow-caster-holes',
+      x: -110,
+      y: lowY,
+      radius: 46,
+      fill: [0.2, 0.6, 0.45, 1],
+      shadowColor: [0, 0, 0, 0.55],
+      shadowBlur: 26,
+      shadowOffsetX: 26,
+      shadowOffsetY: 26,
+      zIndex: 0,
+    }),
+  )
+  root.addChild(
+    new Image({
+      name: 'shadow-over-holes',
+      texture: holed,
+      x: -60,
+      y: lowY - 10,
+      width: 150,
+      height: 90,
+      zIndex: 1,
+    }),
+  )
+  root.addChild(label(-150, lowY - 116, 'and under an image with transparent holes'))
+
+  // Two shadows overlapping each other, which is the case the shadow lane is built for:
+  // it draws last and never writes depth, so shadows accumulate rather than clip.
+  for (let i = 0; i < 3; i++) {
+    root.addChild(
+      new Circle({
+        name: `shadow-stack-${i}`,
+        x: 240 + i * 54,
+        y: lowY + (i % 2) * 26,
+        radius: 40,
+        fill: [0.35 + i * 0.2, 0.4, 0.75, 0.6],
+        shadowColor: [0, 0, 0, 0.5],
+        shadowBlur: 22,
+        shadowOffsetX: 18,
+        shadowOffsetY: 18,
+        zIndex: i,
+      }),
+    )
+  }
+  root.addChild(label(220, lowY - 116, 'translucent shapes, each casting its own shadow'))
+
+  return {}
+}

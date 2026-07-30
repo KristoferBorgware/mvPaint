@@ -10,6 +10,7 @@ import { buildShapeStressScene } from './shapeStressScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
 import { buildTextScene } from './textScene'
+import { buildTransparencyScene } from './transparencyScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildTextPathScene, prepareTextPathScene } from './textPathScene'
 import { buildVectorTextStressScene, prepareVectorTextStressScene } from './vectorTextStressScene'
@@ -63,6 +64,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
       'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, zIndex against ordinary shapes, and an inline SVG rasterized at two different resolutions.',
     prepare: prepareImageScene,
     build: buildImageScene,
+  },
+  {
+    id: 'transparency',
+    title: 'Transparency across lanes',
+    description:
+      'Translucent objects stacked within one lane and across two. The top row is the control - overlapping translucent mesh shapes, text and images, each blending against its own kind. The middle row puts the same pair in two lanes and stacks it both ways round, so any difference between the two halves is the lanes\' doing. The bottom row is shadows, including one under an image with real holes in it. In every cell the back object is opaque and the front one is translucent, so the back object should show through.',
+    build: buildTransparencyScene,
   },
   {
     id: 'shadows',
