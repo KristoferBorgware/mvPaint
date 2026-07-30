@@ -49,6 +49,11 @@ export class ImageBatcher {
   private indexCount = 0
   private nodes: Image[] = []
   private ranges: DrawRange[] = []
+  // Cumulative index count after each Image handed to rebuild(), aligned with that argument
+  // by position (an invisible node contributes nothing but still takes a slot). This is what
+  // lets any run of nodes be drawn on its own, which is how the renderer interleaves the
+  // lanes back to front - see SceneRenderer's draw().
+  private nodeIndexEnds: number[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
@@ -63,9 +68,13 @@ export class ImageBatcher {
     let vertexCount = 0
     this.nodes = []
     this.ranges = []
+    this.nodeIndexEnds = []
 
     for (const image of images) {
-      if (!image.visible) continue
+      if (!image.visible) {
+        this.nodeIndexEnds.push(indices.length)
+        continue
+      }
       const objectId = this.nodes.length
       this.nodes.push(image)
 
@@ -98,6 +107,7 @@ export class ImageBatcher {
       } else {
         this.ranges.push({ texture: image.texture, sampling, firstIndex: indices.length - 6, indexCount: 6 })
       }
+      this.nodeIndexEnds.push(indices.length)
     }
 
     const vtx = new ArrayBuffer(vertexCount * IMAGE_VERTEX_STRIDE)
@@ -172,14 +182,30 @@ export class ImageBatcher {
 
   /** Draws each range with its own texture bound (group 2); groups 0/1 are set once. */
   draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup): void {
+    this.drawRange(pass, frameBindGroup, 0, this.nodeIndexEnds.length)
+  }
+
+  /**
+   * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order. The
+   * texture+sampler runs are clipped to that span rather than rebuilt, so a partial draw
+   * costs the same per-run bind as a whole one and never more runs than the whole lane.
+   */
+  drawRange(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, fromNode: number, toNode: number): void {
     if (!this.vertexBuffer || !this.indexBuffer || !this.objectBindGroup || this.indexCount === 0) return
+    const start = fromNode <= 0 ? 0 : (this.nodeIndexEnds[fromNode - 1] ?? this.indexCount)
+    const end = toNode <= 0 ? 0 : (this.nodeIndexEnds[Math.min(toNode, this.nodeIndexEnds.length) - 1] ?? this.indexCount)
+    if (end <= start) return
+
     pass.setBindGroup(0, frameBindGroup)
     pass.setBindGroup(1, this.objectBindGroup)
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setIndexBuffer(this.indexBuffer, 'uint32')
     for (const range of this.ranges) {
+      const first = Math.max(range.firstIndex, start)
+      const last = Math.min(range.firstIndex + range.indexCount, end)
+      if (last <= first) continue
       pass.setBindGroup(2, range.texture.bindGroupFor(range.sampling))
-      pass.drawIndexed(range.indexCount, 1, range.firstIndex)
+      pass.drawIndexed(last - first, 1, first)
     }
   }
 

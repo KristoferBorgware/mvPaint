@@ -19,6 +19,9 @@ import {
   type RGBA,
 } from './meshFormat'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
+import { buildDrawRuns } from './drawOrder'
+import { Text } from '../shapes/Text'
+import { depthForRank } from '../scene/picking'
 import {
   SLOT_GRANULARITY,
   blurMarginUnits,
@@ -758,6 +761,106 @@ assert(
     SHADOW_OBJECT_STRIDE >= SHADOW_OBJECT_DEPTH_OFFSET + 4,
     'the record holds a mat4x4, a tint, the slot quad + uv, and a depth',
   )
+}
+
+// --- the draw order that makes transparency work across lanes --------------------------
+//
+// Lanes used to draw one after another, which made stacking depend on which lane a thing
+// was in: a translucent shape writes depth like any other fragment, so anything behind it
+// in a later-drawn lane was rejected instead of showing through. buildDrawRuns merges the
+// lanes into one furthest-first sequence, so every fragment lands over what is behind it.
+{
+  // Stand-ins for the three lanes. Only their identity and their depth matter here; the
+  // merge never looks at geometry.
+  const mesh = (n: number) => new Rect({ name: `m${n}`, width: 1, height: 1 })
+  const text = (n: number) => new Text({ name: `t${n}`, text: 'x' })
+  // An Image needs a GPU texture to construct, and the merge never touches one - it reads
+  // nothing but each node's depth - so a plain Shape stands in for the image lane here.
+
+  /** Builds a scene-wide order and hands back what buildDrawRuns makes of it. */
+  const runsFor = (kinds: ('mesh' | 'text' | 'image')[]) => {
+    const meshes: Shape[] = []
+    const texts: Shape[] = []
+    const images: Shape[] = []
+    const depths = new Map<Shape, number>()
+    const meshDepths: number[] = []
+    kinds.forEach((kind, rank) => {
+      // Rank 0 is furthest back and carries the LARGEST depth - the same relationship
+      // depthForRank produces.
+      const depth = depthForRank(rank, kinds.length)
+      if (kind === 'mesh') {
+        const s = mesh(rank)
+        meshes.push(s)
+        meshDepths.push(depth)
+        depths.set(s, depth)
+      } else if (kind === 'text') {
+        const s = text(rank)
+        texts.push(s)
+        depths.set(s, depth)
+      } else {
+        const s = mesh(rank)
+        images.push(s)
+        depths.set(s, depth)
+      }
+    })
+    return buildDrawRuns(meshes, meshes.length, meshDepths, texts, images, depths)
+  }
+
+  // A scene of one kind is still one draw, which is what keeps the stress tests unaffected.
+  const allMesh = runsFor(['mesh', 'mesh', 'mesh', 'mesh', 'mesh'])
+  assert(allMesh.length === 1, 'a scene of one lane is a single run')
+  assert(allMesh[0].lane === 'mesh' && allMesh[0].from === 0 && allMesh[0].to === 5, 'covering all of it')
+
+  // The ordinary case: a background, then content, then text over the top.
+  const layered = runsFor(['image', 'mesh', 'mesh', 'text', 'text'])
+  assert(layered.length === 3, 'a background, some shapes and text over them is three runs')
+  assert(layered.map((r) => r.lane).join(',') === 'image,mesh,text', 'in the order they are stacked, furthest first')
+  assert(layered[1].from === 0 && layered[1].to === 2, "each run indexes its own lane's list")
+
+  // The whole point: a run boundary happens at every lane CHANGE, so an alternating scene
+  // costs one draw per object - and gets the right answer, which it did not before.
+  const alternating = runsFor(['mesh', 'text', 'mesh', 'text', 'mesh'])
+  assert(alternating.length === 5, 'a scene that alternates lanes pays one draw per object')
+  assert(alternating.map((r) => r.lane).join(',') === 'mesh,text,mesh,text,mesh', 'never reordered into lane batches')
+  assert(alternating[2].from === 1 && alternating[2].to === 2, 'the second mesh run picks up where the first left off')
+
+  // Every object appears exactly once, and the runs put them back in rank order. This is
+  // the property everything else rests on: reordering or dropping one would show up as a
+  // shape drawn at the wrong moment, which is exactly the bug being fixed.
+  for (const kinds of [
+    ['mesh', 'text', 'image', 'mesh', 'text', 'image'],
+    ['text', 'text', 'image', 'image', 'mesh', 'mesh'],
+    ['image'],
+    ['text', 'mesh'],
+  ] as ('mesh' | 'text' | 'image')[][]) {
+    const runs = runsFor(kinds)
+    const replayed: string[] = []
+    const next = { mesh: 0, text: 0, image: 0 }
+    for (const run of runs) {
+      assert(run.from === next[run.lane], `${kinds.join('/')}: runs of a lane are contiguous and in order`)
+      for (let i = run.from; i < run.to; i++) replayed.push(run.lane)
+      next[run.lane] = run.to
+    }
+    assert(replayed.join(',') === kinds.join(','), `${kinds.join('/')}: the runs replay the scene order exactly`)
+  }
+
+  // Nothing in, nothing out.
+  assert(buildDrawRuns([], 0, [], [], [], new Map()).length === 0, 'an empty scene draws nothing')
+
+  // Overlays are excluded by passing a mesh count short of the list: they are a tail past
+  // overlayStart and draw last of all, with depth off.
+  const withOverlayTail = (() => {
+    const a = new Rect({ width: 1, height: 1 })
+    const b = new Rect({ width: 1, height: 1 })
+    const overlay = new Rect({ width: 1, height: 1, overlay: true })
+    const depths = new Map<Shape, number>([
+      [a, 0.9],
+      [b, 0.8],
+      [overlay, 0.1],
+    ])
+    return buildDrawRuns([a, b, overlay], 2, [0.9, 0.8, 0.1], [], [], depths)
+  })()
+  assert(withOverlayTail.length === 1 && withOverlayTail[0].to === 2, 'the overlay tail is left out of the interleaved order')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

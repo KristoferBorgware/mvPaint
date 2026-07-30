@@ -15,7 +15,7 @@ Scene graph (nodes with transforms)
         │
         │  every frame:      write transforms + colours into a storage buffer
         ▼
-   One render pass, four lanes, roughly one draw call each
+   One render pass, lanes interleaved back to front
         ▼
    MSAA resolve → canvas
 ```
@@ -329,14 +329,40 @@ only in vertex format and fragment maths.
 
 | Lane | Fragment work | Draw calls |
 | --- | --- | --- |
-| **Mesh** | flat colour, or an analytic gradient | one for the scene, one for the overlay tail |
-| **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | one per run of quads sharing a font atlas |
-| **Image** | `textureSample(...) * tint` | one per run sharing a (texture, sampler state) |
+| **Mesh** | flat colour, or an analytic gradient | one per run, plus one for the overlay tail |
+| **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | one per run, split again per font atlas |
+| **Image** | `textureSample(...) * tint` | one per run, split again per (texture, sampler state) |
 | **Shadow** | sample the pre-blurred silhouette, tint it | one, after the content lanes |
 
-Within the pass: **mesh scene → text → image → shadow → mesh overlays**. The order barely
-matters for correctness, because the depth buffer arbitrates — which is the entire point of
-injecting depth from the zIndex rank.
+### Why the content lanes interleave
+
+The three content lanes are **not** drawn one after another. They are merged into a single
+back-to-front sequence and drawn in runs — one draw per *lane change* (`render/drawOrder.ts`).
+
+They used to draw one lane at a time, and the depth buffer was supposed to arbitrate. It
+cannot, for anything translucent. Alpha blending and the depth test know nothing about each
+other, so a fragment at alpha 0.4 still writes depth — and whatever sat behind it **in a later
+lane** was then rejected outright instead of showing through. Transparency worked in one
+direction and not the other, decided by which lane a thing happened to be in.
+
+Back-to-front is the only order alpha blending composites correctly in, so that is the order
+they go in. The depth test still runs, and still resolves the shadow lane against all of it;
+it just no longer has to arbitrate between the content lanes, because every fragment now
+arrives at or nearer than what it lands on and always passes.
+
+The cost is proportional to how much the scene alternates. Measured on the merge itself:
+
+| scene | runs | merge cost per gather |
+| --- | --: | --: |
+| 100k shapes, all one lane | **1** | 0.91 ms |
+| 10k shapes, all one lane | **1** | 0.11 ms |
+| 100k alternating mesh/text | 100000 | 9.71 ms |
+
+Both stress tests are a single run, so nothing changed for them. A page of shapes with text
+over it is two or three. Only a scene that genuinely alternates kinds at every depth pays per
+object — and it pays that to be correct. If that ever becomes real, the fix is to batch the
+*opaque* objects per lane (they need no ordering at all) and interleave only the translucent
+ones; nothing today needs it.
 
 The shadow lane is the exception that proves the rule. Shadows are drawn last, depth-**tested**
 but never depth-**writing**, half a depth step behind their caster. By then every shape has

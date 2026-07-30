@@ -56,6 +56,11 @@ export class TextBatcher {
   private indexCount = 0
   private objectRecords: ObjectRecord[] = []
   private ranges: DrawRange[] = []
+  // Cumulative index count after each Text handed to rebuild(), aligned with that argument
+  // by position (an invisible node contributes nothing but still takes a slot). This is what
+  // lets any run of nodes be drawn on its own, which is how the renderer interleaves the
+  // lanes back to front - see SceneRenderer's draw().
+  private nodeIndexEnds: number[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
@@ -71,9 +76,13 @@ export class TextBatcher {
     let objectBase = 0
     this.objectRecords = []
     this.ranges = []
+    this.nodeIndexEnds = []
 
     for (const text of texts) {
-      if (!text.visible) continue
+      if (!text.visible) {
+        this.nodeIndexEnds.push(indices.length)
+        continue
+      }
       const shaped = text.shaped(fontBook)
       for (const material of shaped.materials) {
         this.objectRecords.push({ node: text, material })
@@ -107,6 +116,7 @@ export class TextBatcher {
         }
       }
       objectBase += shaped.materials.length
+      this.nodeIndexEnds.push(indices.length)
     }
 
     // Pack the interleaved vertex buffer (floats for pos/uv/color, u32 bits for packedId).
@@ -209,16 +219,38 @@ export class TextBatcher {
 
   /** Draw each atlas range with its atlas bound (group 2); groups 0/1 are set once. */
   draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, fontBook: FontBook): void {
+    this.drawRange(pass, frameBindGroup, fontBook, 0, this.nodeIndexEnds.length)
+  }
+
+  /**
+   * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order. The atlas
+   * runs are clipped to that span rather than rebuilt, so a partial draw costs the same
+   * per-run bind as a whole one and never more runs than the whole lane would.
+   */
+  drawRange(
+    pass: GPURenderPassEncoder,
+    frameBindGroup: GPUBindGroup,
+    fontBook: FontBook,
+    fromNode: number,
+    toNode: number,
+  ): void {
     if (!this.vertexBuffer || !this.indexBuffer || !this.objectBindGroup || this.indexCount === 0) {
       return
     }
+    const start = fromNode <= 0 ? 0 : (this.nodeIndexEnds[fromNode - 1] ?? this.indexCount)
+    const end = toNode <= 0 ? 0 : (this.nodeIndexEnds[Math.min(toNode, this.nodeIndexEnds.length) - 1] ?? this.indexCount)
+    if (end <= start) return
+
     pass.setBindGroup(0, frameBindGroup)
     pass.setBindGroup(1, this.objectBindGroup)
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setIndexBuffer(this.indexBuffer, 'uint32')
     for (const range of this.ranges) {
+      const first = Math.max(range.firstIndex, start)
+      const last = Math.min(range.firstIndex + range.indexCount, end)
+      if (last <= first) continue
       pass.setBindGroup(2, fontBook.atlasByIndex(range.atlasIndex).bindGroup)
-      pass.drawIndexed(range.indexCount, 1, range.firstIndex)
+      pass.drawIndexed(last - first, 1, first)
     }
   }
 

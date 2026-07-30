@@ -25,6 +25,7 @@ import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { buildDrawRuns, type DrawRun } from '../render/drawOrder'
 import type { TransformableNode } from '../shapes/Group'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
@@ -138,6 +139,7 @@ export class SceneRenderer {
     visibleMeshShapes: readonly Shape[]
     visibleMeshDepths: readonly number[]
     overlayStart: number
+    runs: readonly DrawRun[]
   } | null = null
   // The last frame's (margin-expanded) cull rectangle, for getCullBounds() - lets a
   // caller draw it as a debug overlay. Null before the first draw, or whenever the
@@ -363,6 +365,7 @@ export class SceneRenderer {
     let visibleMeshShapes: readonly Shape[]
     let visibleMeshDepths: readonly number[]
     let overlayStart: number
+    let runs: readonly DrawRun[]
 
     if (canReuseGather) {
       const g = this.cachedGather!
@@ -374,6 +377,7 @@ export class SceneRenderer {
       visibleMeshShapes = g.visibleMeshShapes
       visibleMeshDepths = g.visibleMeshDepths
       overlayStart = g.overlayStart
+      runs = g.runs
     } else {
       // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
       // a Text can interleave correctly under the depth test regardless of which lane's
@@ -474,6 +478,18 @@ export class SceneRenderer {
       }
       this.visibleMeshShapes = visibleMeshShapesLocal
 
+      // The order the lanes are actually drawn in: furthest first, whatever lane that is.
+      // Overlays are excluded (the mesh list carries them as a tail past overlayStart) -
+      // they draw last of all, with depth off.
+      const runsLocal = buildDrawRuns(
+        visibleMeshShapesLocal,
+        overlayStartLocal,
+        visibleMeshDepthsLocal,
+        visibleTextsLocal,
+        visibleImagesLocal,
+        depthsLocal,
+      )
+
       ordered = orderedLocal
       depths = depthsLocal
       meshShapes = onScreen
@@ -482,6 +498,7 @@ export class SceneRenderer {
       visibleMeshShapes = visibleMeshShapesLocal
       visibleMeshDepths = visibleMeshDepthsLocal
       overlayStart = overlayStartLocal
+      runs = runsLocal
 
       this.cachedGather = {
         ordered: orderedLocal,
@@ -492,13 +509,11 @@ export class SceneRenderer {
         visibleMeshShapes: visibleMeshShapesLocal,
         visibleMeshDepths: visibleMeshDepthsLocal,
         overlayStart: overlayStartLocal,
+        runs: runsLocal,
       }
     }
 
     this.batcher.updateObjects(visibleMeshShapes, visibleMeshDepths)
-
-    pass.setPipeline(this.pipeline)
-    this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(0, overlayStart))
 
     if (
       this.textGeometryDirty ||
@@ -511,8 +526,6 @@ export class SceneRenderer {
     }
     this.visibleTexts = visibleTexts
     this.textBatcher.updateObjects(depths)
-    pass.setPipeline(this.textPipeline)
-    this.textBatcher.draw(pass, this.frameUniforms.bindGroup, this.fontBook)
 
     // Image lane. Its geometry only changes when the visible SET does, or when a node's
     // texture/crop/tiling/flip does - all of which come with an explicit dirty mark, since
@@ -523,8 +536,32 @@ export class SceneRenderer {
     }
     this.visibleImages = visibleImages
     this.imageBatcher.updateObjects(depths as ReadonlyMap<Image, number>)
-    pass.setPipeline(this.imagePipeline)
-    this.imageBatcher.draw(pass, this.frameUniforms.bindGroup)
+
+    // The content lanes, interleaved strictly furthest-first rather than one lane after
+    // another (see DrawRun). Every fragment therefore arrives over what is already behind
+    // it, which is the only order alpha blending composites correctly in - a translucent
+    // shape now shows the text or image behind it instead of the depth buffer rejecting it
+    // for belonging to a lane that draws later.
+    //
+    // The depth test still runs, and still resolves the shadow lane below against all of
+    // this. It just no longer has to arbitrate between the content lanes: back-to-front
+    // means every fragment is at or nearer than what it lands on, so it always passes.
+    let boundLane: DrawRun['lane'] | null = null
+    for (const run of runs) {
+      if (run.lane !== boundLane) {
+        pass.setPipeline(
+          run.lane === 'mesh' ? this.pipeline : run.lane === 'text' ? this.textPipeline : this.imagePipeline,
+        )
+        boundLane = run.lane
+      }
+      if (run.lane === 'mesh') {
+        this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(run.from, run.to))
+      } else if (run.lane === 'text') {
+        this.textBatcher.drawRange(pass, this.frameUniforms.bindGroup, this.fontBook, run.from, run.to)
+      } else {
+        this.imageBatcher.drawRange(pass, this.frameUniforms.bindGroup, run.from, run.to)
+      }
+    }
 
     // Shadows draw AFTER the content lanes, depth-tested but never depth-writing (see
     // ShadowPipeline). That ordering is what makes them stack: by the time a shadow is
