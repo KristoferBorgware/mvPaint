@@ -348,10 +348,18 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
             controller.beginMarquee(e.world)
           }
         })
-        root.on('pointermove', () => {
-          // Moving before the hold fires means a pan was meant, not a rectangle.
+        // Moving before the hold fires means a pan was meant, not a rectangle.
+        //
+        // Listened for on the CANVAS rather than on the scene root, because this asks only
+        // whether the finger moved - never what it moved over. A scene 'pointermove' is a
+        // hover-class event, so registering one anywhere makes the dispatcher resolve a
+        // hover target on every single move, and resolving one means hit-testing the whole
+        // scene (see SceneInputDispatcher.hoverIsIdle). Paying for an answer this handler
+        // does not even read would be a tax on every scene in the application.
+        const cancelHoldOnMove = () => {
           if (holdTimer !== null && !controller.marquee.active) cancelHold()
-        })
+        }
+        canvas.addEventListener('pointermove', cancelHoldOnMove)
         root.on('pointerup pointercancel', cancelHold)
 
         // The overlay follows the rectangle. No markGeometryDirty(): every marquee part is a
@@ -464,6 +472,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         detachKeyboard = () => {
           window.removeEventListener('keydown', onKeyDown)
           window.removeEventListener('keyup', onKeyUp)
+          canvas.removeEventListener('pointermove', cancelHoldOnMove)
         }
       })
       .catch((err: unknown) => {

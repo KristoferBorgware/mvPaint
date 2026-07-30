@@ -310,4 +310,76 @@ const centredRect = (options: RectOptions = {}): Rect =>
   assert(near(grown!.cy, -50), 'recentred on the new extent, with nothing told to invalidate anything')
 }
 
+// --- a gesture never pays to find out what is under the pointer ------------------------
+//
+// Resolving a hover target means picking, and a pick walks the whole scene. That is the one
+// unbounded thing a pointer move can set off, so it must not happen while a gesture owns
+// the pointer - nothing is pointing at anything then, and the answer is thrown away. At a
+// hundred thousand shapes it was a quarter of a second per move, which is what turned a pan
+// into a slideshow; the count below is what keeps it from creeping back.
+{
+  const listeners = new Map<string, (e: never) => void>()
+  const canvas = {
+    addEventListener: (type: string, fn: (e: never) => void) => listeners.set(type, fn),
+    removeEventListener: (type: string) => listeners.delete(type),
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+    hasPointerCapture: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    style: { cursor: '' },
+  }
+
+  const root = new Container()
+  const shape = root.addChild(centredRect({ name: 'target', x: 0, y: 0, width: 200, height: 200 }))
+
+  resetListenerCensus()
+  let picks = 0
+  const dispatcher = new SceneInputDispatcher(canvas as unknown as HTMLCanvasElement, {
+    root,
+    pick: () => {
+      picks++
+      return shape
+    },
+    toWorld: (x, y) => new Vector2(x, y),
+  })
+  const send = (type: string, x: number, y: number, extra: Record<string, unknown> = {}) =>
+    listeners.get(type)?.({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0, clientX: x, clientY: y, shiftKey: false, altKey: false, preventDefault: () => {}, type, ...extra } as never)
+
+  // With nothing listening for a hover-class event, a move costs no pick at all - the
+  // pre-existing guarantee, restated here because everything below builds on it.
+  send('pointermove', 10, 10)
+  assert(picks === 0, 'a move hit-tests nothing when no hover listener exists')
+
+  // One hover listener switches that on. This is the trap: the handler below never reads
+  // e.target, but registering it is what makes every move resolve one.
+  root.on('pointermove', () => {})
+  picks = 0
+  send('pointermove', 20, 20)
+  send('pointermove', 30, 30)
+  assert(picks === 2, 'a hover listener puts the hit-test back, one per move')
+
+  // Now hold the button down. Every move from here belongs to a gesture, and none of them
+  // may hit-test however far the pointer travels.
+  picks = 0
+  send('pointerdown', 40, 40, { buttons: 1 })
+  const picksFromPress = picks
+  for (let i = 0; i < 25; i++) send('pointermove', 40 + i * 4, 40 + i * 3, { buttons: 1 })
+  assert(picks === picksFromPress, 'twenty-five moves during a gesture hit-test exactly zero times')
+
+  // ...and it comes straight back when the button does, so hovering still works after.
+  send('pointerup', 140, 115, { buttons: 0 })
+  picks = 0
+  send('pointermove', 150, 120)
+  assert(picks === 1, 'the hit-test returns the moment the gesture ends')
+
+  // A marquee is the same: the rectangle answers what it covered, once, at the end.
+  dispatcher.beginMarquee(new Vector2(0, 0))
+  picks = 0
+  for (let i = 0; i < 10; i++) send('pointermove', i * 10, i * 10)
+  assert(picks === 0, 'nor does a move during a marquee')
+
+  dispatcher.destroy()
+  resetListenerCensus()
+}
+
 console.log(`[input] self-test passed (${count} assertions)`)

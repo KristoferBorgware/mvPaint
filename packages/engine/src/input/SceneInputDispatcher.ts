@@ -269,6 +269,34 @@ export class SceneInputDispatcher {
     for (const node of nodes) node.fire(type, { nodes }, true)
   }
 
+  /**
+   * Whether this pointer's move should skip the hover hit-test entirely.
+   *
+   * Resolving a hover target means picking, and a pick walks every shape in the scene
+   * front-to-back (see scene/picking.ts) - the one genuinely unbounded thing a pointer move
+   * can trigger. Measured at 100k shapes it is around a quarter of a second per move, which
+   * turns a smooth pan into a slideshow. So it is worth being exact about when nobody could
+   * possibly want the answer:
+   *
+   *   - a TRANSFORMER drag: this pointer belongs to the frame's handle, and what sits under
+   *     it in the scene is not what the gesture is about.
+   *   - a VIEWPORT pan or pinch: the content is sliding under a stationary pointer. Every
+   *     shape it crosses would be reported as hovered on the way past, which is noise even
+   *     when it is cheap.
+   *   - a MARQUEE: the pointer is pulling out a rectangle. What it sweeps over is answered
+   *     once, at the end, by the rectangle itself.
+   *   - a NODE DRAG: the dragged node is held under the pointer for the whole gesture (that
+   *     is what dragging means here), so a pick returns that same node every time. It could
+   *     not report a drop target even in principle - picking answers "what is on top", and
+   *     what is on top is the thing being carried.
+   *
+   * All four are the same condition: a gesture owns this pointer, so nothing is pointing at
+   * anything. Hover resumes the moment the button comes back up.
+   */
+  private hoverIsIdle(pointerId: number): boolean {
+    return this.transformPointers.has(pointerId) || this.gestureKind !== 'none' || this.marquee.active
+  }
+
   /** Raises a scene-wide event on the root, which is where such listeners belong. */
   private fireOnRoot(type: string, init: NodeEventInit): void {
     if (!hasListener(type)) return
@@ -709,10 +737,13 @@ export class SceneInputDispatcher {
     this.dispatch('pointerdown', device, target, init)
   }
 
-  /** A move. Costs nothing at all unless something is listening for a hover-class event. */
+  /**
+   * A move. Costs nothing at all unless something is listening for a hover-class event -
+   * and nothing even then while a gesture is driving the view or a tool, because working
+   * out what is under the pointer means hit-testing the whole scene (see the note below).
+   */
   move(input: PointerInput, screen: ScreenPoint): void {
-    // Mid-transform this pointer belongs to the frame's handle, not to the scene under it.
-    if (this.transformPointers.has(input.pointerId)) return
+    if (this.hoverIsIdle(input.pointerId)) return
     if (!hasHoverListeners()) return
     const device = deviceFor(input.pointerType)
     const target = this.captures.get(input.pointerId) ?? this.effectiveTarget(this.pick(screen.x, screen.y))
