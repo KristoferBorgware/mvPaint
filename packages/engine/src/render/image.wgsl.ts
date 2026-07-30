@@ -58,6 +58,17 @@ fn vs_main(input : VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   let texel = textureSample(imageTex, imageSampler, input.uv);
-  return texel * objects[input.objectId].tint;
+  let color = texel * objects[input.objectId].tint;
+
+  // A fully transparent fragment - a hole in the source texture, or a tint that has faded
+  // the image out entirely - must not write depth. depthWriteEnabled doesn't look at alpha,
+  // so without this the image's whole quad would occlude whatever draws after it at a
+  // further depth, transparent texels and all: a sprite with holes in it would clip the
+  // shadows behind it to its bounding box. The mesh and text lanes discard for the same
+  // reason (see mesh.wgsl.ts and text.wgsl.ts).
+  if (color.a <= 0.0) {
+    discard;
+  }
+  return color;
 }
 `
