@@ -22,7 +22,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'shapes',
     title: 'Shapes & gradients',
     description:
-      'Rects, a circle and an open polyline: linear and radial gradient fills in local space, stroke joins and caps, and two shapes spinning about their own centres.',
+      'Rects, a circle and an open polyline: linear and radial gradient fills in local space, stroke joins and caps, corner rounding (uniform, per-corner, and scaled down to fit), and two shapes spinning about their own centres.',
     build: buildShapesScene,
   },
   {

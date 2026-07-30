@@ -33,8 +33,8 @@
 // into the cached local-space geometry. Fill/stroke color changes also don't need it -
 // solid colors, like gradient parameters, are read from the per-object GPU buffer every
 // frame, never baked into geometry. It IS needed after changing anything that actually
-// affects buildGeometry()'s output - Circle.radius, Polyline.points, stroke/strokeWidth/
-// lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
+// affects buildGeometry()'s output - Circle.radius, Rect.cornerRadius, Polyline.points,
+// stroke/strokeWidth/lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
 //
 // WHERE THE ORIGIN SITS. A shape's local origin is the point that lands at (x, y), and
 // which point of the shape that is depends on the shape:

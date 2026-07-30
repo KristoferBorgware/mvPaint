@@ -99,6 +99,35 @@ export function buildShapesScene(scene: Scene): SceneContent {
     }),
   )
 
+  // A row of rounded rects below the zigzag: one radius for all four corners, a per-corner
+  // set, a radius far too large for the box (scaled down to a stadium rather than clipped),
+  // and one stroked, where the outline follows the arcs instead of turning square corners.
+  //
+  // Rounding is geometry, so these are set at construction; changing one afterwards needs a
+  // markGeometryDirty() the way Circle.radius does.
+  const roundedRow: { x: number; cornerRadius: number | [number, number, number, number]; stroked?: boolean }[] = [
+    { x: -300, cornerRadius: 16 },
+    { x: -150, cornerRadius: [45, 0, 45, 0] },
+    { x: 0, cornerRadius: 999 },
+    { x: 150, cornerRadius: 22, stroked: true },
+  ]
+  for (const [i, spec] of roundedRow.entries()) {
+    scene.root.addChild(
+      new Rect({
+        name: `rounded-${i}`,
+        x: spec.x,
+        y: -230,
+        width: 130,
+        height: 90,
+        cornerRadius: spec.cornerRadius,
+        fill: [0.16, 0.55, 0.62, 1],
+        stroke: [0.95, 0.75, 0.3, 1],
+        strokeWidth: spec.stroked ? 8 : 0,
+        lineJoin: 'round',
+      }),
+    )
+  }
+
   // The spin lives here rather than in the canvas: a scene owns its own animation state,
   // so switching away from it discards the accumulator along with the shapes.
   let angle = 0

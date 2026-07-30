@@ -150,6 +150,129 @@ assert(
   assert(tris.length === 2, 'fill-only rect has 2 triangles')
 }
 
+// --- rounded rect: the corners become arcs, and the outline still spans the same box ---
+{
+  const seg = 4
+  const r = 1
+  const rect = new Rect({ width: 8, height: 6, cornerRadius: r, cornerSegments: seg, fill: [1, 1, 1, 1] })
+  const { verts, tris } = capture(rect)
+
+  // Four corners, each an arc of seg+1 points, fanned from the first: n verts, n-2 tris.
+  const n = 4 * (seg + 1)
+  assert(verts.length === n, `a rounded rect's fill is one point per arc sample (${n})`)
+  assert(tris.length === n - 2, 'fanned from the first outline point, so two fewer triangles than points')
+  assert(verts.every((v) => v.isFill), 'every rounded-fill vertex is marked isFill')
+
+  // The arcs are tangent to the edges, so the outline still touches all four sides - a
+  // rounded rect occupies the same box, it just cuts the corners off.
+  const xs = verts.map((v) => v.x)
+  const ys = verts.map((v) => v.y)
+  assert(near(Math.min(...xs), 0) && near(Math.max(...xs), 8), 'still spans x in [0, width]')
+  assert(near(Math.min(...ys), -6) && near(Math.max(...ys), 0), 'and y in [-height, 0]')
+  assert(near(rect.localBounds().min.x, 0) && near(rect.localBounds().max.y, 0), 'so the bounds are unchanged too')
+
+  // ...and the square corners themselves are gone: nothing sits within the radius of them.
+  const square = [
+    { x: 0, y: 0 },
+    { x: 8, y: 0 },
+    { x: 8, y: -6 },
+    { x: 0, y: -6 },
+  ]
+  // The arc's closest approach to the corner it replaces is its 45-degree sample, at
+  // r*(sqrt(2)-1) away - so nothing reaches the corner, and nothing crosses to the far side.
+  const cut = r * (Math.SQRT2 - 1)
+  assert(
+    verts.every((v) => square.every((c) => Math.hypot(v.x - c.x, v.y - c.y) >= cut - 1e-9)),
+    'no vertex comes closer to a square corner than the arc does',
+  )
+  assert(square.every((c) => !hasVertexNear(verts, c.x, c.y)), 'and none sits on one')
+  // Every arc sample is exactly its radius from that corner's arc centre.
+  const centres = [
+    { x: r, y: -r },
+    { x: 8 - r, y: -r },
+    { x: 8 - r, y: -6 + r },
+    { x: r, y: -6 + r },
+  ]
+  assert(
+    verts.every((v) => centres.some((c) => near(Math.hypot(v.x - c.x, v.y - c.y), r, 1e-9))),
+    'every vertex lies on one of the four corner arcs',
+  )
+}
+
+// --- radius 0 keeps the plain four-vertex quad, so rounding costs the common case nothing ---
+{
+  const plain = capture(new Rect({ width: 4, height: 2 }))
+  const explicitZero = capture(new Rect({ width: 4, height: 2, cornerRadius: 0 }))
+  assert(plain.verts.length === 4 && plain.tris.length === 2, 'radius 0 is still 4 verts / 2 triangles')
+  assert(explicitZero.verts.length === 4, 'passing 0 explicitly takes the same path')
+  // A radius that fits nothing (a zero-sized rect) is scaled away to that same quad.
+  assert(capture(new Rect({ width: 0, height: 0, cornerRadius: 5 })).verts.length === 4, 'a rect too small to round stays square')
+}
+
+// --- per-corner radii, and only the named corner is cut ---
+{
+  const seg = 3
+  const rect = new Rect({ width: 10, height: 10, cornerRadius: [2, 0, 0, 0], cornerSegments: seg })
+  const { verts } = capture(rect)
+  // Three square corners contribute one point each, the rounded one contributes seg+1.
+  assert(verts.length === 3 + (seg + 1), 'a square corner is one point, a rounded one is an arc')
+  assert(hasVertexNear(verts, 10, 0) && hasVertexNear(verts, 10, -10) && hasVertexNear(verts, 0, -10), 'the three square corners are still sharp')
+  assert(!hasVertexNear(verts, 0, 0), 'and the top-left one is not')
+  assert(hasVertexNear(verts, 2, 0) && hasVertexNear(verts, 0, -2), 'its arc meets the two edges at the tangent points')
+}
+
+// --- oversized radii scale down together, keeping their proportions ---
+{
+  // 40 + 40 across a 40-wide edge: everything halves. Asked for 2:1 between the two top
+  // corners, so the fitted radii must still be 2:1 - the shape of the rounding survives.
+  const seg = 6
+  const rect = new Rect({ width: 40, height: 40, cornerRadius: [40, 20, 0, 0], cornerSegments: seg })
+  const { verts } = capture(rect)
+  // Fitted: scale = min(40/(40+20), 40/(20+0), 40/(0+40)) = 2/3 (edges with no radius on
+  // either end impose no limit).
+  // So tl = 40*2/3 and tr = 20*2/3, still exactly 2:1.
+  const tl = 40 * (2 / 3)
+  const tr = 20 * (2 / 3)
+  assert(hasVertexNear(verts, tl, 0, 1e-9), 'the top-left arc meets the top edge at the scaled radius')
+  assert(hasVertexNear(verts, 40 - tr, 0, 1e-9), 'and the top-right arc at half of it, as asked')
+  assert(near(tl / tr, 2), 'the two radii keep the 2:1 ratio they were given')
+}
+
+// --- the stroke follows the rounded outline, not the square one ---
+{
+  const seg = 4
+  const r = 2
+  const sw = 0.5
+  const rect = new Rect({ width: 12, height: 12, cornerRadius: r, cornerSegments: seg, strokeWidth: sw })
+  const { verts } = capture(rect)
+  const stroke = verts.filter((v) => !v.isFill)
+  assert(stroke.length > 0, 'a rounded rect strokes its outline')
+  // The corner the stroke rides is an arc, so its outer edge sits at r + sw/2 from the arc
+  // centre - not out at the square corner a miter join would have reached.
+  const centre = { x: r, y: -r }
+  const nearCorner = stroke.filter((v) => v.x < r && v.y > -r)
+  assert(nearCorner.length > 0, 'some stroke geometry lies over the rounded corner')
+  const dists = nearCorner.map((v) => Math.hypot(v.x - centre.x, v.y - centre.y))
+  // The arc is a polyline, so its miter-joined outer edge is the offset POLYGON, which
+  // stands off the true offset circle by 1/cos(half the segment turn) - the same faceting
+  // a circle's rim has. The inner side needs no such correction and lands exactly.
+  const miter = 1 / Math.cos(Math.PI / 2 / seg / 2)
+  assert(near(Math.max(...dists), r + (sw / 2) * miter, 1e-9), 'the outer stroke edge is the arc offset by half the stroke width, mitered')
+  assert(near(Math.min(...dists), r - sw / 2, 1e-9), 'and the inner edge is exactly that much inside the arc')
+  assert(!hasVertexNear(stroke, -sw / 2, sw / 2), 'the square outer miter corner is not emitted')
+}
+
+// --- cornerRadius is geometry: changing it invalidates the cache and bumps the lane epoch ---
+{
+  const rect = new Rect({ width: 10, height: 10 })
+  assert(capture(rect).verts.length === 4, 'square to start with')
+  rect.cornerRadius = 3
+  rect.cornerSegments = 2
+  rect.markGeometryDirty()
+  assert(capture(rect).verts.length === 4 * 3, 'after markGeometryDirty() the arcs are there')
+  assert(rect.attrs.cornerRadius === 3, 'cornerRadius is an exposed attribute')
+}
+
 // --- circle: fill fan + a round-joined rim contour (structural checks; the general
 //     stroker's exact per-joint vertex count depends on its round-arc step count) ---
 {

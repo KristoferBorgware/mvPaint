@@ -135,6 +135,16 @@ class TransformGroup extends Container {
   assert(near(centred.min.x, -20, 0.05) && near(centred.max.x, 20, 0.05), 'a circle spans its radius either side of its local origin')
   assert(near(centred.min.y, -centred.max.y, 1e-9), 'centred on it in y as well')
 
+  // A rounded corner is cut out of the pick shape too, with nothing to keep in step: the
+  // hit test runs on the very triangles that were drawn, so it follows whatever they are.
+  const square = new Rect({ width: 100, height: 100 })
+  const rounded = new Rect({ width: 100, height: 100, cornerRadius: 30 })
+  assert(hitTestShape(square, 4, -4), 'a square rect is hit right up in its corner')
+  assert(!hitTestShape(rounded, 4, -4), 'a rounded one is not - the corner is not there to hit')
+  assert(hitTestShape(rounded, 50, -50) && hitTestShape(rounded, 0.5, -50), 'its middle and its straight edges still are')
+  const roundedBounds = shapeLocalBounds(rounded)
+  assert(near(roundedBounds.min.x, 0) && near(roundedBounds.max.x, 100), 'and rounding never shrinks the bounds')
+
   const circle = new Circle({ x: 0, y: 0, radius: 30 })
   assert(hitTestShape(circle, 0, 0), 'circle center hits')
   assert(hitTestShape(circle, 29, 0), 'inside circle radius hits')
