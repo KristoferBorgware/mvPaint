@@ -1,6 +1,7 @@
 // The example-scene registry. The picker lists whatever is in here, in this order, and the
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
+import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
@@ -24,6 +25,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Rects, a circle and an open polyline: linear and radial gradient fills in local space, stroke joins and caps, corner rounding (uniform, per-corner, and scaled down to fit), and two shapes spinning about their own centres.',
     build: buildShapesScene,
+  },
+  {
+    id: 'groups',
+    title: 'Groups',
+    description:
+      'Containers that place themselves and are sized by what they hold: one assembly under three different group transforms, a group of groups, a group whose extent follows its orbiting contents, visibility governing a whole subtree, and a group whose parts are deliberately still grabbed on their own. Click any part to select the whole assembly.',
+    build: buildGroupScene,
   },
   {
     id: 'text',

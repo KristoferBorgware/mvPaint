@@ -10,6 +10,7 @@
 
 import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Container } from '../shapes/Container'
+import { Group } from '../shapes/Group'
 import { Rect , type RectOptions } from '../shapes/Rect'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector2 } from '../math/Vector2'
@@ -19,6 +20,7 @@ import { panToAnchor, zoomToward } from './cameraControls'
 import { draggedPosition } from './nodeDrag'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
 import { Transformer } from '../shapes/Transformer'
+import { boxForNodes } from '../shapes/transformerMath'
 import { Circle } from '../shapes/Circle'
 import { resetListenerCensus } from '../events/listenerCensus'
 import type { Shape } from '../shapes/Shape'
@@ -289,6 +291,96 @@ const centredRect = (options: RectOptions = {}): Rect =>
   press('pointerup', 200, 200)
   dispatcher.destroy()
   resetListenerCensus()
+}
+
+// --- a press inside a group takes hold of the GROUP ------------------------------------
+//
+// This is the one place grouping is mechanism rather than policy: a group is meant to feel
+// like one object under the pointer, so a drag that lands on a shape inside it moves the
+// whole assembly, and the shape's own x/y never change. Which node a CLICK selects stays
+// the application's business - the dispatcher still reports the press on the shape.
+{
+  const listeners = new Map<string, (e: never) => void>()
+  const canvas = {
+    addEventListener: (type: string, fn: (e: never) => void) => listeners.set(type, fn),
+    removeEventListener: (type: string) => listeners.delete(type),
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+    hasPointerCapture: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    style: { cursor: '' },
+  }
+
+  const root = new Container()
+  const group = root.addChild(new Group({ name: 'assembly' }))
+  const part = group.addChild(centredRect({ name: 'part', x: 0, y: 0, width: 40, height: 40 }))
+
+  resetListenerCensus()
+  const dispatcher = new SceneInputDispatcher(canvas as unknown as HTMLCanvasElement, {
+    root,
+    pick: () => part,
+    toWorld: (x, y) => new Vector2(x, y),
+  })
+  const send = (type: string, x: number, y: number) =>
+    listeners.get(type)?.({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX: x, clientY: y, shiftKey: false, altKey: false, preventDefault: () => {}, type } as never)
+
+  const pressed: string[] = []
+  root.on('pointerdown', (e) => pressed.push((e.target as { name?: string }).name ?? 'root'))
+
+  send('pointerdown', 0, 0)
+  send('pointermove', 50, 30)
+  assert(pressed[0] === 'part', 'the press is still reported on the shape - a pick tells the truth about what is there')
+  assert(near(group.x, 50) && near(group.y, 30), 'but the drag moved the GROUP')
+  assert(part.x === 0 && part.y === 0, 'and left the shape exactly where it was inside it')
+  send('pointerup', 50, 30)
+
+  // A group that has opted out is not a handle: the drag falls back to the shape itself.
+  group.draggable = false
+  send('pointerdown', 50, 30)
+  send('pointermove', 60, 30)
+  assert(near(group.x, 50), 'a non-draggable group does not move')
+  assert(near(part.x, 10), 'the shape inside it does')
+  send('pointerup', 60, 30)
+
+  // ...and a shape that has opted out inside a group that has NOT still moves the group,
+  // because the group is what was grabbed, not the shape.
+  group.draggable = true
+  part.draggable = false
+  part.x = 0
+  send('pointerdown', 50, 30)
+  send('pointermove', 90, 30)
+  assert(near(group.x, 90), 'a non-draggable shape is still a handle on its draggable group')
+  assert(part.x === 0, 'and does not move itself')
+  send('pointerup', 90, 30)
+
+  dispatcher.destroy()
+  resetListenerCensus()
+}
+
+// --- the transformer wraps a group as one node, framed by what the group holds ---------
+{
+  const root = new Container()
+  const group = root.addChild(new Group({ x: 100, y: 0 }))
+  group.addChild(centredRect({ x: -20, y: 0, width: 20, height: 20 }))
+  group.addChild(centredRect({ x: 20, y: 0, width: 20, height: 20 }))
+
+  const transformer = new Transformer()
+  root.addChild(transformer)
+  transformer.attach([group])
+  assert(transformer.has(group), 'a group can be attached like any other node')
+
+  const box = boxForNodes(transformer.nodes, (node) => (node instanceof Group ? node.bounds() : node.localBounds()))
+  assert(box !== null, 'and the frame fits around it')
+  // The two rects span -30..30 in the group's own space, and the group sits at x = 100.
+  assert(near(box!.cx, 100) && near(box!.halfW, 30), 'over the extent of everything the group holds, in world space')
+  assert(near(box!.halfH, 10), 'on both axes')
+
+  // Adding to the group changes what the frame would cover, with nothing to invalidate.
+  // The new rect is centred on y = -100, so it spans -110..-90 and the union runs -110..10.
+  group.addChild(centredRect({ x: 0, y: -100, width: 20, height: 20 }))
+  const grown = boxForNodes(transformer.nodes, (node) => (node instanceof Group ? node.bounds() : node.localBounds()))
+  assert(near(grown!.halfH, 60), 'and a group that gained a member is measured bigger next time it is asked')
+  assert(near(grown!.cy, -50), 'recentred on the new extent, with nothing told to invalidate anything')
 }
 
 console.log(`[input] self-test passed (${count} assertions)`)

@@ -16,7 +16,8 @@
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import type { AABB } from '../math/AABB'
-import type { Shape } from './Shape'
+import type { Node } from './Node'
+import type { TransformableNode } from './Group'
 
 export interface Point2 {
   x: number
@@ -85,7 +86,7 @@ function rotate2(p: Point2, angle: number): Point2 {
 }
 
 /** A node's rotation in world space - its own, plus everything its ancestors add. */
-export function worldRotationOf(node: Shape): number {
+export function worldRotationOf(node: Node): number {
   const m = node.worldMatrix().m
   return Math.atan2(m[1], m[0])
 }
@@ -140,7 +141,7 @@ export function boxFromPoints(points: readonly Point2[], rotation: number): Orie
 }
 
 /** The four world-space corners of a node's local bounds. */
-export function worldCorners(node: Shape, bounds: AABB): Point2[] {
+export function worldCorners(node: Node, bounds: AABB): Point2[] {
   const world = node.worldMatrix()
   const corners: Point2[] = []
   for (const [x, y] of [
@@ -173,7 +174,10 @@ export function worldCorners(node: Shape, bounds: AABB): Point2[] {
  * `nodes[0]` still orients the box even if it happens to be one of those, since
  * orientation only needs its rotation, not its bounds.
  */
-export function boxForNodes(nodes: readonly Shape[], boundsOf: (node: Shape) => AABB | null): OrientedBox | null {
+export function boxForNodes(
+  nodes: readonly TransformableNode[],
+  boundsOf: (node: TransformableNode) => AABB | null,
+): OrientedBox | null {
   if (nodes.length === 0) return null
   const rotation = worldRotationOf(nodes[0])
 
@@ -404,7 +408,7 @@ export function decompose2D(a: number, b: number, c: number, d: number): Decompo
  * held fixed and folded into the position, since the pivot belongs to the node, not the
  * gesture.
  */
-export function applyWorldTransform(node: Shape, delta: Matrix4x4): void {
+export function applyWorldTransform(node: TransformableNode, delta: Matrix4x4): void {
   const parentWorld = node.parent ? node.parent.worldMatrix() : Matrix4x4.identity()
   const newLocal = parentWorld.inverse().mul(delta).mul(parentWorld).mul(node.localMatrix())
   const m = newLocal.m

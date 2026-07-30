@@ -2,6 +2,7 @@
 //   npx tsx src/scene/selfTest.ts
 
 import { Container } from '../shapes/Container'
+import { Group } from '../shapes/Group'
 import { Node } from '../shapes/Node'
 import { Scene } from './Scene'
 import { OrthographicCamera } from '../camera/OrthographicCamera'
@@ -346,6 +347,50 @@ class TransformGroup extends Container {
   left.x = 900
   left.y = 900
   assert(nodesInBox(scene, { x: 800, y: 800 }, { x: 1000, y: 1000 }).includes(left), 'a moved shape is found where it now is')
+}
+
+// --- a group in a real scene: what draws, what picks, and what a hidden group takes with it
+{
+  const scene = new Scene()
+  const group = scene.root.addChild(new Group({ name: 'assembly', x: 200 }))
+  const inGroup = group.addChild(new Rect({ width: 40, height: 40 }))
+  const loose = scene.root.addChild(new Rect({ x: -500, y: 0, width: 40, height: 40 }))
+
+  // A group is not itself drawable, so it never appears in the render order - only what it
+  // holds does, exactly as if the shapes sat at the root.
+  assert(collectZOrder(scene).includes(inGroup), 'a shape inside a group still renders')
+  assert(!(collectZOrder(scene) as unknown[]).includes(group), 'the group itself never does - it draws nothing')
+
+  // Picking goes through the group's transform, so the shape is where the group put it.
+  assert(hitTestShape(inGroup, 220, -20), "the shape is hit at the group's position, not its own")
+  assert(!hitTestShape(inGroup, 20, -20), 'and not at where it would be without the group')
+  assert(pickNode(scene, 220, -20) === inGroup, 'a pick returns the SHAPE, not the group that holds it')
+
+  // Hiding the group removes its whole subtree from both, in one move.
+  group.visible = false
+  assert(!collectZOrder(scene).includes(inGroup), 'a hidden group takes its contents out of the render order')
+  assert(pickNode(scene, 220, -20) === null, 'and out of picking')
+  assert(collectZOrder(scene).includes(loose), 'while leaving everything outside it alone')
+  assert(pickNode(scene, -480, -20) === loose, 'which is still pickable')
+
+  group.visible = true
+  assert(collectZOrder(scene).includes(inGroup), 'and showing it brings the subtree back')
+}
+
+// --- a hidden group prunes nested subtrees too, however deep ---
+{
+  const scene = new Scene()
+  const outer = scene.root.addChild(new Group())
+  const inner = outer.addChild(new Group())
+  const deep = inner.addChild(new Group())
+  const leaf = deep.addChild(new Rect({ width: 10, height: 10 }))
+
+  assert(collectZOrder(scene).includes(leaf), 'visible all the way down')
+  outer.visible = false
+  assert(!collectZOrder(scene).includes(leaf), 'hiding the outermost group is enough - the walk turns back there')
+  outer.visible = true
+  inner.visible = false
+  assert(!collectZOrder(scene).includes(leaf), 'and so is hiding one in the middle')
 }
 
 console.log(`[scene] self-test passed (${count} assertions)`)

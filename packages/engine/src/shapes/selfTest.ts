@@ -15,6 +15,7 @@ import { Circle } from './Circle'
 import { meshGeometryEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
+import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
 import { Text } from './Text'
 import { Transformer } from './Transformer'
 import {
@@ -52,7 +53,8 @@ const centredRect = (options: RectOptions = {}): Rect =>
 
 
 
-const localBoundsOf = (node: Shape): AABB | null => node.localBounds()
+const localBoundsOf = (node: TransformableNode): AABB | null =>
+  node instanceof Group ? node.bounds() : node.localBounds()
 
 /** World-space corners of a node's local bounds, for checking a transform's effect. */
 function corners(node: Shape): { x: number; y: number }[] {
@@ -924,6 +926,141 @@ function TWO_PI_PLUS(a: number): number {
   assert(text.getAttr('runs') === text.runs, 'getAttr reads a getter-only property too')
   text.setAttr('runs', [{ text: 'world' }])
   assert(text.runs.length === 1 && text.runs[0].text === 'world', "setAttr('runs', ...) on a TextBlock goes through setRuns()")
+}
+
+// --- groups: a container that places itself, sized by what it holds -------------------
+//
+// A group draws nothing and stores no size. What it contributes is a matrix in the middle
+// of the chain, and an extent that is whatever it currently contains - so the interesting
+// assertions are all about those two things staying true as the contents change.
+{
+  const group = new Group({ x: 100, y: -50 })
+  const a = group.addChild(new Rect({ x: 0, y: 0, width: 40, height: 20 }))
+
+  // The group's matrix lands between the shape's own and the world, which is the whole
+  // mechanism: nothing downstream needs to know a group is involved.
+  const corner = a.worldMatrix().transformPoint(new Vector3(0, 0, 0))
+  assert(near(corner.x, 100) && near(corner.y, -50), "a child's world position is its own plus the group's")
+
+  // ...and moving the group moves what is inside it, without touching the children at all.
+  group.x = 200
+  const moved = a.worldMatrix().transformPoint(new Vector3(0, 0, 0))
+  assert(near(moved.x, 200) && near(a.x, 0), 'moving the group moves the child, whose own x never changed')
+
+  // Sized by its contents: the rect spans [0,40] x [-20,0] in its own space, and the group
+  // holds that unmoved, so the group's local extent is exactly the rect's.
+  const bounds = group.bounds()
+  assert(bounds.valid(), 'a group holding something has an extent')
+  assert(near(bounds.min.x, 0) && near(bounds.max.x, 40), 'and it is the union of what it holds')
+  assert(near(bounds.max.y, 0) && near(bounds.min.y, -20), 'in both axes')
+
+  // Add a second shape and the group grows to cover it - no invalidation call anywhere.
+  group.addChild(new Rect({ x: 60, y: 0, width: 10, height: 100 }))
+  const grown = group.bounds()
+  assert(near(grown.max.x, 70), 'adding a shape grows the group')
+  assert(near(grown.min.y, -100), 'in whichever direction the new shape reaches')
+
+  // Move a child and the group follows it, again with nothing told to recompute.
+  a.x = -30
+  assert(near(group.bounds().min.x, -30), 'moving a child moves the group edge it was defining')
+
+  // World bounds are the same extent carried through the group's own transform.
+  const world = group.worldBounds()
+  assert(near(world.min.x, -30 + 200) && near(world.max.x, 70 + 200), 'world bounds add the group position')
+}
+
+// --- an empty group is nowhere, not a point at its own origin ---
+{
+  const empty = new Group({ x: 10, y: 10 })
+  assert(!empty.bounds().valid(), 'a group holding nothing has no extent at all')
+  assert(!empty.worldBounds().valid(), 'in world space either')
+  // A group holding only things with nothing to measure is equally empty.
+  empty.addChild(new Group())
+  assert(!empty.bounds().valid(), 'a group of empty groups is still nowhere')
+}
+
+// --- the group's own transform applies to its contents' extent ---
+{
+  const group = new Group({ scaleX: 2, scaleY: 3 })
+  group.addChild(new Rect({ width: 10, height: 10 }))
+  assert(near(group.bounds().max.x, 10), "bounds() is in the group's OWN space, so its scale is not in them")
+  assert(near(group.worldBounds().max.x, 20), 'worldBounds() is, so the scale is')
+  assert(near(group.worldBounds().min.y, -30), 'on both axes independently')
+}
+
+// --- groups nest, and the middle group's transform is composed on the way down ---
+{
+  const outer = new Group({ x: 100 })
+  const inner = outer.addChild(new Group({ x: 10, scaleX: 2 }))
+  inner.addChild(new Rect({ width: 5, height: 5 }))
+
+  assert(near(inner.bounds().max.x, 5), "the inner group measures its own child in the child's units")
+  assert(near(outer.bounds().max.x, 10 + 5 * 2), "the outer group sees the inner one's offset and scale")
+  assert(near(outer.worldBounds().max.x, 100 + 10 + 5 * 2), 'and world bounds add the outer position on top')
+}
+
+// --- a hidden group takes its contents out of the measurement, and out of the scene ---
+{
+  const group = new Group()
+  const shown = group.addChild(new Rect({ width: 10, height: 10 }))
+  const hiddenChild = group.addChild(new Group({ x: 1000 }))
+  hiddenChild.addChild(new Rect({ width: 10, height: 10 }))
+
+  assert(near(group.bounds().max.x, 1010), 'a visible nested group counts towards the extent')
+  hiddenChild.visible = false
+  assert(near(group.bounds().max.x, 10), 'a hidden one does not')
+
+  // The same rule for a plain hidden shape, which is the pre-existing behaviour.
+  shown.visible = false
+  assert(!group.bounds().valid(), 'and hiding the last visible thing leaves no extent')
+}
+
+// --- which group a node belongs to, for an application deciding what a click means ---
+{
+  const outer = new Group({ name: 'outer' })
+  const inner = outer.addChild(new Group({ name: 'inner' }))
+  const leaf = inner.addChild(new Rect({ width: 1, height: 1 }))
+  const loose = new Rect({ width: 1, height: 1 })
+
+  assert(closestGroup(leaf) === inner, 'the closest group is the one directly holding the node')
+  assert(outermostGroup(leaf) === outer, 'the outermost is the whole assembly')
+  assert(closestGroup(loose) === null && outermostGroup(loose) === null, 'a node in no group is in no group')
+  assert(hiddenByGroup(leaf) === false, 'nothing above it is hidden')
+  outer.visible = false
+  assert(hiddenByGroup(leaf), 'until something above it is')
+
+  // Which group a DRAG takes hold of is a different question: it stops at the first group
+  // that has opted out, because reaching past one to an outer group would move the very
+  // thing that said it should not be moved that way.
+  assert(draggableGroup(leaf) === outer, 'a drag takes hold of the outermost draggable group')
+  inner.draggable = false
+  assert(draggableGroup(leaf) === null, 'and takes hold of nothing once the group it is in opts out')
+  inner.draggable = true
+  outer.draggable = false
+  assert(draggableGroup(leaf) === inner, 'stopping at the outer one that opted out, but keeping the inner')
+}
+
+// --- a group carries the same transform vocabulary a shape does ---
+{
+  const group = new Group({ x: 3, y: 4, rotation: 0.5, scaleX: 2, skewX: 0.25, offsetX: 1 })
+  const snapshot = group.captureTransform()
+  const before = group.localMatrix()
+  group.x = 99
+  group.rotation = 0
+  group.restoreTransform(snapshot)
+  assert(group.x === 3 && near(group.rotation, 0.5), 'capture/restore puts every field back')
+  assert(group.localMatrix().m.every((v, i) => near(v, before.m[i])), 'so the matrix comes back identical')
+
+  // The same memoization shapes get: an unmoved node hands back the SAME instance, which
+  // is what lets world matrices and the render lanes short-circuit on reference equality.
+  const held = group.localMatrix()
+  assert(group.localMatrix() === held, 'an unchanged group returns the same matrix instance')
+  group.y = 40
+  assert(group.localMatrix() !== held, 'and a changed one does not')
+
+  assert(group.attrs.x === 3 && group.attrs.visible === true, 'the transform and visibility are exposed as attributes')
+  group.setAttr('rotation', 1)
+  assert(group.rotation === 1, 'and are writable through setAttr')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

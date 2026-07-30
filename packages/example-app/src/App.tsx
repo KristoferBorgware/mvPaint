@@ -24,7 +24,7 @@ import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
-import type { Shape } from '@mvpaint/engine'
+import { Shape, type TransformableNode } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
 import { ShadowControls } from './components/ShadowControls'
@@ -61,7 +61,7 @@ export default function App() {
   const [cullMargin, setCullMargin] = useState(0)
   const [uniformCornerScale, setUniformCornerScale] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<readonly Shape[]>([])
+  const [selected, setSelected] = useState<readonly TransformableNode[]>([])
   // Both panels start collapsed - on mobile they otherwise eat most of the screen; the
   // user opts in via the toggle row instead of having them always on.
   const [infoOpen, setInfoOpen] = useState(false)
@@ -69,7 +69,7 @@ export default function App() {
   const canvasRef = useRef<WebGPUCanvasHandle>(null)
 
   // Stable identities so the child effects don't see a new callback every render.
-  const handleSelectionChange = useCallback((nodes: readonly Shape[]) => setSelected([...nodes]), [])
+  const handleSelectionChange = useCallback((nodes: readonly TransformableNode[]) => setSelected([...nodes]), [])
 
   const selectScene = (next: ExampleScene) => {
     setScene(next)
@@ -211,7 +211,7 @@ export default function App() {
                 </Typography>
               </Stack>
 
-              <ShadowControls selected={selected} />
+              <ShadowControls selected={selected.filter((node): node is Shape => node instanceof Shape)} />
             </Stack>
           </Paper>
         </Collapse>

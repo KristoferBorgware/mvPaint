@@ -26,8 +26,11 @@
 // genuinely has to know about, and the application decides what goes in it.
 //
 // A pointer press resolves in priority order: a transformer handle, then a draggable node,
-// then empty space. Gestures resolve against the values captured when the press began,
-// never accumulated per move, so no gesture can drift over a long drag.
+// then empty space. Where the node it lands on sits inside a draggable Group, the group is
+// what the drag takes hold of - a group behaves as one object under the pointer, which is
+// mechanism, while WHICH node a click selects stays the application's to decide. Gestures
+// resolve against the values captured when the press began, never accumulated per move, so
+// no gesture can drift over a long drag.
 //
 // The raw entry points (down/move/up/cancel/leave/wheel/contextMenu) are public. The canvas
 // listeners call them, and so can a host driving input from somewhere else - a test, a
@@ -35,7 +38,9 @@
 
 import type { PickableNode } from '../scene/picking'
 import type { Node } from '../shapes/Node'
-import type { Shape, ShapeTransform } from '../shapes/Shape'
+import type { Shape } from '../shapes/Shape'
+import type { NodeTransform } from '../shapes/nodeTransform'
+import { draggableGroup, type TransformableNode } from '../shapes/Group'
 import type { Transformer } from '../shapes/Transformer'
 import { Vector2 } from '../math/Vector2'
 import {
@@ -105,13 +110,13 @@ interface TrackedPointer {
 
 /** A node's full transform, captured so a gesture can always re-resolve from its start. */
 interface NodeSnapshot {
-  node: Shape
-  transform: ShapeTransform
+  node: TransformableNode
+  transform: NodeTransform
 }
 
 /** A one-pointer drag moving nodes. Each keeps its own start position. */
 interface NodeDragSession {
-  nodes: Shape[]
+  nodes: TransformableNode[]
   startPositions: { x: number; y: number }[]
   anchorWorld: Vector2
   active: boolean
@@ -260,7 +265,7 @@ export class SceneInputDispatcher {
   // nothing - which matters for the per-move ones, dragmove and transform.
 
   /** Raises a drag or transform event on every node taking part, carrying the whole set. */
-  private fireOnNodes(type: string, nodes: readonly Shape[]): void {
+  private fireOnNodes(type: string, nodes: readonly TransformableNode[]): void {
     if (nodes.length === 0 || !hasListener(type)) return
     for (const node of nodes) node.fire(type, { nodes }, true)
   }
@@ -358,7 +363,7 @@ export class SceneInputDispatcher {
       anchor,
       box,
       startWorld: world,
-      snapshots: transformer.nodes.map((node: Shape) => ({ node, transform: node.captureTransform() })),
+      snapshots: transformer.nodes.map((node) => ({ node, transform: node.captureTransform() })),
     }
     this.setCursor(anchor === 'rotate' ? 'grabbing' : 'nwse-resize')
     this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node))
@@ -420,18 +425,32 @@ export class SceneInputDispatcher {
   // --- node dragging ---
 
   /**
-   * Arms a drag over a draggable node. `hit` is whatever the press already hit-tested for
-   * (see onPointerDown).
+   * Arms a drag over a draggable node, or over the group that node belongs to. `hit` is
+   * whatever the press already hit-tested for (see onPointerDown).
    */
   private armDrag(screenX: number, screenY: number, hit: PickableNode | null): boolean {
-    if (!hit || !hit.draggable) return false
+    if (!hit) return false
+
+    // What the press actually takes hold of. A shape inside a draggable Group is a handle
+    // on the GROUP, not on itself - that is what makes a group feel like one object under
+    // the pointer, and it is why a shape's own `draggable` is not the whole story: a
+    // non-draggable shape in a draggable group still moves the group.
+    //
+    // Unless the transformer is already wrapping the shape, in which case the application
+    // has said that this shape is the thing being worked on, and reaching past it to its
+    // group would move things the application did not put in the frame.
+    const group = this.transformer?.has(hit) ? null : draggableGroup(hit)
+    if (!group && !hit.draggable) return false
+    const grabbed: TransformableNode = group ?? hit
+
     const anchorWorld = this.worldAt(screenX, screenY)
     if (!anchorWorld) return false
 
-    // The transformer's attached set is what "the group" means here: pressing a node that
-    // is in it drags the whole set, pressing one that is not drags only that node. Neither
-    // changes the set - an application does that, in response to the press it also heard.
-    const nodes = this.transformer?.has(hit) ? [...this.transformer.nodes] : [hit]
+    // The transformer's attached set is what "the selection" means here: pressing a node
+    // that is in it drags the whole set, pressing one that is not drags only that node.
+    // Neither changes the set - an application does that, in response to the press it also
+    // heard.
+    const nodes = this.transformer?.has(grabbed) ? [...this.transformer.nodes] : [grabbed]
 
     this.drag = {
       nodes,

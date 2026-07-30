@@ -41,9 +41,16 @@ them at different moments.
 scale, skew, pivot offset, zIndex, visibility, pickability, fill/stroke styling, shadow
 settings.
 
+`Group extends Container` (`shapes/Group.ts`) is the other kind of node that places itself. It
+draws nothing and occupies no slot in any render lane; what it contributes is a matrix in the
+middle of the chain, which the composition below already handles, so a shape inside a group
+needs no special case anywhere downstream. Both kinds share one transform implementation
+(`shapes/nodeTransform.ts`) — a group and a shape must compose identically, or the same gesture
+would move them differently.
+
 ### The local matrix
 
-Each shape composes a 4x4 matrix from its transform fields:
+Each placeable node composes a 4x4 matrix from its transform fields:
 
 ```
 localMatrix = translate(x, y) · rotate(rotation) · skew · scale(scaleX, scaleY) · translate(-offsetX, -offsetY)
@@ -67,6 +74,20 @@ Which point of a shape lands at (x, y) depends on the kind of shape:
 The practical consequence is the pivot. Rotation and scale are about the local origin, so a
 circle spins in place while a rect turns about its corner. To spin a rect about its middle,
 give it `offsetX: width / 2, offsetY: -height / 2`.
+
+A group has no origin convention because it has no geometry of its own. It also has no size:
+`group.bounds()` is computed from whatever it currently holds, walking into nested groups and
+composing their matrices on the way. Nothing caches it, and nothing needs invalidating when a
+child moves — the same relationship the transformer's frame has with the nodes it wraps, and
+for the same reason: a stored width and height would be a second, independent claim about the
+same thing.
+
+What a group governs for its subtree is `visible` (the render/pick walk turns back at a hidden
+one rather than testing each shape's ancestors), `listening` (inherited from `Node`), and
+`draggable` — a press on a shape inside a draggable group takes hold of the *group*. That last
+one is the only place grouping is mechanism rather than policy. Which node a click *selects* is
+an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
+that wants to ask.
 
 ### Two caches, both keyed on identity
 

@@ -19,6 +19,7 @@ import { OrthographicCamera } from '../camera/OrthographicCamera'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import type { TransformableNode } from '../shapes/Group'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
 import { screenToWorld } from '../input/viewport'
@@ -253,7 +254,7 @@ export class SceneRenderer {
   }
 
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
-  localBoundsOf(node: PickableNode): AABB {
+  localBoundsOf(node: TransformableNode): AABB {
     return localBoundsOf(node, this.fontBook)
   }
 
@@ -577,7 +578,7 @@ export interface SceneRendererHandle {
   /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
   pick: (screenX: number, screenY: number) => PickableNode | null
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
-  localBoundsOf: (node: PickableNode) => AABB
+  localBoundsOf: (node: TransformableNode) => AABB
   /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
   nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
   markGeometryDirty: () => void
@@ -704,7 +705,7 @@ export async function createSceneRenderer(
     pick(screenX: number, screenY: number) {
       return scene.pick(screenX, screenY)
     },
-    localBoundsOf(node: PickableNode) {
+    localBoundsOf(node: TransformableNode) {
       return scene.localBoundsOf(node)
     },
     nodesInBox(from, to, options) {

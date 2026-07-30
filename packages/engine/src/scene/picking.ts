@@ -19,6 +19,8 @@ import { Vector3 } from '../math/Vector3'
 import type { Node } from '../shapes/Node'
 import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
+import { Container } from '../shapes/Container'
+import { Group, type TransformableNode } from '../shapes/Group'
 import { Text } from '../shapes/Text'
 import type { FontBook } from '../text/FontAtlas'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
@@ -85,12 +87,23 @@ export function hitTestText(text: Text, fontBook: FontBook, worldX: number, worl
  * zIndex (Array.prototype.sort is stable per spec, so ties keep scene-traversal order).
  * The renderer and pickNode() both build on this so "what's on top" and "what's under
  * the depth test" can never disagree.
+ *
+ * A hidden Group takes its whole subtree out with it, and the walk turns back at one
+ * rather than testing each shape's ancestors: hiding a group of ten thousand shapes should
+ * cost one check, and asking every shape whether it is under a hidden group would instead
+ * cost more the deeper the scene nests.
  */
+function collectShapes(node: Node, predicate: (shape: Shape) => boolean, out: Shape[]): void {
+  if (node instanceof Group && !node.visible) return
+  if (node instanceof Shape && predicate(node)) out.push(node)
+  if (node instanceof Container) {
+    for (const child of node.children) collectShapes(child, predicate, out)
+  }
+}
+
 function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean): Shape[] {
   const all: Shape[] = []
-  scene.root.traversePreOrder((node) => {
-    if (node instanceof Shape && predicate(node)) all.push(node)
-  })
+  collectShapes(scene.root, predicate, all)
   return all.sort((a, b) => a.zIndex - b.zIndex)
 }
 
@@ -108,9 +121,7 @@ function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean)
  */
 export function collectZOrder(scene: Scene, sorted = true): Shape[] {
   const all: Shape[] = []
-  scene.root.traversePreOrder((node) => {
-    if (node instanceof Shape && node.visible) all.push(node)
-  })
+  collectShapes(scene.root, (shape) => shape.visible, all)
   return sorted ? all.sort((a, b) => a.zIndex - b.zIndex) : all
 }
 
@@ -140,7 +151,21 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?
   return null
 }
 
-/** A pickable node's own local-space bounds (shape triangles, or shaped text quads). */
-export function localBoundsOf(node: PickableNode, fontBook: FontBook): AABB {
+/**
+ * A node's own local-space bounds: a shape's triangles, a Text's shaped quads, or - for a
+ * Group, which has no extent of its own - whatever it currently holds, measured through
+ * this same function so text inside a group is bounded by its glyphs like text anywhere
+ * else.
+ */
+export function localBoundsOf(node: TransformableNode, fontBook: FontBook): AABB {
+  if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fontBook))
   return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node)
+}
+
+// The resolver a group measures its contents with. It never sees a nested Group - the
+// group walks into those itself, composing their matrices as it goes - so this only has to
+// answer for leaves, and return null for anything that is not one.
+function nodeLocalBounds(node: Node, fontBook: FontBook): AABB | null {
+  if (node instanceof Text) return textLocalBounds(node.shaped(fontBook))
+  return node instanceof Shape ? shapeLocalBounds(node) : null
 }

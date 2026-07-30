@@ -9,6 +9,8 @@ import {
   Vector3,
   panToAnchor,
   Shape,
+  outermostGroup,
+  type TransformableNode,
   zoomToward,
   type CameraGestureEvent,
   type MarqueeEvent,
@@ -52,7 +54,7 @@ interface WebGPUCanvasProps {
   /** Called with a human-readable message on WebGPU init or device errors. */
   onError?: (message: string) => void
   /** Called with every selected node (empty when the selection is cleared). */
-  onSelectionChange?: (nodes: readonly Shape[]) => void
+  onSelectionChange?: (nodes: readonly TransformableNode[]) => void
 }
 
 export interface WebGPUCanvasHandle {
@@ -290,11 +292,19 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
         // Pressing a shape selects it; shift adds to what is already framed. Done on the
         // press rather than the click so that dragging a shape picks it up immediately.
+        //
+        // A press inside a group selects the whole GROUP. That is this application's choice,
+        // not the engine's - a pick reports the shape that is actually there, and an editor
+        // that wanted to reach inside a group (or step in on a second click) would simply
+        // not ask for the group here.
+        const selectionTarget = (hit: Shape): TransformableNode => outermostGroup(hit) ?? hit
+
         root.on('pointerdown', (e) => {
           const hit = e.target
           if (hit === root || !(hit instanceof Shape)) return
-          if ((e.evt as PointerEvent | undefined)?.shiftKey) transformer.add(hit)
-          else if (!transformer.has(hit)) transformer.attach([hit])
+          const target = selectionTarget(hit)
+          if ((e.evt as PointerEvent | undefined)?.shiftKey) transformer.add(target)
+          else if (!transformer.has(target)) transformer.attach([target])
         })
         let marqueeAdds = false
         let holdTimer: ReturnType<typeof setTimeout> | null = null
@@ -339,8 +349,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           marqueeOverlay.update(null, handle.getZoom())
           const covered = ((e as MarqueeEvent).nodes ?? []) as Shape[]
           if (covered.length === 0 && !marqueeAdds) return
-          if (marqueeAdds) for (const node of covered) transformer.add(node)
-          else transformer.attach(covered)
+          // Same rule as a press: a rectangle that catches part of a group has caught the
+          // group. Deduplicated, since several members map to the same one.
+          const targets = [...new Set(covered.map(selectionTarget))]
+          if (marqueeAdds) for (const node of targets) transformer.add(node)
+          else transformer.attach(targets)
         })
 
         // A click that hit nothing clears the selection - again a choice, not a given.

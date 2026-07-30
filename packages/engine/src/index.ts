@@ -29,6 +29,8 @@ export * from './scene/picking'
 
 export * from './shapes/Node'
 export * from './shapes/Container'
+export * from './shapes/Group'
+export * from './shapes/nodeTransform'
 export * from './shapes/Shape'
 export * from './shapes/Circle'
 export * from './shapes/Path'

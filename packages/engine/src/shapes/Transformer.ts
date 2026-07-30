@@ -40,7 +40,7 @@
 
 import { Container } from './Container'
 import { Rect } from './Rect'
-import type { Shape } from './Shape'
+import type { TransformableNode } from './Group'
 import { hasListener } from '../events/listenerCensus'
 import type { RGBA } from '../render/meshFormat'
 import {
@@ -106,7 +106,7 @@ export class Transformer extends Container {
   readonly rotateEnabled: boolean
   keepRatio: boolean
 
-  private attached: Shape[] = []
+  private attached: TransformableNode[] = []
   private box: OrientedBox | null = null
   private zoom = 1
 
@@ -184,7 +184,7 @@ export class Transformer extends Container {
   }
 
   /** The nodes this frame currently wraps. */
-  get nodes(): readonly Shape[] {
+  get nodes(): readonly TransformableNode[] {
     return this.attached
   }
 
@@ -193,7 +193,7 @@ export class Transformer extends Container {
   }
 
   /** Replaces the attached set; an empty list hides the frame. */
-  attach(nodes: readonly Shape[]): void {
+  attach(nodes: readonly TransformableNode[]): void {
     // Never wrap the frame's own parts, however the caller assembled the list.
     const next = nodes.filter((node) => !this.owns(node))
     if (sameNodes(next, this.attached)) return
@@ -201,13 +201,13 @@ export class Transformer extends Container {
   }
 
   /** Adds one node, if it is not already attached. */
-  add(node: Shape): void {
+  add(node: TransformableNode): void {
     if (this.owns(node) || this.attached.includes(node)) return
     this.setAttached([...this.attached, node])
   }
 
   /** Removes one node, if it is attached. */
-  remove(node: Shape): void {
+  remove(node: TransformableNode): void {
     const index = this.attached.indexOf(node)
     if (index < 0) return
     const next = [...this.attached]
@@ -216,12 +216,12 @@ export class Transformer extends Container {
   }
 
   /** Adds the node if it is absent, removes it if present - a shift-click, in one call. */
-  toggle(node: Shape): void {
+  toggle(node: TransformableNode): void {
     if (this.attached.includes(node)) this.remove(node)
     else this.add(node)
   }
 
-  has(node: Shape): boolean {
+  has(node: TransformableNode): boolean {
     return this.attached.includes(node)
   }
 
@@ -231,7 +231,7 @@ export class Transformer extends Container {
   }
 
   /** True if `node` is one of this transformer's own visuals. */
-  owns(node: Shape): boolean {
+  owns(node: TransformableNode): boolean {
     return this.parts.includes(node as Rect)
   }
 
@@ -252,7 +252,7 @@ export class Transformer extends Container {
    * them, so they stay where they were drawn until the next frame refits them, exactly as
    * before - this only stops them being *acted on* while the box is known to be stale.
    */
-  private setAttached(next: Shape[]): void {
+  private setAttached(next: TransformableNode[]): void {
     this.attached = next
     this.box = null
     if (next.length === 0) this.hideAll()
@@ -384,7 +384,7 @@ export class Transformer extends Container {
 }
 
 /** Same nodes in the same order - what decides whether attach() is a real change. */
-function sameNodes(a: readonly Shape[], b: readonly Shape[]): boolean {
+function sameNodes(a: readonly TransformableNode[], b: readonly TransformableNode[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false

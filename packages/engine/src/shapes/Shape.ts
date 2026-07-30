@@ -79,42 +79,25 @@
 import { AABB } from '../math/AABB'
 import { bumpMeshGeometryEpoch } from './contentEpoch'
 import { Matrix4x4 } from '../math/Matrix4x4'
-import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
 import type { FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { Node } from './Node'
+import {
+  LocalMatrixCache,
+  TRANSFORM_ATTR_KEYS,
+  applyTransformOptions,
+  captureTransform,
+  restoreTransform,
+  type NodeTransform,
+  type NodeTransformOptions,
+} from './nodeTransform'
 
-/** A complete snapshot of everything localMatrix() depends on. See Shape.captureTransform. */
-export interface ShapeTransform {
-  x: number
-  y: number
-  rotation: number
-  scaleX: number
-  scaleY: number
-  skewX: number
-  skewY: number
-  offsetX: number
-  offsetY: number
-}
-
-export interface ShapeOptions {
+export interface ShapeOptions extends NodeTransformOptions {
   name?: string
   id?: string
-  x?: number
-  y?: number
   width?: number
   height?: number
-  scaleX?: number
-  scaleY?: number
-  /** Radians, about +Z. */
-  rotation?: number
-  offsetX?: number
-  offsetY?: number
-  /** Shear: x shifts by skewX per unit y. See Shape.skewX. */
-  skewX?: number
-  /** Shear: y shifts by skewY per unit x. See Shape.skewY. */
-  skewY?: number
   /**
    * Stacking-order hint: shapes with a higher zIndex render in front, resolved by the
    * renderer's depth buffer (so mesh shapes and text can freely interleave). Integer-
@@ -280,17 +263,9 @@ export abstract class Shape extends Node {
 
   constructor(options: ShapeOptions = {}) {
     super(options.name, options.id)
-    this.x = options.x ?? 0
-    this.y = options.y ?? 0
+    applyTransformOptions(this, options)
     this.width = options.width ?? 0
     this.height = options.height ?? 0
-    this.scaleX = options.scaleX ?? 1
-    this.scaleY = options.scaleY ?? 1
-    this.rotation = options.rotation ?? 0
-    this.offsetX = options.offsetX ?? 0
-    this.offsetY = options.offsetY ?? 0
-    this.skewX = options.skewX ?? 0
-    this.skewY = options.skewY ?? 0
     this.zIndex = options.zIndex ?? 0
     this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
@@ -316,15 +291,7 @@ export abstract class Shape extends Node {
       'visible',
       'pickable',
       'draggable',
-      'x',
-      'y',
-      'scaleX',
-      'scaleY',
-      'rotation',
-      'offsetX',
-      'offsetY',
-      'skewX',
-      'skewY',
+      ...TRANSFORM_ATTR_KEYS,
       'zIndex',
       'overlay',
       'shadowColor',
@@ -355,52 +322,10 @@ export abstract class Shape extends Node {
     ]
   }
 
-  // T(x,y) * R(rotation) * skew * S(scaleX,scaleY) - everything localMatrix() composes
-  // except the trailing pivot translation, so shadowMatrix() below can splice its own
-  // extra transform in at that same point (closest to the raw local-space geometry).
-  private coreMatrix(): Matrix4x4 {
-    let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
-    if (this.rotation !== 0) {
-      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
-    }
-    if (this.skewX !== 0 || this.skewY !== 0) {
-      m = m.mul(skewMatrix(this.skewX, this.skewY))
-    }
-    if (this.scaleX !== 1 || this.scaleY !== 1) {
-      m = m.mul(Matrix4x4.scaling(new Vector3(this.scaleX, this.scaleY, 1)))
-    }
-    return m
-  }
-
-  // Memoized on a snapshot of every field it reads (see ShapeTransform): a static shape -
-  // the overwhelming common case once a scene has settled - then costs nothing here on
-  // later frames instead of re-composing translate*rotate*skew*scale from scratch. The
-  // cache object is only reallocated on an actual change, not every call.
-  private localCache: (ShapeTransform & { matrix: Matrix4x4 }) | null = null
+  private readonly localCache = new LocalMatrixCache()
 
   override localMatrix(): Matrix4x4 {
-    const c = this.localCache
-    if (
-      c &&
-      c.x === this.x &&
-      c.y === this.y &&
-      c.rotation === this.rotation &&
-      c.scaleX === this.scaleX &&
-      c.scaleY === this.scaleY &&
-      c.skewX === this.skewX &&
-      c.skewY === this.skewY &&
-      c.offsetX === this.offsetX &&
-      c.offsetY === this.offsetY
-    ) {
-      return c.matrix
-    }
-
-    let m = this.coreMatrix()
-    if (this.offsetX !== 0 || this.offsetY !== 0) {
-      m = m.mul(Matrix4x4.translation(new Vector3(-this.offsetX, -this.offsetY, 0)))
-    }
-    this.localCache = { ...this.captureTransform(), matrix: m }
-    return m
+    return this.localCache.matrixFor(this)
   }
 
   /**
@@ -420,35 +345,17 @@ export abstract class Shape extends Node {
   /**
    * Every field localMatrix() reads, captured together so a gesture can restore the node
    * exactly as it was. Enumerating them by hand at each call site is what makes adding a
-   * new transform field (skew, most recently) silently break gestures: a partial restore
-   * leaves the previous move's value behind, and the next delta compounds onto it instead
-   * of replacing it. Keeping the list in one place is the point.
+   * new transform field silently break gestures: a partial restore leaves the previous
+   * move's value behind, and the next delta compounds onto it instead of replacing it.
+   * Keeping the list in one place is the point.
    */
-  captureTransform(): ShapeTransform {
-    return {
-      x: this.x,
-      y: this.y,
-      rotation: this.rotation,
-      scaleX: this.scaleX,
-      scaleY: this.scaleY,
-      skewX: this.skewX,
-      skewY: this.skewY,
-      offsetX: this.offsetX,
-      offsetY: this.offsetY,
-    }
+  captureTransform(): NodeTransform {
+    return captureTransform(this)
   }
 
   /** Puts the node back exactly as captureTransform() found it. */
-  restoreTransform(t: ShapeTransform): void {
-    this.x = t.x
-    this.y = t.y
-    this.rotation = t.rotation
-    this.scaleX = t.scaleX
-    this.scaleY = t.scaleY
-    this.skewX = t.skewX
-    this.skewY = t.skewY
-    this.offsetX = t.offsetX
-    this.offsetY = t.offsetY
+  restoreTransform(t: NodeTransform): void {
+    restoreTransform(this, t)
   }
 
   /**
@@ -572,16 +479,6 @@ export abstract class Shape extends Node {
   protected buildGeometry(_sink: MeshSink): void {}
 }
 
-/**
- * The shear [[1, skewX], [skewY, 1]]: x slides by skewX per unit y, y by skewY per unit
- * x. Column-major storage, so column 0 is (1, skewY) and column 1 is (skewX, 1).
- */
-function skewMatrix(skewX: number, skewY: number): Matrix4x4 {
-  const m = Matrix4x4.identity()
-  m.m[1] = skewY
-  m.m[4] = skewX
-  return m
-}
 
 interface CachedVertex {
   x: number
