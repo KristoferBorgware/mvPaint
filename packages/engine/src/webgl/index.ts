@@ -16,9 +16,8 @@
 // than hundreds of thousands: without storage buffers the per-object records go through a
 // float texture, which is a slower road to the same architecture.
 //
-// LANES LAND ONE AT A TIME - mesh first, then text, images and shadows. Until each arrives,
-// its nodes are skipped with one warning rather than throwing, so a mixed scene shows what
-// can be drawn instead of nothing at all.
+// All four lanes - mesh, text, image and shadow - are implemented. What is missing relative to
+// WebGPU is MSAA, and nothing else.
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import type { CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
@@ -84,6 +83,9 @@ export async function createWebGl2SceneRenderer(
     lastTime = now
     resizer.update()
     options.onFrame?.(dt)
+    // Baking binds its own framebuffer, so it happens before the frame rather than inside it -
+    // the same ordering the WebGPU path gets from its prepass hook.
+    scene.prepareShadows()
     scene.draw(resizer.width, resizer.height)
     rafId = requestAnimationFrame(tick)
   }

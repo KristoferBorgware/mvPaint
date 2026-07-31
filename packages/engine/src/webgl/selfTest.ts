@@ -20,6 +20,13 @@ import { componentOf, meshFragmentGlsl, meshVertexGlsl, texelOf } from './shader
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
 import { imageFragmentGlsl, imageVertexGlsl } from './shaders/image.glsl'
 import {
+  shadowBlurFragmentGlsl,
+  shadowFilterVertexGlsl,
+  shadowQuadFragmentGlsl,
+  shadowQuadVertexGlsl,
+  shadowSilhouetteVertexGlsl,
+} from './shaders/shadow.glsl'
+import {
   OBJECT_DEPTH_OFFSET,
   OBJECT_FILL_COLOR_OFFSET,
   OBJECT_STRIDE,
@@ -27,6 +34,7 @@ import {
 } from '../render/meshFormat'
 import { TEXT_OBJECT_ATLAS_LAYER_OFFSET, TEXT_OBJECT_STRIDE } from '../render/textFormat'
 import { IMAGE_OBJECT_STRIDE, IMAGE_OBJECT_TINT_OFFSET } from '../render/imageFormat'
+import { SHADOW_OBJECT_COLOR_OFFSET, SHADOW_OBJECT_STRIDE } from '../render/shadowFormat'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -161,6 +169,45 @@ function assert(cond: boolean, msg: string): void {
     'the tint is read as a whole texel',
   )
   assert(!imageFragmentGlsl.includes('floatBitsToUint'), 'the image record has no integer fields to misread')
+}
+
+// --- the shadow lane, and the one place the two paths genuinely diverge ---------------------
+{
+  assert(recordTexels(SHADOW_OBJECT_STRIDE) === 8, 'a 128-byte shadow record is 8 texels')
+  for (const source of [shadowQuadVertexGlsl, shadowQuadFragmentGlsl]) {
+    assert(source.startsWith('#version 300 es\n'), 'both shadow-quad stages declare GLSL ES 300 first')
+    assert(source.includes(`const int OBJ_TEXELS = ${SHADOW_OBJECT_STRIDE / 16};`), 'generated with the record size')
+  }
+  assert(shadowQuadVertexGlsl.includes('* 2.0 - 1.0) * clip.w'), 'the shadow quad remaps depth into GL clip space')
+  assert(
+    shadowQuadFragmentGlsl.includes(`obj(id, ${SHADOW_OBJECT_COLOR_OFFSET / 16})`),
+    "the shadow's colour comes from the record, so recolouring never touches the baked texture",
+  )
+
+  // THE FLIP. WebGPU puts NDC y = +1 in a texture's first texel row and GL puts it in the
+  // last, so a bake ported unchanged comes out mirrored - and mirrored again per filter pass.
+  // It is corrected in exactly two places, and they only work together:
+  //
+  //   1. the silhouette projection's y is negated (webgl/ShadowAtlas.ts passes -(2/quadH));
+  //   2. the fullscreen vertex shader maps uv.y STRAIGHT THROUGH, where the WGSL flips it.
+  //
+  // Getting one without the other gives upside-down shadows, so both are pinned here.
+  assert(
+    shadowFilterVertexGlsl.includes('v_uv = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);'),
+    'the filter passes map uv.y straight through, so each reads the row it writes',
+  )
+  assert(
+    !shadowFilterVertexGlsl.includes('1.0 - (y + 1.0)'),
+    "and do NOT carry the WGSL's flip, which would mirror the image on every pass",
+  )
+  assert(
+    shadowSilhouetteVertexGlsl.includes('a_position * u_scale + u_offset'),
+    'the silhouette projection is a plain scale-and-offset, with the flip applied to the uniform',
+  )
+  // Both filter kernels bound their loops by a constant so the shader compiles everywhere;
+  // an unbounded dynamic loop is legal GLSL ES 300 but not reliably compiled.
+  assert(shadowBlurFragmentGlsl.includes('i <= MAX_TAPS'), 'the blur loop is bounded by a constant')
+  assert(shadowBlurFragmentGlsl.includes('if (i > r) break;'), 'and exits early at the real radius')
 }
 
 console.log(`[webgl] self-test passed (${count} assertions)`)

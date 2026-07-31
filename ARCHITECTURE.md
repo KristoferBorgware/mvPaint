@@ -727,11 +727,15 @@ The GLSL is a template string that interpolates the same `OBJECT_*_OFFSET` const
 and the batchers use (`webgl/shaders/`), so the two shaders cannot drift apart — there is only
 one copy of the record layout and both read it.
 
-**Lanes are landing one at a time**: mesh first, then text, images, shadows. A lane the
-fallback does not have yet is skipped with one warning rather than throwing, so a mixed scene
-shows what can be drawn instead of nothing. `npx tsx src/webgl/selfTest.ts` covers the pure
-half — the data texture's index maths and the generated shader's agreement with the record
-layout.
+All four lanes are implemented — mesh, text, image and shadow. The shadow bake ports without
+a compute shader because it never needed one: silhouette, separable morphology and separable
+Gaussian are already ordinary render passes into small textures. The one thing that genuinely
+diverges is render-to-texture orientation — WebGPU puts NDC y = +1 in a texture's *first*
+texel row and GL in its *last* — and it is corrected in exactly two places, pinned by
+`webgl/selfTest.ts` because getting one without the other gives upside-down shadows.
+
+`npx tsx src/webgl/selfTest.ts` covers the pure half: the data texture's index maths, and
+every generated shader's agreement with the record layout it was generated from.
 
 ---
 

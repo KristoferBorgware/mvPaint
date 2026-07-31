@@ -1,6 +1,7 @@
 # mvPaint
 
-A 2D scene-graph renderer for the browser, built directly on **WebGPU**.
+A 2D scene-graph renderer for the browser, built directly on **WebGPU**, with a WebGL2
+fallback for machines that do not have it.
 
 You build a tree of nodes — rectangles, circles, paths, images, text — set their transforms
 and paint, and the engine turns the whole thing into a handful of GPU draw calls per frame. It
@@ -11,6 +12,22 @@ pixels, and nothing above them.
 **[Live examples →](https://kristoferborgware.github.io/mvPaint/)**
 
 ---
+
+## Render paths
+
+WebGPU is the engine. `createSceneRenderer()` uses it, and falls back to a second, separate
+WebGL2 implementation only when it is unavailable — `handle.path` says which one you got, and
+`backend: 'webgl2'` forces the fallback, which is how it gets tested on a machine that has
+WebGPU. The fallback is dynamic-imported, so a browser with WebGPU never downloads it.
+
+Both draw every node type, through the same scene graph, the same picking and the same
+z-ordering. The fallback has **no MSAA**, so shape edges are aliased (text is unaffected —
+MSDF antialiases in the fragment shader), and it targets tens of thousands of objects rather
+than hundreds of thousands: WebGL2 has no storage buffers, so per-object records travel
+through a float texture instead.
+
+It is temporary, and built to be deleted: `src/webgl/` plus one branch in
+`renderer/createSceneRenderer.ts`. Nothing in the WebGPU path was reshaped to accommodate it.
 
 ## What it is for
 

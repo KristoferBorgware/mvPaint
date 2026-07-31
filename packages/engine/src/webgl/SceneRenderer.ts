@@ -15,23 +15,21 @@
 // would have smoothed them. Text is unaffected when its lane arrives - an MSDF glyph
 // antialiases itself in the fragment shader.
 //
-// LANES ARE LANDING ONE AT A TIME. Only the mesh lane exists so far; the others are reported
-// once and skipped, so a scene that mixes them still shows what this can draw rather than
-// throwing and showing nothing.
+// All four lanes are here. What is missing relative to WebGPU is MSAA, and nothing else.
 
 import { Camera2D } from '../camera/Camera2D'
 import type { AABB } from '../math/AABB'
 import { Scene } from '../scene/Scene'
-import { localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
 import { screenToWorld } from '../input/viewport'
 import { Shape } from '../shapes/Shape'
 import type { TransformableNode } from '../shapes/Group'
 import { meshGeometryEpoch } from '../shapes/contentEpoch'
 import { SceneGather, sameMembers } from '../render/gather'
-import type { LaneName } from '../render/drawOrder'
+import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { textShapingEpoch } from '../shapes/contentEpoch'
-import type { Text } from '../shapes/Text'
+import { Text } from '../shapes/Text'
 import type { Image } from '../shapes/Image'
 import type { Gl2Context } from './Gl2Context'
 import type { GlFontBook } from './FontBook'
@@ -39,17 +37,15 @@ import { GlProgram, GlStateCache } from './programs'
 import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
 import { imageFragmentGlsl, imageVertexGlsl } from './shaders/image.glsl'
+import { shadowQuadFragmentGlsl, shadowQuadVertexGlsl } from './shaders/shadow.glsl'
 import { GlMeshBatcher } from './lanes/MeshBatcher'
 import { GlTextBatcher } from './lanes/TextBatcher'
 import { GlImageBatcher } from './lanes/ImageBatcher'
+import { GlShadowBatcher } from './lanes/ShadowBatcher'
+import { GlShadowAtlas } from './ShadowAtlas'
 
-/** Reported once each, not per frame - a lane that is missing is missing every frame. */
-const announced = new Set<LaneName>()
-function announceMissingLane(lane: LaneName): void {
-  if (announced.has(lane)) return
-  announced.add(lane)
-  console.warn(`WebGL2 fallback: the ${lane} lane is not implemented yet - those nodes are not drawn.`)
-}
+/** Shared empty list, so a shadowless frame allocates nothing to say so. */
+const NO_SHADOWS: readonly Shape[] = []
 
 export class GlSceneRenderer {
   readonly scene = new Scene()
@@ -69,6 +65,11 @@ export class GlSceneRenderer {
 
   private readonly imageProgram: GlProgram
   private readonly imageBatcher: GlImageBatcher
+
+  private readonly shadowProgram: GlProgram
+  private readonly shadowBatcher: GlShadowBatcher
+  private readonly shadowAtlas: GlShadowAtlas
+  private shadowGeometryDirty = true
 
   // Shaping, measuring and culling need font METRICS; drawing also needs the atlas. One object
   // supplies both, and it is a FontProvider, so picking and culling never touch the texture.
@@ -138,6 +139,16 @@ export class GlSceneRenderer {
       state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
     })
     this.imageBatcher = new GlImageBatcher(this.gl)
+
+    // A shadow is a translucent blob by definition, so it too is depth-read-only.
+    this.shadowProgram = new GlProgram(this.gl, this.stateCache, {
+      label: 'shadow',
+      vertex: shadowQuadVertexGlsl,
+      fragment: shadowQuadFragmentGlsl,
+      state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
+    })
+    this.shadowBatcher = new GlShadowBatcher(this.gl)
+    this.shadowAtlas = new GlShadowAtlas(this.gl, this.stateCache)
   }
 
   get camera(): Camera2D {
@@ -223,6 +234,19 @@ export class GlSceneRenderer {
     this.imageGeometryDirty = true
   }
 
+  /**
+   * Re-bake any stale shadow silhouette. Runs BEFORE the frame, because baking binds its own
+   * framebuffer and it would be a mess to do that halfway through drawing the scene - the same
+   * reason the WebGPU path needs a prepass on the frame's encoder.
+   */
+  prepareShadows(): void {
+    if (!this.shadowsEnabled) return
+    const ordered = collectZOrder(this.scene, this.zSortEnabled)
+    // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
+    // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
+    this.shadowAtlas.update(ordered.filter((s) => !(s instanceof Text)))
+  }
+
   /** One frame, into the default framebuffer. `width`/`height` are backing-store pixels. */
   draw(width: number, height: number): void {
     const gl = this.gl
@@ -290,7 +314,36 @@ export class GlSceneRenderer {
     }
     this.visibleImages = g.images
     this.imageBatcher.updateObjects(g.depths as ReadonlyMap<Image, number>)
-    if (this.shadowsEnabled && g.meshShapes.some((s) => s.hasShadow())) announceMissingLane('shadow')
+
+    // Shadows. Packed and updated here, but DRAWN in the interleaved order below like any
+    // other lane: a shadow has to composite over whatever is behind it and under whatever is
+    // in front. Half a depth step behind its caster puts it immediately before that caster in
+    // the order, so a shape still paints over its own shadow.
+    const shadowCasters = this.shadowsEnabled ? g.meshShapes.filter((s) => s.hasShadow()) : NO_SHADOWS
+    const shadowNudge = 0.5 / (g.ordered.length + 1)
+    if (shadowCasters.length > 0 || this.shadowBatcher.packed.length > 0) {
+      if (this.shadowGeometryDirty || !sameMembers(shadowCasters, this.shadowBatcher.packed)) {
+        this.shadowBatcher.rebuild(shadowCasters)
+        this.shadowGeometryDirty = false
+      }
+      this.shadowBatcher.updateObjects(this.shadowAtlas, g.depths, shadowNudge)
+    }
+
+    // A run list including shadows cannot come from the gather cache: a blur or an offset can
+    // be animated with no dirty mark at all.
+    const drawRuns =
+      shadowCasters.length > 0
+        ? buildDrawRuns({
+            mesh: { depths: g.visibleMeshDepths, from: g.meshTranslucentStart, to: g.overlayStart },
+            text: { depths: g.textDepths, from: 0, to: g.texts.length },
+            image: { depths: g.imageDepths, from: 0, to: g.images.length },
+            shadow: {
+              depths: shadowCasters.map((s) => (g.depths.get(s) ?? 0.5) + shadowNudge),
+              from: 0,
+              to: shadowCasters.length,
+            },
+          })
+        : g.runs
 
     gl.viewport(0, 0, width, height)
     // Scissor and culling are never wanted here and are global state, so they are settled once
@@ -318,11 +371,16 @@ export class GlSceneRenderer {
     // Only the mesh lane contributes so far; the loop is written for all four because the run
     // list already is, and the lanes land into it unchanged.
     let boundLane: LaneName | null = null
-    for (const run of g.runs) {
-      if (run.lane === 'shadow') continue
+    for (const run of drawRuns) {
       if (boundLane !== run.lane) {
         this.bindLane(
-          run.lane === 'mesh' ? this.meshTranslucent : run.lane === 'text' ? this.textProgram : this.imageProgram,
+          run.lane === 'mesh'
+            ? this.meshTranslucent
+            : run.lane === 'text'
+              ? this.textProgram
+              : run.lane === 'image'
+                ? this.imageProgram
+                : this.shadowProgram,
           viewProjection,
         )
         boundLane = run.lane
@@ -331,8 +389,10 @@ export class GlSceneRenderer {
         this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
       } else if (run.lane === 'text') {
         this.textBatcher.drawRange(this.textProgram, this.fonts, run.from, run.to)
-      } else {
+      } else if (run.lane === 'image') {
         this.imageBatcher.drawRange(this.imageProgram, run.from, run.to)
+      } else {
+        this.shadowBatcher.drawRange(this.shadowProgram, this.shadowAtlas, run.from, run.to)
       }
     }
 
@@ -362,6 +422,9 @@ export class GlSceneRenderer {
     this.textProgram.destroy()
     this.imageBatcher.destroy()
     this.imageProgram.destroy()
+    this.shadowBatcher.destroy()
+    this.shadowProgram.destroy()
+    this.shadowAtlas.destroy()
     this.fonts.destroy()
     this.meshOpaque.destroy()
     this.meshTranslucent.destroy()

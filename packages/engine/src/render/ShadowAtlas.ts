@@ -81,7 +81,15 @@ interface Entry extends ShadowSlot {
 }
 
 /** Local-space silhouette triangles for a shape, honouring shadowForStrokeEnabled. */
-function silhouetteOf(shape: Shape): { positions: number[]; indices: number[]; minX: number; minY: number; maxX: number; maxY: number } | null {
+/**
+ * A shape's shadow-casting geometry in its own local space, or null if it has none.
+ *
+ * Exported because it is pure CPU - it tessellates through a MeshSink and names no GPU type -
+ * and the WebGL fallback's atlas has to bake exactly the same silhouette. Shared rather than
+ * copied: which triangles a shadow is made of (notably whether the stroke counts) is a
+ * behaviour decision, and two of it would be two to keep in agreement.
+ */
+export function silhouetteOf(shape: Shape): { positions: number[]; indices: number[]; minX: number; minY: number; maxX: number; maxY: number } | null {
   const positions: number[] = []
   const isFill: boolean[] = []
   const indices: number[] = []
