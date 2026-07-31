@@ -1,0 +1,299 @@
+// The fallback's renderer: the same frame, drawn with WebGL2.
+//
+// The structure is the WebGPU one's, because the structure is not a WebGPU idea - it is the
+// engine's. Gather (shared, render/gather.ts), then three passes:
+//
+//   1. OPAQUE - the mesh lane's provably-opaque head, one draw, writing depth.
+//   2. TRANSLUCENT - everything else, strictly furthest-first across lanes, testing depth but
+//      never writing it, one draw per lane change.
+//   3. OVERLAY - the editor furniture on top, depth off entirely.
+//
+// What differs is underneath. There are no bind groups, so the frame's view-projection is a
+// uniform set once per pass and the object records are a texture bound per lane. There is no
+// command encoder, so passes are just calls in order. And there is no MSAA: this renders
+// straight into the default framebuffer, so mesh edges are aliased where WebGPU's resolve
+// would have smoothed them. Text is unaffected when its lane arrives - an MSDF glyph
+// antialiases itself in the fragment shader.
+//
+// LANES ARE LANDING ONE AT A TIME. Only the mesh lane exists so far; the others are reported
+// once and skipped, so a scene that mixes them still shows what this can draw rather than
+// throwing and showing nothing.
+
+import { Camera2D } from '../camera/Camera2D'
+import type { AABB } from '../math/AABB'
+import { Scene } from '../scene/Scene'
+import { localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { nodesInBox, type MarqueeOptions } from '../scene/selection'
+import { screenToWorld } from '../input/viewport'
+import { Shape } from '../shapes/Shape'
+import type { TransformableNode } from '../shapes/Group'
+import { meshGeometryEpoch } from '../shapes/contentEpoch'
+import { SceneGather, sameMembers } from '../render/gather'
+import type { LaneName } from '../render/drawOrder'
+import { msdfFontProvider } from '../text/msdfProvider'
+import type { Gl2Context } from './Gl2Context'
+import { GlProgram, GlStateCache } from './programs'
+import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
+import { GlMeshBatcher } from './lanes/MeshBatcher'
+
+/** Reported once each, not per frame - a lane that is missing is missing every frame. */
+const announced = new Set<LaneName>()
+function announceMissingLane(lane: LaneName): void {
+  if (announced.has(lane)) return
+  announced.add(lane)
+  console.warn(`WebGL2 fallback: the ${lane} lane is not implemented yet - those nodes are not drawn.`)
+}
+
+export class GlSceneRenderer {
+  readonly scene = new Scene()
+
+  private activeCamera: Camera2D
+  private readonly gl: WebGL2RenderingContext
+  private readonly canvas: HTMLCanvasElement
+  private readonly stateCache: GlStateCache
+
+  private readonly meshOpaque: GlProgram
+  private readonly meshTranslucent: GlProgram
+  private readonly meshOverlay: GlProgram
+  private readonly meshBatcher: GlMeshBatcher
+
+  // Shaping, measuring and culling need font METRICS and nothing else, so the fallback uses
+  // the device-free provider rather than an atlas it has no lane to draw with yet. When the
+  // text lane lands it adds a texture; this stays exactly as it is.
+  private readonly fonts = msdfFontProvider()
+
+  private readonly gather = new SceneGather()
+  private cullMargin = 0
+  private cullingEnabled = true
+  private zSortEnabled = true
+  private shadowsEnabled = true
+  private geometryDirty = true
+  private textGeometryDirty = true
+  private imageGeometryDirty = true
+  private builtMeshEpoch = -1
+  private visibleMeshShapes: readonly Shape[] = []
+
+  constructor(context: Gl2Context, camera?: Camera2D | null) {
+    this.gl = context.gl
+    this.canvas = context.canvas
+    this.activeCamera = camera ?? new Camera2D()
+    this.stateCache = new GlStateCache(this.gl)
+
+    // Three programs from one shader pair, differing only in what they do with depth - the
+    // same three variants render/MeshPipeline.ts builds, for the same reasons.
+    const mesh = { vertex: meshVertexGlsl, fragment: meshFragmentGlsl }
+    this.meshOpaque = new GlProgram(this.gl, this.stateCache, {
+      ...mesh,
+      label: 'mesh-opaque',
+      state: { blend: true, depthTest: true, depthWrite: true, depthFunc: this.gl.LEQUAL },
+    })
+    this.meshTranslucent = new GlProgram(this.gl, this.stateCache, {
+      ...mesh,
+      label: 'mesh-translucent',
+      // Tested against what pass 1 wrote, never written: back-to-front already resolves these
+      // against each other, and writing would make them reject one another instead of blending.
+      state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
+    })
+    this.meshOverlay = new GlProgram(this.gl, this.stateCache, {
+      ...mesh,
+      label: 'mesh-overlay',
+      state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.ALWAYS },
+    })
+    this.meshBatcher = new GlMeshBatcher(this.gl)
+  }
+
+  get camera(): Camera2D {
+    return this.activeCamera
+  }
+
+  setCamera(camera: Camera2D | null): void {
+    this.activeCamera = camera ?? new Camera2D()
+  }
+
+  setZoom(next: number): void {
+    this.activeCamera.zoom = next > 0 ? next : 1
+  }
+
+  getZoom(): number {
+    return this.activeCamera.zoom
+  }
+
+  setCullMargin(margin: number): void {
+    this.cullMargin = margin
+  }
+
+  getCullMargin(): number {
+    return this.cullMargin
+  }
+
+  setCullingEnabled(enabled: boolean): void {
+    if (enabled !== this.cullingEnabled) this.gather.invalidate()
+    this.cullingEnabled = enabled
+  }
+
+  getCullingEnabled(): boolean {
+    return this.cullingEnabled
+  }
+
+  setZSortEnabled(enabled: boolean): void {
+    if (enabled !== this.zSortEnabled) this.gather.invalidate()
+    this.zSortEnabled = enabled
+  }
+
+  getZSortEnabled(): boolean {
+    return this.zSortEnabled
+  }
+
+  setShadowsEnabled(enabled: boolean): void {
+    this.shadowsEnabled = enabled
+  }
+
+  getShadowsEnabled(): boolean {
+    return this.shadowsEnabled
+  }
+
+  getCullBounds(): AABB | null {
+    return this.gather.getCullBounds()
+  }
+
+  pick(screenX: number, screenY: number): PickableNode | null {
+    const world = screenToWorld(this.camera, screenX, screenY, {
+      width: this.canvas.clientWidth,
+      height: this.canvas.clientHeight,
+    })
+    if (!world) return null
+    return pickNode(this.scene, world.x, world.y, this.fonts)
+  }
+
+  localBoundsOf(node: TransformableNode): AABB {
+    return localBoundsOf(node, this.fonts)
+  }
+
+  nodesInBox(from: { x: number; y: number }, to: { x: number; y: number }, options: MarqueeOptions = {}): Shape[] {
+    return nodesInBox(this.scene, from, to, { fontBook: this.fonts, ...options })
+  }
+
+  markGeometryDirty(): void {
+    this.geometryDirty = true
+  }
+
+  markTextGeometryDirty(): void {
+    this.textGeometryDirty = true
+  }
+
+  markImageGeometryDirty(): void {
+    this.imageGeometryDirty = true
+  }
+
+  /** One frame, into the default framebuffer. `width`/`height` are backing-store pixels. */
+  draw(width: number, height: number): void {
+    const gl = this.gl
+    const camera = this.activeCamera
+    // The camera is sized in CSS pixels; the device pixel ratio decides how many physical
+    // pixels render each logical one and nothing more.
+    const viewWidth = this.canvas.clientWidth
+    const viewHeight = this.canvas.clientHeight
+
+    const canReuseGather =
+      !this.cullingEnabled &&
+      !this.zSortEnabled &&
+      !this.geometryDirty &&
+      !this.textGeometryDirty &&
+      !this.imageGeometryDirty &&
+      this.builtMeshEpoch === meshGeometryEpoch() &&
+      this.gather.hasCache()
+
+    const g = this.gather.run(
+      {
+        scene: this.scene,
+        camera,
+        fonts: this.fonts,
+        viewWidth,
+        viewHeight,
+        cullingEnabled: this.cullingEnabled,
+        zSortEnabled: this.zSortEnabled,
+        cullMargin: this.cullMargin,
+      },
+      canReuseGather,
+    )
+
+    if (!canReuseGather) {
+      if (
+        this.geometryDirty ||
+        this.builtMeshEpoch !== meshGeometryEpoch() ||
+        !sameMembers(g.visibleMeshShapes, this.visibleMeshShapes)
+      ) {
+        this.meshBatcher.rebuild(g.visibleMeshShapes)
+        this.geometryDirty = false
+        this.builtMeshEpoch = meshGeometryEpoch()
+      }
+      this.visibleMeshShapes = g.visibleMeshShapes
+    }
+    this.meshBatcher.updateObjects(g.visibleMeshShapes, g.visibleMeshDepths)
+
+    if (g.texts.length > 0) announceMissingLane('text')
+    if (g.images.length > 0) announceMissingLane('image')
+    if (this.shadowsEnabled && g.meshShapes.some((s) => s.hasShadow())) announceMissingLane('shadow')
+
+    gl.viewport(0, 0, width, height)
+    // Scissor and culling are never wanted here and are global state, so they are settled once
+    // rather than being part of every program's block.
+    gl.disable(gl.SCISSOR_TEST)
+    gl.disable(gl.CULL_FACE)
+    // Clearing depth needs the depth write ON, whatever the last program left behind.
+    gl.depthMask(true)
+    this.stateCache.invalidate()
+    gl.clearColor(1, 1, 1, 1)
+    gl.clearDepth(1)
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+
+    const viewProjection = camera.viewProjection(viewWidth, viewHeight).toGPU()
+
+    // PASS 1 - the opaque half. No ordering needed: every fragment it paints is fully opaque,
+    // so the depth buffer alone decides between two overlapping shapes, and one draw covers
+    // the lot however finely they are stacked among the translucent ones.
+    if (g.meshTranslucentStart > 0) {
+      this.useMesh(this.meshOpaque, viewProjection)
+      this.meshBatcher.draw(this.meshOpaque, this.meshBatcher.indexRangeFor(0, g.meshTranslucentStart))
+    }
+
+    // PASS 2 - everything translucent, interleaved strictly furthest-first (render/drawOrder).
+    // Only the mesh lane contributes so far; the loop is written for all four because the run
+    // list already is, and the lanes land into it unchanged.
+    let boundLane: LaneName | null = null
+    for (const run of g.runs) {
+      if (run.lane !== 'mesh') continue
+      if (boundLane !== run.lane) {
+        this.useMesh(this.meshTranslucent, viewProjection)
+        boundLane = run.lane
+      }
+      this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
+    }
+
+    // PASS 3 - the overlay tail, over every other lane, touching depth not at all.
+    if (g.overlayStart < g.visibleMeshShapes.length) {
+      this.useMesh(this.meshOverlay, viewProjection)
+      this.meshBatcher.draw(
+        this.meshOverlay,
+        this.meshBatcher.indexRangeFor(g.overlayStart, g.visibleMeshShapes.length),
+      )
+    }
+  }
+
+  /**
+   * Bind a mesh program and the frame-wide uniforms - what group(0) is on the other path.
+   * The mesh shader wants the view-projection and nothing else; the lanes that also need the
+   * viewport resolution get it when they land.
+   */
+  private useMesh(program: GlProgram, viewProjection: Float32Array): void {
+    program.use()
+    this.gl.uniformMatrix4fv(program.uniform('u_viewProjection'), false, viewProjection)
+  }
+
+  destroy(): void {
+    this.meshBatcher.destroy()
+    this.meshOpaque.destroy()
+    this.meshTranslucent.destroy()
+    this.meshOverlay.destroy()
+  }
+}

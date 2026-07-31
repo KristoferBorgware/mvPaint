@@ -67,8 +67,18 @@ interface WebGPUCanvasProps {
   cullMargin: number
   /** When false, dragging a corner anchor scales each axis freely instead of uniformly. */
   uniformCornerScale: boolean
-  /** Called with a human-readable message on WebGPU init or device errors. */
+  /**
+   * Which render path to use. Changing it tears the renderer down and builds a new one, which
+   * is the only way to switch - a canvas keeps whichever context it was first given.
+   *
+   * 'webgl2' forces the fallback on a machine that has WebGPU. That is the entire reason it is
+   * exposed: a fallback nobody can reach on purpose is a fallback nobody tests.
+   */
+  backend?: 'auto' | 'webgpu' | 'webgl2'
+  /** Called with a human-readable message on renderer init or device errors. */
   onError?: (message: string) => void
+  /** Called once the renderer exists, with the path it actually took. */
+  onPathChange?: (path: 'webgpu' | 'webgl2') => void
   /** Called with every selected node (empty when the selection is cleared). */
   onSelectionChange?: (nodes: readonly TransformableNode[]) => void
 }
@@ -79,7 +89,19 @@ export interface WebGPUCanvasHandle {
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
-  { scene, reloadToken, speed, zoom, onZoomChange, cullMargin, uniformCornerScale, onError, onSelectionChange },
+  {
+    scene,
+    reloadToken,
+    speed,
+    zoom,
+    onZoomChange,
+    cullMargin,
+    uniformCornerScale,
+    backend,
+    onError,
+    onPathChange,
+    onSelectionChange,
+  },
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -107,6 +129,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const onZoomChangeRef = useRef(onZoomChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onErrorRef = useRef(onError)
+  const onPathChangeRef = useRef(onPathChange)
 
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange
@@ -117,6 +140,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useEffect(() => {
     onErrorRef.current = onError
   }, [onError])
+  useEffect(() => {
+    onPathChangeRef.current = onPathChange
+  }, [onPathChange])
 
   /**
    * Build `def` into the live scene graph, optionally clearing whatever is there first.
@@ -219,8 +245,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     containerRef.current?.appendChild(stats.dom)
 
     createSceneRenderer(canvas, {
+      backend,
       camera: cameraRef.current,
-      onDeviceError: (message) => onError?.(message),
+      onDeviceError: (message) => onErrorRef.current?.(message),
       populate: (sceneGraph, _camera, resources) => {
         sceneGraphRef.current = sceneGraph
         resourcesRef.current = resources
@@ -275,6 +302,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           return
         }
         handleRef.current = handle
+        onPathChangeRef.current?.(handle.path)
         handle.setZoom(zoom)
         frameSceneOrigin(handle.camera, canvas)
         handle.setCullMargin(cullMargin)
@@ -494,8 +522,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       handleRef.current = null
       stats.dom.remove()
     }
+    // Rebuilt when the render path changes, and only then: a canvas cannot be handed a second
+    // kind of context, so switching means a new renderer over a new canvas element (see the
+    // `key` on the canvas below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [backend])
 
   // Swap the scene's content in place - on a scene change, or on an explicit reload of the
   // same one. The renderer, its pipelines, the font atlases and the transformer all
@@ -530,7 +561,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+      {/* Keyed on the render path: a canvas element keeps whichever context type it was
+          first given, so switching paths has to mount a fresh one rather than reconfigure
+          this one. */}
       <canvas
+        key={backend ?? 'auto'}
         ref={canvasRef}
         style={{ display: 'block', width: '100%', height: '100%' }}
       />

@@ -12,6 +12,8 @@ import {
   Slider,
   Stack,
   Switch,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
   useMediaQuery,
   useTheme,
@@ -60,6 +62,10 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [cullMargin, setCullMargin] = useState(0)
   const [uniformCornerScale, setUniformCornerScale] = useState(true)
+  // Which render path to ask for, and which one actually happened. They differ whenever
+  // 'auto' falls back, which is the case worth being able to see.
+  const [backend, setBackend] = useState<'auto' | 'webgpu' | 'webgl2'>('auto')
+  const [activePath, setActivePath] = useState<'webgpu' | 'webgl2' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<readonly TransformableNode[]>([])
   // Both panels start collapsed - on mobile they otherwise eat most of the screen; the
@@ -70,6 +76,13 @@ export default function App() {
 
   // Stable identities so the child effects don't see a new callback every render.
   const handleSelectionChange = useCallback((nodes: readonly TransformableNode[]) => setSelected([...nodes]), [])
+
+  const selectBackend = (next: 'auto' | 'webgpu' | 'webgl2') => {
+    // The old path's error - "WebGPU is not supported", say - says nothing about the new one.
+    setError(null)
+    setActivePath(null)
+    setBackend(next)
+  }
 
   const selectScene = (next: ExampleScene) => {
     setScene(next)
@@ -89,7 +102,9 @@ export default function App() {
         onZoomChange={setZoom}
         cullMargin={cullMargin}
         uniformCornerScale={uniformCornerScale}
+        backend={backend}
         onError={setError}
+        onPathChange={setActivePath}
         onSelectionChange={handleSelectionChange}
       />
 
@@ -208,6 +223,27 @@ export default function App() {
                   Corner anchors keep the aspect ratio; edge anchors always scale one axis.
                   Hold shift while dragging a corner to invert this, alt to scale about the
                   center.
+                </Typography>
+              </Stack>
+
+              <Stack spacing={0.5}>
+                <Typography variant="body2">Render path</Typography>
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={backend}
+                  onChange={(_e, next: 'auto' | 'webgpu' | 'webgl2' | null) => next && selectBackend(next)}
+                >
+                  <ToggleButton value="auto">Auto</ToggleButton>
+                  <ToggleButton value="webgpu">WebGPU</ToggleButton>
+                  <ToggleButton value="webgl2">WebGL2</ToggleButton>
+                </ToggleButtonGroup>
+                <Typography variant="caption" color="text.secondary">
+                  {activePath === 'webgl2'
+                    ? 'Drawing through the WebGL2 fallback: no MSAA, so shape edges are aliased, and only the lanes ported so far are drawn.'
+                    : activePath === 'webgpu'
+                      ? 'Drawing through WebGPU. Pick WebGL2 to see what a machine without it sees.'
+                      : 'Auto uses WebGPU and falls back to WebGL2 only if it is unavailable.'}
                 </Typography>
               </Stack>
 

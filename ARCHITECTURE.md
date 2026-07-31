@@ -719,7 +719,19 @@ Where the fallback differs, visibly: **no MSAA**, so mesh edges are aliased (tex
 unaffected — MSDF antialiases in the fragment shader), and it targets tens of thousands of
 objects rather than hundreds of thousands. WebGL2 has no storage buffers, so the per-object
 records that carry every transform and material become a float data texture read with
-`texelFetch` — the same architecture, reached a slower way.
+`texelFetch` — the same architecture, reached a slower way. `webgl/ObjectTexture.ts` explains
+that substitution, including why integer fields are stored as floats rather than as
+reinterpreted bits.
+
+The GLSL is a template string that interpolates the same `OBJECT_*_OFFSET` constants the WGSL
+and the batchers use (`webgl/shaders/`), so the two shaders cannot drift apart — there is only
+one copy of the record layout and both read it.
+
+**Lanes are landing one at a time**: mesh first, then text, images, shadows. A lane the
+fallback does not have yet is skipped with one warning rather than throwing, so a mixed scene
+shows what can be drawn instead of nothing. `npx tsx src/webgl/selfTest.ts` covers the pure
+half — the data texture's index maths and the generated shader's agreement with the record
+layout.
 
 ---
 
