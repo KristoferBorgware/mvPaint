@@ -99,6 +99,9 @@ export async function createWebGl2SceneRenderer(
   let running = true
   let rafId = 0
   let lastTime = performance.now()
+  // Backed by a closure variable so the frame loop reads whatever is currently set, and a
+  // caller can attach, replace or clear it at any point after construction.
+  let onFrame: ((dt: number) => void) | null = null
 
   // One message, however many frames the problem lasts: a per-frame report would bury the
   // first (and only useful) one under sixty a second.
@@ -144,7 +147,7 @@ export async function createWebGl2SceneRenderer(
     lastTime = now
     try {
       resizer.update()
-      options.onFrame?.(dt)
+      onFrame?.(dt)
       // Baking binds its own framebuffer, so it happens before the frame rather than inside
       // it - the same ordering the WebGPU path gets from its prepass hook.
       scene.prepareShadows()
@@ -163,6 +166,12 @@ export async function createWebGl2SceneRenderer(
 
   return {
     path: 'webgl2',
+    get onFrame() {
+      return onFrame
+    },
+    set onFrame(next: ((dt: number) => void) | null) {
+      onFrame = next
+    },
     images,
     scene: scene.scene,
     // A getter, not a captured reference: setCamera can replace it, and a handle holding the

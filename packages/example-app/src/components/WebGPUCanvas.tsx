@@ -248,42 +248,6 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       backend,
       camera: cameraRef.current,
       onDeviceError: (message) => onErrorRef.current?.(message),
-      onFrame: (dt) => {
-        // A scene's own animation. It would overwrite anything the transformer's rotate
-        // handle did, so at speed 0 the animation lets go entirely and shapes can be turned
-        // by hand instead - which is why the speed reaches the scene rather than being
-        // applied here.
-        contentRef.current.onFrame?.(dt, speedRef.current)
-        // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll
-        // it back so the zoom slider stays in sync, without a setState on every frame:
-        // a live pinch reports a new zoom on nearly every render tick, and each report is
-        // a setState on the whole app tree (the slider/label live in the top-level App
-        // component) - competing with this same render loop for the main thread exactly
-        // while the gesture is busiest. Throttled to a few times a second instead; still
-        // imperceptibly laggy for a numeric readout, and the final value always lands
-        // (the very next tick past the interval reports it, gesture or not).
-        const handle = handleRef.current
-        const currentZoom = handle?.getZoom()
-        if (currentZoom !== undefined && currentZoom !== lastReportedZoom) {
-          const now = performance.now()
-          if (now - lastZoomReportTime >= ZOOM_REPORT_INTERVAL_MS) {
-            lastReportedZoom = currentZoom
-            lastZoomReportTime = now
-            onZoomChangeRef.current?.(currentZoom)
-          }
-        }
-        // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
-        // updated every frame since it tracks the camera as it pans/zooms.
-        if (handle) {
-          cullBoundsOverlay.update(handle.getCullMargin() !== 0 ? handle.getCullBounds() : null)
-          // Re-fit the frame to whatever is selected: the selection may be moving under
-          // a drag, spinning with the animation above, or unchanged - all one code path.
-          const selection = transformer.nodes
-          const box = selection.length > 0 ? boxForNodes(selection, (node) => handle.localBoundsOf(node)) : null
-          transformer.update(box, handle.getZoom())
-        }
-        stats.update()
-      },
     })
       .then((handle) => {
         if (cancelled) {
@@ -306,6 +270,43 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         handle.scene.root.addChild(cullBoundsOverlay)
         handle.scene.root.addChild(marqueeOverlay)
         applyScene(sceneDefRef.current, false)
+
+        // Per-frame work, attached now rather than at construction: everything it touches -
+        // the handle itself, the transformer, the overlays - exists by this point, so there
+        // is nothing to guard against.
+        handle.onFrame = (dt) => {
+          // A scene's own animation. It would overwrite anything the transformer's rotate
+          // handle did, so at speed 0 the animation lets go entirely and shapes can be turned
+          // by hand instead - which is why the speed reaches the scene rather than being
+          // applied here.
+          contentRef.current.onFrame?.(dt, speedRef.current)
+          // Wheel/pinch/keyboard zoom change the camera directly (bypassing React) - poll it
+          // back so the zoom slider stays in sync, without a setState on every frame: a live
+          // pinch reports a new zoom on nearly every render tick, and each report is a
+          // setState on the whole app tree (the slider/label live in the top-level App
+          // component) - competing with this same render loop for the main thread exactly
+          // while the gesture is busiest. Throttled to a few times a second instead; still
+          // imperceptibly laggy for a numeric readout, and the final value always lands (the
+          // very next tick past the interval reports it, gesture or not).
+          const currentZoom = handle.getZoom()
+          if (currentZoom !== lastReportedZoom) {
+            const now = performance.now()
+            if (now - lastZoomReportTime >= ZOOM_REPORT_INTERVAL_MS) {
+              lastReportedZoom = currentZoom
+              lastZoomReportTime = now
+              onZoomChangeRef.current?.(currentZoom)
+            }
+          }
+          // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
+          // updated every frame since it tracks the camera as it pans/zooms.
+          cullBoundsOverlay.update(handle.getCullMargin() !== 0 ? handle.getCullBounds() : null)
+          // Re-fit the frame to whatever is selected: the selection may be moving under a
+          // drag, spinning with the animation above, or unchanged - all one code path.
+          const selection = transformer.nodes
+          const box = selection.length > 0 ? boxForNodes(selection, (node) => handle.localBoundsOf(node)) : null
+          transformer.update(box, handle.getZoom())
+          stats.update()
+        }
 
         handle.setZoom(zoom)
         frameSceneOrigin(handle.camera, canvas)

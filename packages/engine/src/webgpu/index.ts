@@ -70,7 +70,7 @@ export async function createWebGpuSceneRenderer(
     gpu,
     resizer,
     ({ pass, dt, width, height }: FrameContext) => {
-      options.onFrame?.(dt)
+      onFrame?.(dt)
       scene.draw(pass, width, height)
     },
     {
@@ -84,8 +84,18 @@ export async function createWebGpuSceneRenderer(
   )
   frameRenderer.start()
 
+  // Backed by a closure variable so the frame loop reads whatever is currently set, and a
+  // caller can attach, replace or clear it at any point after construction.
+  let onFrame: ((dt: number) => void) | null = null
+
   return {
     path: 'webgpu',
+    get onFrame() {
+      return onFrame
+    },
+    set onFrame(next: ((dt: number) => void) | null) {
+      onFrame = next
+    },
     images,
     scene: scene.scene,
     // A getter, not a captured reference: setCamera() below can replace it, and a handle

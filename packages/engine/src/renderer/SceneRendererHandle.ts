@@ -73,6 +73,15 @@ export interface SceneRendererHandle extends SceneResources {
   localBoundsOf: (node: TransformableNode) => AABB
   /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
   nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
+  /**
+   * Called every frame, before the draw - animate scene content here.
+   *
+   * A property rather than a construction option, for the reason the scene is filled after
+   * construction too: a callback that animates a node wants that node to exist, and at
+   * construction it does not. Assign it when there is something to animate, and null it to
+   * stop. It is called with the seconds elapsed since the previous frame.
+   */
+  onFrame: ((dt: number) => void) | null
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
   markImageGeometryDirty: () => void
@@ -100,6 +109,4 @@ export interface CreateSceneRendererOptions {
    * moving it is how an application pans and zooms.
    */
   camera?: Camera2D
-  /** Called every frame, before the draw - e.g. to animate scene content. */
-  onFrame?: (dt: number) => void
 }

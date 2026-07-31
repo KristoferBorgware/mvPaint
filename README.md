@@ -93,7 +93,8 @@ import {
 const canvas = document.querySelector('canvas') as HTMLCanvasElement
 const camera = new Camera2D({ zoom: 1 })
 
-// Nodes are plain objects - they need no renderer to exist, and no device to be built from.
+// The renderer starts with an EMPTY scene and draws it every frame.
+const handle = await createSceneRenderer(canvas, { camera })
 
 // A card: a rounded rect with a soft shadow, and a label sitting on top of it.
 const card = new Group({ x: 120, y: -80 })
@@ -122,7 +123,7 @@ card.addChild(
   }),
 )
 
-// A circle behind the card, with a gradient fill, spun by the frame callback below.
+// A circle behind the card, with a gradient fill.
 const dot = new Circle({ name: 'dot', x: 90, y: -150, radius: 46, zIndex: -1 })
 dot.fillPriority = 'linear-gradient'
 dot.fillLinearGradientStartPoint = { x: -46, y: 0 }
@@ -132,17 +133,14 @@ dot.fillLinearGradientColorStops = [
   { offset: 1, color: [0.5, 0.3, 0.9, 1] },
 ]
 
-// The renderer starts with an EMPTY scene and draws it every frame.
-const handle = await createSceneRenderer(canvas, {
-  camera,
-  onFrame: (dt) => {
-    dot.rotation += dt
-  },
-})
-
-// Add the content. It appears on the next frame - no dirty mark, no rebuild call.
+// Content appears on the next frame - no dirty mark, no rebuild call.
 handle.scene.root.addChild(dot)
 handle.scene.root.addChild(card)
+
+// Animation is attached the same way, so it can just close over what it animates.
+handle.onFrame = (dt) => {
+  dot.rotation += dt
+}
 
 // Events bubble, so one listener on the root covers the whole subtree.
 handle.scene.root.on('click', (event) => {
