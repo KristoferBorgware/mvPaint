@@ -32,13 +32,16 @@ import { SceneGather, sameMembers } from '../render/gather'
 import type { LaneName } from '../render/drawOrder'
 import { textShapingEpoch } from '../shapes/contentEpoch'
 import type { Text } from '../shapes/Text'
+import type { Image } from '../shapes/Image'
 import type { Gl2Context } from './Gl2Context'
 import type { GlFontBook } from './FontBook'
 import { GlProgram, GlStateCache } from './programs'
 import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
+import { imageFragmentGlsl, imageVertexGlsl } from './shaders/image.glsl'
 import { GlMeshBatcher } from './lanes/MeshBatcher'
 import { GlTextBatcher } from './lanes/TextBatcher'
+import { GlImageBatcher } from './lanes/ImageBatcher'
 
 /** Reported once each, not per frame - a lane that is missing is missing every frame. */
 const announced = new Set<LaneName>()
@@ -64,6 +67,9 @@ export class GlSceneRenderer {
   private readonly textProgram: GlProgram
   private readonly textBatcher: GlTextBatcher
 
+  private readonly imageProgram: GlProgram
+  private readonly imageBatcher: GlImageBatcher
+
   // Shaping, measuring and culling need font METRICS; drawing also needs the atlas. One object
   // supplies both, and it is a FontProvider, so picking and culling never touch the texture.
   private readonly fonts: GlFontBook
@@ -80,6 +86,7 @@ export class GlSceneRenderer {
   private builtTextEpoch = -1
   private visibleMeshShapes: readonly Shape[] = []
   private visibleTexts: readonly Text[] = []
+  private visibleImages: readonly Image[] = []
 
   constructor(context: Gl2Context, fonts: GlFontBook, camera?: Camera2D | null) {
     this.gl = context.gl
@@ -120,6 +127,17 @@ export class GlSceneRenderer {
       state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
     })
     this.textBatcher = new GlTextBatcher(this.gl)
+
+    // An image can never be proven opaque either: what is in a texture is the application's
+    // business and is never read back, so a tint alpha of 1 proves nothing (see
+    // render/opacity.ts). One depth-read-only program, like text.
+    this.imageProgram = new GlProgram(this.gl, this.stateCache, {
+      label: 'image',
+      vertex: imageVertexGlsl,
+      fragment: imageFragmentGlsl,
+      state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
+    })
+    this.imageBatcher = new GlImageBatcher(this.gl)
   }
 
   get camera(): Camera2D {
@@ -263,7 +281,15 @@ export class GlSceneRenderer {
     this.visibleTexts = g.texts
     this.textBatcher.updateObjects(g.depths)
 
-    if (g.images.length > 0) announceMissingLane('image')
+    // The image lane's geometry only changes when the visible SET does, or when a node's
+    // texture, crop, tiling or flip does - all of which come with an explicit dirty mark,
+    // since none of them is a per-frame value the way a transform or a tint is.
+    if (this.imageGeometryDirty || !sameMembers(g.images, this.visibleImages)) {
+      this.imageBatcher.rebuild(g.images)
+      this.imageGeometryDirty = false
+    }
+    this.visibleImages = g.images
+    this.imageBatcher.updateObjects(g.depths as ReadonlyMap<Image, number>)
     if (this.shadowsEnabled && g.meshShapes.some((s) => s.hasShadow())) announceMissingLane('shadow')
 
     gl.viewport(0, 0, width, height)
@@ -293,15 +319,20 @@ export class GlSceneRenderer {
     // list already is, and the lanes land into it unchanged.
     let boundLane: LaneName | null = null
     for (const run of g.runs) {
-      if (run.lane !== 'mesh' && run.lane !== 'text') continue
+      if (run.lane === 'shadow') continue
       if (boundLane !== run.lane) {
-        this.bindLane(run.lane === 'mesh' ? this.meshTranslucent : this.textProgram, viewProjection)
+        this.bindLane(
+          run.lane === 'mesh' ? this.meshTranslucent : run.lane === 'text' ? this.textProgram : this.imageProgram,
+          viewProjection,
+        )
         boundLane = run.lane
       }
       if (run.lane === 'mesh') {
         this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
-      } else {
+      } else if (run.lane === 'text') {
         this.textBatcher.drawRange(this.textProgram, this.fonts, run.from, run.to)
+      } else {
+        this.imageBatcher.drawRange(this.imageProgram, run.from, run.to)
       }
     }
 
@@ -329,6 +360,8 @@ export class GlSceneRenderer {
     this.meshBatcher.destroy()
     this.textBatcher.destroy()
     this.textProgram.destroy()
+    this.imageBatcher.destroy()
+    this.imageProgram.destroy()
     this.fonts.destroy()
     this.meshOpaque.destroy()
     this.meshTranslucent.destroy()

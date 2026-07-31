@@ -18,6 +18,7 @@ import {
 } from './ObjectTexture'
 import { componentOf, meshFragmentGlsl, meshVertexGlsl, texelOf } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
+import { imageFragmentGlsl, imageVertexGlsl } from './shaders/image.glsl'
 import {
   OBJECT_DEPTH_OFFSET,
   OBJECT_FILL_COLOR_OFFSET,
@@ -25,6 +26,7 @@ import {
   OBJECT_STROKE_COLOR_OFFSET,
 } from '../render/meshFormat'
 import { TEXT_OBJECT_ATLAS_LAYER_OFFSET, TEXT_OBJECT_STRIDE } from '../render/textFormat'
+import { IMAGE_OBJECT_STRIDE, IMAGE_OBJECT_TINT_OFFSET } from '../render/imageFormat'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -143,6 +145,22 @@ function assert(cond: boolean, msg: string): void {
   assert(textFragmentGlsl.indexOf('fwidth(v_uv)') < branch, 'the uv derivative is taken before the glyph branch')
   assert(textFragmentGlsl.indexOf('fwidth(v_localPos)') < branch, 'and so is the local one')
   assert(textFragmentGlsl.indexOf('texture(u_atlas') < branch, 'and the atlas sample, which is also a derivative read')
+}
+
+// --- the image lane -------------------------------------------------------------------------
+{
+  assert(recordTexels(IMAGE_OBJECT_STRIDE) === 6, 'a 96-byte image record is 6 texels - a transform, a tint, a depth')
+  for (const source of [imageVertexGlsl, imageFragmentGlsl]) {
+    assert(source.startsWith('#version 300 es\n'), 'both image stages declare GLSL ES 300 first')
+    assert(source.includes(`const int OBJ_TEXELS = ${IMAGE_OBJECT_STRIDE / 16};`), 'generated with the image record size')
+  }
+  assert(imageVertexGlsl.includes('* 2.0 - 1.0) * clip.w'), 'the image vertex shader remaps depth into GL clip space')
+  // The tint is 16-byte aligned, so it is a whole texel and needs no component index.
+  assert(
+    imageFragmentGlsl.includes(`obj(id, ${IMAGE_OBJECT_TINT_OFFSET / 16})`),
+    'the tint is read as a whole texel',
+  )
+  assert(!imageFragmentGlsl.includes('floatBitsToUint'), 'the image record has no integer fields to misread')
 }
 
 console.log(`[webgl] self-test passed (${count} assertions)`)
