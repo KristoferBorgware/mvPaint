@@ -16,15 +16,6 @@ export const TEXT_VERTEX_FLOATS = 9 // 32-bit slots per vertex (2 + 2 + 4 + 1)
 export const TEXT_GLYPH_BIT = 0x80000000
 export const TEXT_OBJECT_ID_MASK = 0x7fffffff
 
-export const TEXT_VERTEX_LAYOUT: GPUVertexBufferLayout = {
-  arrayStride: TEXT_VERTEX_STRIDE,
-  attributes: [
-    { shaderLocation: 0, offset: 0, format: 'float32x2' }, // position (local)
-    { shaderLocation: 1, offset: 8, format: 'float32x2' }, // uv (atlas)
-    { shaderLocation: 2, offset: 16, format: 'float32x4' }, // color (rgba)
-    { shaderLocation: 3, offset: 32, format: 'uint32' }, //    packedId
-  ],
-}
 
 // Per-object material record, in bytes (std430-compatible):
 //   0   model: mat4x4<f32>                                (64)

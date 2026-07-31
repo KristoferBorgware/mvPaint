@@ -64,7 +64,7 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   // the image out entirely - contributes nothing: blending at alpha 0 leaves the
   // destination exactly as it was. Discarding skips that blend instead of performing it.
   // Nothing behind the quad depends on it: images are drawn entirely in the translucent
-  // pass and never write depth at all (see render/ImagePipeline.ts). The mesh and text
+  // pass and never write depth at all (see webgpu/pipelines/ImagePipeline.ts). The mesh and text
   // lanes discard for the same reason (see mesh.wgsl.ts and text.wgsl.ts).
   if (color.a <= 0.0) {
     discard;

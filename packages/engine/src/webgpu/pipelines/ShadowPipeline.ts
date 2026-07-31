@@ -9,9 +9,9 @@
 // mesh and text lanes, that gives the right answer without sorting: a shadow lands on top
 // of every shape it is in front of, and behind every shape it is behind.
 
-import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
-import { SHADOW_VERTEX_LAYOUT } from './shadowFormat'
-import { shadowQuadShaderCode } from './shadowQuad.wgsl'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from '../depthFormat'
+import { SHADOW_VERTEX_LAYOUT } from '../vertexLayouts'
+import { shadowQuadShaderCode } from '../shaders/shadowQuad.wgsl'
 
 export function createShadowPipeline(
   device: GPUDevice,

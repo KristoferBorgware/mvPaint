@@ -28,8 +28,8 @@
 // always" rather than benefit from - or be masked by - culling.
 //
 // It does NOT own the GPU context, resize observer, frame loop, or any scene content -
-// those are wired by createWebGpuSceneRenderer() below, with content supplied by the caller
-// through the `populate` option.
+// those are wired by createWebGpuSceneRenderer() in webgpu/index.ts, with content supplied by
+// the caller through the `populate` option.
 //
 // Nor does it own the CAMERA. Where a scene is looked at from is an application's business,
 // so a Camera2D is supplied (createSceneRenderer's `camera` option, or setCamera later) and
@@ -48,11 +48,6 @@ import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { SceneGather, sameMembers } from '../render/gather'
 import type { TransformableNode } from '../shapes/Group'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
-import type {
-  CreateSceneRendererOptions,
-  SceneRendererHandle,
-} from '../renderer/SceneRendererHandle'
-import { webGpuImageFactory } from '../image/WebGpuImageTexture'
 import { screenToWorld } from '../input/viewport'
 import {
   createAtlasBindGroupLayout,
@@ -61,26 +56,22 @@ import {
   createObjectBindGroupLayout,
   createShadowPipelineLayout,
   createTextPipelineLayout,
-} from '../render/layouts'
-import { DEPTH_FORMAT } from '../render/depthFormat'
-import { FrameUniforms } from '../render/FrameUniforms'
-import { MeshBatcher } from '../render/MeshBatcher'
-import { createMeshPipeline } from '../render/MeshPipeline'
-import { ShadowAtlas } from '../render/ShadowAtlas'
-import { ShadowBatcher } from '../render/ShadowBatcher'
-import { createShadowPipeline } from '../render/ShadowPipeline'
-import { TextBatcher } from '../render/TextBatcher'
-import { createTextPipeline } from '../render/TextPipeline'
-import { createImagePipeline } from '../render/ImagePipeline'
-import { ImageBatcher } from '../render/ImageBatcher'
+} from './layouts'
+import { FrameUniforms } from './FrameUniforms'
+import { MeshBatcher } from './lanes/MeshBatcher'
+import { createMeshPipeline } from './pipelines/MeshPipeline'
+import { ShadowAtlas } from './ShadowAtlas'
+import { ShadowBatcher } from './lanes/ShadowBatcher'
+import { createShadowPipeline } from './pipelines/ShadowPipeline'
+import { TextBatcher } from './lanes/TextBatcher'
+import { createTextPipeline } from './pipelines/TextPipeline'
+import { createImagePipeline } from './pipelines/ImagePipeline'
+import { ImageBatcher } from './lanes/ImageBatcher'
 import { Image } from '../shapes/Image'
-import { FontBook } from '../text/FontAtlas'
-import { createGpuContext } from '../systems/GpuContext'
-import { CanvasResizer } from '../systems/CanvasResizer'
-import { FrameRenderer, type FrameContext } from '../systems/FrameRenderer'
+import { FontBook } from './FontBook'
 
-const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
-const SAMPLE_COUNT = 4
+/** MSAA 4x. Exported because the frame loop's targets must agree with the pipelines. */
+export const SAMPLE_COUNT = 4
 
 /** Shared empty list, so a shadowless frame allocates nothing to say so. */
 const NO_SHADOWS: readonly Shape[] = []
@@ -187,7 +178,7 @@ export class SceneRenderer {
     this.imageBatcher = new ImageBatcher(device, objectLayout)
 
     // Shadow lane: blurred silhouettes are baked once into a shared atlas (see
-    // render/ShadowAtlas.ts), then drawn as one quad each in a single call. Text is not
+    // webgpu/ShadowAtlas.ts), then drawn as one quad each in a single call. Text is not
     // part of this - it duplicates its glyphs instead (see text/layout.ts).
     this.shadowAtlas = new ShadowAtlas(device)
     const shadowObjectLayout = createObjectBindGroupLayout(device)
@@ -544,141 +535,5 @@ export class SceneRenderer {
     this.shadowBatcher.destroy()
     this.fontBook.destroy()
     this.frameUniforms.destroy()
-  }
-}
-
-/**
- * Composition root for the WebGPU path: wires the GPU context, resize observer and frame loop
- * (system components) to a SceneRenderer, loads the MSDF font atlases, and starts the render
- * loop on a white background through a 2D orthographic camera, MSAA 4x. Scene content is
- * supplied by the caller via `options.populate`. Throws if WebGPU is unavailable.
- *
- * Applications call createSceneRenderer() (renderer/createSceneRenderer.ts) instead, which
- * comes here first and only falls back if this throws.
- */
-export async function createWebGpuSceneRenderer(
-  canvas: HTMLCanvasElement,
-  options: CreateSceneRendererOptions = {},
-): Promise<SceneRendererHandle> {
-  const gpu = await createGpuContext(canvas)
-
-  // Surface asynchronous device (validation) errors - an invalid pipeline or a bad
-  // draw does not throw; it just poisons the command buffer and the canvas stays blank.
-  gpu.device.addEventListener('uncapturederror', (event) => {
-    const message = (event as GPUUncapturedErrorEvent).error.message
-    console.error('WebGPU device error:', message)
-    options.onDeviceError?.(message)
-  })
-
-  // Load the MSDF font atlases (fetch each PNG + upload to the GPU) before building the scene,
-  // so the text lane has its textures ready on the first frame.
-  const fontBook = await FontBook.load(gpu.device)
-
-  // Catch the most common startup failure - an invalid render pipeline built from a
-  // shader/layout mismatch - which is created inside the SceneRenderer constructor.
-  gpu.device.pushErrorScope('validation')
-  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fontBook, options.camera)
-  gpu.device.popErrorScope().then((error) => {
-    if (error) {
-      console.error('WebGPU pipeline setup error:', error.message)
-      options.onDeviceError?.(error.message)
-    }
-  })
-
-  // One layout for every texture a scene builds, so the image lane can bind any of them
-  // without a pipeline change (see webGpuImageFactory).
-  const images = webGpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
-
-  options.populate?.(scene.scene, scene.camera, { images })
-
-  const resizer = new CanvasResizer(canvas)
-
-  const frameRenderer = new FrameRenderer(
-    gpu,
-    resizer,
-    ({ pass, dt, width, height }: FrameContext) => {
-      options.onFrame?.(dt)
-      scene.draw(pass, width, height)
-    },
-    {
-      clearColor: WHITE,
-      sampleCount: SAMPLE_COUNT,
-      depthFormat: DEPTH_FORMAT,
-      // Shadow rendering needs its own offscreen render passes on the same encoder,
-      // finished before the main pass (which draws the composited result) begins.
-      onPrePass: (encoder) => scene.prepareShadows(encoder),
-    },
-  )
-  frameRenderer.start()
-
-  return {
-    path: 'webgpu',
-    images,
-    scene: scene.scene,
-    // A getter, not a captured reference: setCamera() below can replace it, and a handle
-    // holding the camera from construction would keep handing back the old one.
-    get camera() {
-      return scene.camera
-    },
-    setCamera(camera: Camera2D | null) {
-      scene.setCamera(camera)
-    },
-    setZoom(next: number) {
-      scene.setZoom(next)
-    },
-    getZoom() {
-      return scene.getZoom()
-    },
-    setCullMargin(margin: number) {
-      scene.setCullMargin(margin)
-    },
-    getCullMargin() {
-      return scene.getCullMargin()
-    },
-    setCullingEnabled(enabled: boolean) {
-      scene.setCullingEnabled(enabled)
-    },
-    getCullingEnabled() {
-      return scene.getCullingEnabled()
-    },
-    setZSortEnabled(enabled: boolean) {
-      scene.setZSortEnabled(enabled)
-    },
-    getZSortEnabled() {
-      return scene.getZSortEnabled()
-    },
-    setShadowsEnabled(enabled: boolean) {
-      scene.setShadowsEnabled(enabled)
-    },
-    getShadowsEnabled() {
-      return scene.getShadowsEnabled()
-    },
-    getCullBounds() {
-      return scene.getCullBounds()
-    },
-    pick(screenX: number, screenY: number) {
-      return scene.pick(screenX, screenY)
-    },
-    localBoundsOf(node: TransformableNode) {
-      return scene.localBoundsOf(node)
-    },
-    nodesInBox(from, to, options) {
-      return scene.nodesInBox(from, to, options)
-    },
-    markGeometryDirty() {
-      scene.markGeometryDirty()
-    },
-    markTextGeometryDirty() {
-      scene.markTextGeometryDirty()
-    },
-    markImageGeometryDirty() {
-      scene.markImageGeometryDirty()
-    },
-    destroy() {
-      frameRenderer.stop()
-      scene.destroy()
-      resizer.dispose()
-      gpu.device.destroy()
-    },
   }
 }

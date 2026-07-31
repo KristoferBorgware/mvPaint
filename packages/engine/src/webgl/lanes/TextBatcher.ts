@@ -1,7 +1,7 @@
 // The text lane on WebGL2: every Text node's glyph and decoration quads in one buffer pair,
 // one object record per run, drawn as a range of nodes.
 //
-// The same shaping, the same quads and the same 320-byte record as render/TextBatcher.ts -
+// The same shaping, the same quads and the same 320-byte record as webgpu/lanes/TextBatcher.ts -
 // the shaper (text/layout.ts) is shared outright, so what arrives here is already identical.
 // What differs is the same three things as the mesh lane: records go into a texture, integer
 // fields are written as floats, and a VAO carries the vertex layout.

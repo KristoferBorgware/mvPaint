@@ -1,6 +1,6 @@
 // Getting a WebGL2 context, and saying clearly what is missing when there isn't one.
 //
-// This is the fallback's counterpart to systems/GpuContext.ts, and the shape of the two is
+// This is the fallback's counterpart to webgpu/GpuContext.ts, and the shape of the two is
 // deliberately similar: acquire, check, or throw a sentence a person can act on. A renderer
 // that half-starts and then draws nothing is the failure mode both are written to avoid.
 //

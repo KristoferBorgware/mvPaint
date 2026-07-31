@@ -21,7 +21,7 @@ import { kerningFor, normalizeMetrics, type FontMetrics, type MsdfFontJson } fro
 import { layoutText, type FontProvider, type TextRun } from './layout'
 import { arcPath, circlePath, TextPathGeometry } from './textPath'
 import { quadCorner } from './textQuad'
-import type { FontStyle } from './FontAtlas'
+import type { FontStyle } from '../webgpu/FontBook'
 // Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts also pulls in `?url` PNG
 // imports only a bundler can resolve, which would break this file running under plain node.
 import { ATLAS_LAYER_SIZE, msdfFontProvider } from './msdfProvider'

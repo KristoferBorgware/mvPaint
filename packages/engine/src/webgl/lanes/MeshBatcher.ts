@@ -1,4 +1,4 @@
-// The mesh lane on WebGL2: the same packing as render/MeshBatcher.ts, uploaded differently.
+// The mesh lane on WebGL2: the same packing as webgpu/lanes/MeshBatcher.ts, uploaded differently.
 //
 // It tessellates the same shapes into the same interleaved vertex layout and writes the same
 // 304-byte object records at the same byte offsets, because those are the format the geometry
@@ -17,7 +17,7 @@
 // would be two to keep correct.
 
 import type { Shape } from '../../shapes/Shape'
-import { ObjectCache } from '../../render/MeshBatcher'
+import { ObjectCache } from '../../webgpu/lanes/MeshBatcher'
 import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,

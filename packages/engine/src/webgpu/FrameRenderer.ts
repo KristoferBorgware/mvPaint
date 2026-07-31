@@ -3,7 +3,7 @@
 // boilerplate. It knows nothing about cubes or cameras - each frame it opens a render
 // pass and hands it to an onFrame callback that records the scene's draw calls.
 
-import type { CanvasResizer } from './CanvasResizer'
+import type { CanvasResizer } from '../systems/CanvasResizer'
 import type { GpuContext } from './GpuContext'
 
 /** What a scene receives each frame to update and record its draws. */

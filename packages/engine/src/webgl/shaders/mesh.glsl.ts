@@ -1,4 +1,4 @@
-// The mesh lane's shader, GLSL ES 300 - the twin of render/mesh.wgsl.ts.
+// The mesh lane's shader, GLSL ES 300 - the twin of webgpu/shaders/mesh.wgsl.ts.
 //
 // Same maths, same record, two differences that are both forced by the API:
 //

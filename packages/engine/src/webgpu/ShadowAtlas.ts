@@ -26,10 +26,10 @@
 // per-object record, so one byte per texel is all the atlas ever needs to store.
 
 import type { Shape } from '../shapes/Shape'
-import type { MeshSink } from './meshFormat'
+import type { MeshSink } from '../render/meshFormat'
 import { createFilterTextureBindGroupLayout, createShadowBakeProjectLayout } from './layouts'
-import { shadowBlurShaderCode, shadowMorphologyShaderCode, shadowSilhouetteShaderCode } from './shadowBake.wgsl'
-import { shadowRegion, shadowSigma, shadowQuadBounds, slotBucket, type ShadowRegion } from './shadowMath'
+import { shadowBlurShaderCode, shadowMorphologyShaderCode, shadowSilhouetteShaderCode } from './shaders/shadowBake.wgsl'
+import { shadowRegion, shadowSigma, shadowQuadBounds, slotBucket, type ShadowRegion } from '../render/shadowMath'
 
 const ATLAS_FORMAT: GPUTextureFormat = 'r8unorm'
 /** Cap on a single shadow's slot; bigger shapes bake at reduced resolution (see shadowRegion). */

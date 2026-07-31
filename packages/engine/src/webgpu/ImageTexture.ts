@@ -5,13 +5,13 @@
 // texture, because wrapping and filtering are SAMPLER state and a sampler is part of a bind
 // group. They are built on demand and cached here, keyed by the combination, because an
 // application typically uses one or two across a whole scene - which keeps the batcher's
-// draw ranges merged (see render/ImageBatcher.ts).
+// draw ranges merged (see webgpu/lanes/ImageBatcher.ts).
 //
 // Everything that is not about WebGPU - the sampling vocabulary, the ImageTexture interface
 // an Image node holds, and the SVG rasterizer, which produces plain pixels - lives in
 // image/ImageTexture.ts and is shared with the WebGL fallback path.
 
-import { createAtlasBindGroupLayout } from '../render/layouts'
+import { createAtlasBindGroupLayout } from './layouts'
 import {
   assertSvgFits,
   isSvgSource,
@@ -24,7 +24,7 @@ import {
   type ImageTextureFactory,
   type ImageWrap,
   type SvgRasterOptions,
-} from './ImageTexture'
+} from '../image/ImageTexture'
 
 const ADDRESS_MODE: Record<ImageWrap, GPUAddressMode> = {
   clamp: 'clamp-to-edge',

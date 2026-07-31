@@ -6,9 +6,9 @@
 // Three variants come out of the same shader and layout, differing only in what they do
 // with depth - see the options below, and webgpu/SceneRenderer's two-pass draw().
 
-import { meshShaderCode } from './mesh.wgsl'
-import { MESH_VERTEX_LAYOUT } from './meshFormat'
-import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
+import { meshShaderCode } from '../shaders/mesh.wgsl'
+import { MESH_VERTEX_LAYOUT } from '../vertexLayouts'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from '../depthFormat'
 
 export interface MeshPipelineOptions {
   /**

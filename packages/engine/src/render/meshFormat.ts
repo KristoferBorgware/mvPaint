@@ -68,13 +68,6 @@ export const MESH_VERTEX_FLOATS = 3 // 32-bit slots per vertex (2 + 1)
 export const MESH_FILL_BIT = 0x80000000
 export const MESH_OBJECT_ID_MASK = 0x7fffffff
 
-export const MESH_VERTEX_LAYOUT: GPUVertexBufferLayout = {
-  arrayStride: MESH_VERTEX_STRIDE,
-  attributes: [
-    { shaderLocation: 0, offset: 0, format: 'float32x2' }, // position
-    { shaderLocation: 1, offset: 8, format: 'uint32' }, //    packedId
-  ],
-}
 
 // Per-object storage record, in bytes:
 //   0   model: mat4x4<f32>                    (64)

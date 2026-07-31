@@ -51,7 +51,7 @@ export function createMeshPipelineLayout(
  * `viewDimension` is where they part company. The text lane binds a '2d-array': all four Inter
  * styles live in one texture, one layer each, selected per glyph from the object record - which
  * is what lets a mixed-style paragraph draw in a single call instead of one per style (see
- * text/FontAtlas.ts). The image and shadow lanes bind a plain '2d'.
+ * webgpu/FontBook.ts). The image and shadow lanes bind a plain '2d'.
  */
 export function createAtlasBindGroupLayout(
   device: GPUDevice,

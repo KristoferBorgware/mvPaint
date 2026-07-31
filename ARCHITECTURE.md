@@ -178,7 +178,7 @@ to point-in-triangle tests — which is why a mousemove over a hovered shape red
 
 ## One frame, end to end
 
-`systems/FrameRenderer.ts` owns the loop and the boilerplate:
+`webgpu/FrameRenderer.ts` owns the loop and the boilerplate:
 
 ```
 requestAnimationFrame tick
@@ -363,7 +363,7 @@ that no amount of shader merging gets under.
 
 Which makes it worth not having distinct textures. All four Inter styles live in **one
 `texture_2d_array`**, a layer each, behind one bind group; a run's layer travels in its object
-record (`text/FontAtlas.ts`). The text lane used to segment its draws per atlas, so a paragraph
+record (`webgpu/FontBook.ts`). The text lane used to segment its draws per atlas, so a paragraph
 alternating regular and bold paid a bind and a draw per switch — four pages of mixed-style
 lorem ipsum cost **108 draws against 4 distinct atlases**. It is now 1.
 
@@ -749,11 +749,11 @@ every generated shader's agreement with the record layout it was generated from.
 | Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |
-| Packing and uploads | `render/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |
-| Shaders | `render/mesh.wgsl.ts`, `text.wgsl.ts`, `image.wgsl.ts`, `shadowQuad.wgsl.ts`, `shadowBake.wgsl.ts` |
-| Pipelines, bind layouts | `render/*Pipeline.ts`, `render/layouts.ts`, `render/depthFormat.ts` |
+| Packing and uploads | `webgpu/lanes/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |
+| Shaders | `webgpu/shaders/mesh.wgsl.ts`, `text.wgsl.ts`, `image.wgsl.ts`, `shadowQuad.wgsl.ts`, `shadowBake.wgsl.ts` |
+| Pipelines, bind layouts | `webgpu/pipelines/`, `webgpu/layouts.ts`, `webgpu/vertexLayouts.ts`, `webgpu/depthFormat.ts` |
 | The gather (shared, GPU-free) | `render/gather.ts` |
-| Orchestration | `webgpu/SceneRenderer.ts`, `systems/FrameRenderer.ts`, `systems/GpuContext.ts` |
+| Orchestration | `webgpu/index.ts`, `webgpu/SceneRenderer.ts`, `webgpu/FrameRenderer.ts`, `webgpu/GpuContext.ts` |
 | Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
 | The WebGL2 fallback (temporary) | `webgl/` |
 | Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |

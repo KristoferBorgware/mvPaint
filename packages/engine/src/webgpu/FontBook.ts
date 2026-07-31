@@ -20,14 +20,14 @@
 // `?url` PNG import only a bundler can resolve), which is what lets the self-test - and any app
 // code that wants to measure text before a device exists - reach it directly.
 
-import { createAtlasBindGroupLayout } from '../render/layouts'
-import { normalizeMetrics, type FontMetrics } from './msdfMetrics'
-import { ATLAS_LAYER_SIZE, resolveStyle, STYLE_ORDER, type FontStyle } from './msdfProvider'
+import { createAtlasBindGroupLayout } from './layouts'
+import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
+import { ATLAS_LAYER_SIZE, resolveStyle, STYLE_ORDER, type FontStyle } from '../text/msdfProvider'
 
-export type { FontStyle } from './msdfProvider'
-export { msdfFontProvider, ATLAS_LAYER_SIZE } from './msdfProvider'
+export type { FontStyle } from '../text/msdfProvider'
+export { msdfFontProvider, ATLAS_LAYER_SIZE } from '../text/msdfProvider'
 
-import { MSDF_ATLAS_SOURCES as SOURCES } from './msdfAtlasImages'
+import { MSDF_ATLAS_SOURCES as SOURCES } from '../text/msdfAtlasImages'
 
 export class FontBook {
   /** group(2) layout for the atlas array + sampler, reused by the text pipeline. */

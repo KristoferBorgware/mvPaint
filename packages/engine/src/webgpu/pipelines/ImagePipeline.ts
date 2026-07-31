@@ -12,9 +12,9 @@
 // never read back, so nothing on the CPU can rule out an alpha channel - see
 // render/opacity.ts - and an image quad must therefore never reject what is behind it.
 
-import { imageShaderCode } from './image.wgsl'
-import { IMAGE_VERTEX_LAYOUT } from './imageFormat'
-import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
+import { imageShaderCode } from '../shaders/image.wgsl'
+import { IMAGE_VERTEX_LAYOUT } from '../vertexLayouts'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from '../depthFormat'
 
 export function createImagePipeline(
   device: GPUDevice,

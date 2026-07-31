@@ -4,7 +4,7 @@
 // scene graph - and the scene graph owns no GPU resources and knows no GPU API. So the type
 // here is an interface: a size, and the promise that it can be released. Everything a render
 // path actually needs to BIND is its own business, declared on its own implementation
-// (image/WebGpuImageTexture.ts, and the WebGL fallback's own), never here.
+// (webgpu/ImageTexture.ts, and the WebGL fallback's own), never here.
 //
 // Wrapping and filtering live here rather than on an implementation because they are a
 // property of the picture as the application describes it, not of the machinery: "this one

@@ -40,7 +40,7 @@ struct ObjectData {
 @group(1) @binding(0) var<storage, read> objects : array<ObjectData>;
 // All four Inter styles in one texture, one layer each - so a paragraph that mixes them is
 // still a single draw. Which layer a glyph reads is a per-run value in its object record; see
-// text/FontAtlas.ts.
+// webgpu/FontBook.ts.
 @group(2) @binding(0) var atlasTex : texture_2d_array<f32>;
 @group(2) @binding(1) var atlasSampler : sampler;
 
@@ -212,7 +212,7 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   // glyph ink, where MSDF coverage alpha is 0 - contributes nothing: blending at alpha 0
   // leaves the destination exactly as it was. Discarding skips that blend instead of
   // performing it. Nothing behind the quad depends on it: text is drawn entirely in the
-  // translucent pass and never writes depth at all (see render/TextPipeline.ts).
+  // translucent pass and never writes depth at all (see webgpu/pipelines/TextPipeline.ts).
   if (color.a <= 0.0) {
     discard;
   }

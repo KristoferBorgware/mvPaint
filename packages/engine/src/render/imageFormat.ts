@@ -15,14 +15,6 @@
 export const IMAGE_VERTEX_STRIDE = 20 // bytes
 export const IMAGE_VERTEX_FLOATS = 5 // 32-bit slots per vertex (2 + 2 + 1)
 
-export const IMAGE_VERTEX_LAYOUT: GPUVertexBufferLayout = {
-  arrayStride: IMAGE_VERTEX_STRIDE,
-  attributes: [
-    { shaderLocation: 0, offset: 0, format: 'float32x2' }, // position (local)
-    { shaderLocation: 1, offset: 8, format: 'float32x2' }, // uv
-    { shaderLocation: 2, offset: 16, format: 'uint32' }, //   packedId (object index)
-  ],
-}
 
 // Per-object record, in bytes (std430-compatible):
 //   0   model: mat4x4<f32>   (64)

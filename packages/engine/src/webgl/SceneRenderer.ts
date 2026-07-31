@@ -97,7 +97,7 @@ export class GlSceneRenderer {
     this.stateCache = new GlStateCache(this.gl)
 
     // Three programs from one shader pair, differing only in what they do with depth - the
-    // same three variants render/MeshPipeline.ts builds, for the same reasons.
+    // same three variants webgpu/pipelines/MeshPipeline.ts builds, for the same reasons.
     const mesh = { vertex: meshVertexGlsl, fragment: meshFragmentGlsl }
     this.meshOpaque = new GlProgram(this.gl, this.stateCache, {
       ...mesh,

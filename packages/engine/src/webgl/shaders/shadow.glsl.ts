@@ -1,5 +1,5 @@
-// The shadow lane's shaders, GLSL ES 300 - the twins of render/shadowQuad.wgsl.ts and
-// render/shadowBake.wgsl.ts.
+// The shadow lane's shaders, GLSL ES 300 - the twins of webgpu/shaders/shadowQuad.wgsl.ts and
+// webgpu/shaders/shadowBake.wgsl.ts.
 //
 // A shadow is a blurred silhouette baked once into a shared atlas and then drawn as one
 // textured quad. The bake is three kinds of pass - rasterize the silhouette as coverage, an

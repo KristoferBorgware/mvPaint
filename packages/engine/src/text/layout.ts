@@ -12,7 +12,7 @@
 import type { FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
-import type { FontStyle } from './FontAtlas'
+import type { FontStyle } from '../webgpu/FontBook'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
 
 export interface TextGradient {
@@ -129,7 +129,7 @@ export interface TextMaterial {
    * Which layer of the shared atlas array this run's glyphs sample - the resolved style, after
    * any fallback. A run has exactly one font, so this belongs to the material alongside the
    * distanceRange it is read from, and the whole lane draws in one call regardless of how many
-   * styles a paragraph mixes (see text/FontAtlas.ts).
+   * styles a paragraph mixes (see webgpu/FontBook.ts).
    */
   atlasIndex: number
 }

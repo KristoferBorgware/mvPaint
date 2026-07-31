@@ -1,5 +1,5 @@
 // The image lane on WebGL2: every Image node's quad in one buffer pair, drawn as a run of
-// ranges - the same shape as render/ImageBatcher.ts.
+// ranges - the same shape as webgpu/lanes/ImageBatcher.ts.
 //
 // A range is a stretch of quads sharing one texture AND one sampler state. Consecutive quads
 // that agree on both merge into a single draw, so a sprite sheet used forty times costs one

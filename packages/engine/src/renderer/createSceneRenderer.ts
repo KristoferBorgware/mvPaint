@@ -14,7 +14,7 @@
 // WebGPU, forcing the flag is the only way to see what the other half of the world sees.
 
 import type { CreateSceneRendererOptions, SceneRendererHandle } from './SceneRendererHandle'
-import { createWebGpuSceneRenderer } from '../webgpu/SceneRenderer'
+import { createWebGpuSceneRenderer } from '../webgpu'
 
 /**
  * Creates a renderer for `canvas`, preferring WebGPU.

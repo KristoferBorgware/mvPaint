@@ -11,9 +11,9 @@
 // it. See render/opacity.ts for why that rules the whole lane out of the opaque pass, and
 // webgpu/SceneRenderer's draw() for the two passes.
 
-import { textShaderCode } from './text.wgsl'
-import { TEXT_VERTEX_LAYOUT } from './textFormat'
-import { DEPTH_COMPARE, DEPTH_FORMAT } from './depthFormat'
+import { textShaderCode } from '../shaders/text.wgsl'
+import { TEXT_VERTEX_LAYOUT } from '../vertexLayouts'
+import { DEPTH_COMPARE, DEPTH_FORMAT } from '../depthFormat'
 
 export function createTextPipeline(
   device: GPUDevice,

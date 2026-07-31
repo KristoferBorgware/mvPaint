@@ -1,6 +1,6 @@
 // The four Inter MSDF atlases as one WebGL2 array texture - the fallback's FontBook.
 //
-// Same arrangement as the WebGPU one (text/FontAtlas.ts) and for the same reason: all four
+// Same arrangement as the WebGPU one (webgpu/FontBook.ts) and for the same reason: all four
 // styles live as layers of a single TEXTURE_2D_ARRAY, a run picks its layer from its object
 // record, and a paragraph mixing regular, bold and italic therefore draws in ONE call instead
 // of one per style. That win is worth as much here as there - more, if anything, since a

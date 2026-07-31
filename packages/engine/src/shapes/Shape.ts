@@ -68,7 +68,7 @@
 //
 // Mesh shapes render the shadow by baking a spread-and-blurred silhouette into a shared
 // atlas keyed on local-space geometry + blur + spread, then drawing one textured quad per shadow (see
-// render/ShadowAtlas.ts and render/ShadowBatcher.ts) - so a shadow costs no per-frame GPU
+// webgpu/ShadowAtlas.ts and webgpu/lanes/ShadowBatcher.ts) - so a shadow costs no per-frame GPU
 // work once its texture is cached, and moving/scaling/spinning a shape never re-bakes it.
 // Text ignores these fields: it carries its own per-run shadow styling instead (an offset
 // duplicate of the glyphs, see text/layout.ts), since it has no mesh geometry to
@@ -161,7 +161,7 @@ export abstract class Shape extends Node {
    * at draw time (it is baked into the atlas texture alongside the blur).
    *
    * The grow/shrink uses a square structuring element, so a large spread squares off corners
-   * a touch - see render/shadowBake.wgsl.ts. Like shadowBlur, changing it re-bakes.
+   * a touch - see webgpu/shaders/shadowBake.wgsl.ts. Like shadowBlur, changing it re-bakes.
    */
   shadowSpread = 0
   /**
@@ -320,7 +320,7 @@ export abstract class Shape extends Node {
 
   /**
    * Bumped by every markGeometryDirty(). The shadow atlas keys its baked silhouette on
-   * this (see render/ShadowAtlas.ts), so it re-bakes exactly when the geometry it
+   * this (see webgpu/ShadowAtlas.ts), so it re-bakes exactly when the geometry it
    * rasterized actually changed - and never merely because the shape moved.
    */
   get geometryVersion(): number {

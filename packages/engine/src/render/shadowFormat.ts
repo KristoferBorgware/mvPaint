@@ -14,13 +14,6 @@
 export const SHADOW_VERTEX_STRIDE = 12 // bytes
 export const SHADOW_VERTEX_FLOATS = 3 // 32-bit slots per vertex (2 + 1)
 
-export const SHADOW_VERTEX_LAYOUT: GPUVertexBufferLayout = {
-  arrayStride: SHADOW_VERTEX_STRIDE,
-  attributes: [
-    { shaderLocation: 0, offset: 0, format: 'float32x2' }, // corner (0..1 in each axis)
-    { shaderLocation: 1, offset: 8, format: 'uint32' }, //    objectId
-  ],
-}
 
 // Per-object record, in bytes:
 //   0   model: mat4x4<f32>  (64) - the shape's world matrix, with the shadow offset applied

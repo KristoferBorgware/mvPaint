@@ -15,16 +15,16 @@
 // geometry, so moving, fading or restacking an image never rebuilds a buffer - only changing
 // which texture it shows, or how it is cropped or tiled, does.
 
-import type { Image } from '../shapes/Image'
-import type { ImageSampling } from '../image/ImageTexture'
-import { WebGpuImageTexture } from '../image/WebGpuImageTexture'
+import type { Image } from '../../shapes/Image'
+import type { ImageSampling } from '../../image/ImageTexture'
+import { WebGpuImageTexture } from '../ImageTexture'
 import {
   IMAGE_OBJECT_DEPTH_OFFSET,
   IMAGE_OBJECT_STRIDE,
   IMAGE_OBJECT_TINT_OFFSET,
   IMAGE_VERTEX_FLOATS,
   IMAGE_VERTEX_STRIDE,
-} from './imageFormat'
+} from '../../render/imageFormat'
 
 /** A stretch of indices sharing one texture + sampler bind group. */
 interface DrawRange {

@@ -1,6 +1,6 @@
 // The shadow atlas on WebGL2: blurred silhouettes baked once into one shared R8 texture.
 //
-// The same cache as render/ShadowAtlas.ts, keyed on the same things - geometry version, blur,
+// The same cache as webgpu/ShadowAtlas.ts, keyed on the same things - geometry version, blur,
 // spread, whether the stroke casts - so a shape that is only being moved, spun or zoomed
 // re-bakes nothing. Every pass is bounded by the slot (at most MAX_REGION on a side) rather
 // than by the canvas, which is what makes a blurred shadow affordable at all.
@@ -13,7 +13,7 @@
 // agree. The y negation below is the first of them.
 
 import type { Shape } from '../shapes/Shape'
-import { silhouetteOf, MAX_REGION, type ShadowSlot } from '../render/ShadowAtlas'
+import { silhouetteOf, MAX_REGION, type ShadowSlot } from '../webgpu/ShadowAtlas'
 import { shadowQuadBounds, shadowRegion, shadowSigma, slotBucket, type ShadowRegion } from '../render/shadowMath'
 import { GlProgram, type GlStateCache } from './programs'
 import {

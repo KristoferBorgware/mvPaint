@@ -1,7 +1,7 @@
 // FrameUniforms - owns the group(0) uniform buffer + bind group (camera view-projection
 // and viewport resolution). Written once per frame by the renderer.
 
-import { FRAME_RESOLUTION_OFFSET, FRAME_UNIFORM_SIZE } from './meshFormat'
+import { FRAME_RESOLUTION_OFFSET, FRAME_UNIFORM_SIZE } from '../render/meshFormat'
 
 export class FrameUniforms {
   readonly bindGroup: GPUBindGroup

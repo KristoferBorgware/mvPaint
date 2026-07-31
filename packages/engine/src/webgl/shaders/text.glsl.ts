@@ -1,4 +1,4 @@
-// The text lane's shader, GLSL ES 300 - the twin of render/text.wgsl.ts.
+// The text lane's shader, GLSL ES 300 - the twin of webgpu/shaders/text.wgsl.ts.
 //
 // Multi-channel signed distance fields: a glyph's coverage is the median of the sampled RGB,
 // thresholded against a range measured in SCREEN pixels rather than texels, which is what

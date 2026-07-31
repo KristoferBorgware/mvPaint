@@ -9,7 +9,7 @@
 // buffers are recreated on rebuild (rebuilds are rare); per-slice incremental updates
 // and capacity pooling are a later optimization.
 
-import type { Shape } from '../shapes/Shape'
+import type { Shape } from '../../shapes/Shape'
 import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,
@@ -31,7 +31,7 @@ import {
   type GradientStop,
   type MeshMaterial,
   type MeshSink,
-} from './meshFormat'
+} from '../../render/meshFormat'
 
 const EMPTY_STOPS: readonly GradientStop[] = []
 // 5 numbers per gradient stop, flattened: offset, r, g, b, a.

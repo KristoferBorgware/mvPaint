@@ -1,4 +1,4 @@
-// The image lane's shader, GLSL ES 300 - the twin of render/image.wgsl.ts.
+// The image lane's shader, GLSL ES 300 - the twin of webgpu/shaders/image.wgsl.ts.
 //
 // Sample the bound texture at the interpolated coordinate and multiply by the object's tint.
 // That is the whole of it: which part of the image shows was resolved into the corner UVs on

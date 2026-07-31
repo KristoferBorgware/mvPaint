@@ -12,12 +12,12 @@ import { Polyline } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
 import {
   FILL_TYPE_CODE,
-  MESH_VERTEX_LAYOUT,
   MESH_VERTEX_STRIDE,
   OBJECT_STRIDE,
   type MeshSink,
   type RGBA,
 } from './meshFormat'
+import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayouts'
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
@@ -43,7 +43,6 @@ import {
   SHADOW_OBJECT_QUAD_OFFSET,
   SHADOW_OBJECT_STRIDE,
   SHADOW_OBJECT_UV_OFFSET,
-  SHADOW_VERTEX_LAYOUT,
   SHADOW_VERTEX_STRIDE,
 } from './shadowFormat'
 import { Shape } from '../shapes/Shape'

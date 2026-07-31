@@ -14,9 +14,9 @@
 // the atlas had since handed to a different shape. Reading the slot per frame removes the
 // possibility rather than adding a second thing to remember to invalidate.
 
-import type { Shape } from '../shapes/Shape'
-import type { ShadowAtlas } from './ShadowAtlas'
-import { shadowWorldOffset, worldAxisScale } from './shadowMath'
+import type { Shape } from '../../shapes/Shape'
+import type { ShadowAtlas } from '../ShadowAtlas'
+import { shadowWorldOffset, worldAxisScale } from '../../render/shadowMath'
 import {
   SHADOW_OBJECT_COLOR_OFFSET,
   SHADOW_OBJECT_DEPTH_OFFSET,
@@ -25,7 +25,7 @@ import {
   SHADOW_OBJECT_UV_OFFSET,
   SHADOW_VERTEX_FLOATS,
   SHADOW_VERTEX_STRIDE,
-} from './shadowFormat'
+} from '../../render/shadowFormat'
 
 /** The four corners of a unit square, in the winding the index buffer below expects. */
 const CORNERS: readonly [number, number][] = [

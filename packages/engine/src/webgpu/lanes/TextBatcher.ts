@@ -6,15 +6,15 @@
 //
 // Quads are emitted in painter order and drawn as ONE range, whatever styles they mix. Every
 // Inter style shares a single texture_2d_array with a layer each, and a run's layer travels in
-// its object record (see text/FontAtlas.ts), so there is no per-atlas segmentation left to do:
+// its object record (see webgpu/FontBook.ts), so there is no per-atlas segmentation left to do:
 // this lane binds group(2) exactly once and issues exactly one drawIndexed per span of nodes.
 
-import type { Shape } from '../shapes/Shape'
-import type { Text } from '../shapes/Text'
-import type { FontBook } from '../text/FontAtlas'
-import type { TextMaterial } from '../text/layout'
-import { quadCorner } from '../text/textQuad'
-import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from './meshFormat'
+import type { Shape } from '../../shapes/Shape'
+import type { Text } from '../../shapes/Text'
+import type { FontBook } from '../FontBook'
+import type { TextMaterial } from '../../text/layout'
+import { quadCorner } from '../../text/textQuad'
+import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from '../../render/meshFormat'
 import {
   TEXT_GLYPH_BIT,
   TEXT_OBJECT_ATLAS_LAYER_OFFSET,
@@ -35,7 +35,7 @@ import {
   TEXT_OBJECT_STROKE_WIDTH_OFFSET,
   TEXT_VERTEX_FLOATS,
   TEXT_VERTEX_STRIDE,
-} from './textFormat'
+} from '../../render/textFormat'
 
 interface ObjectRecord {
   node: Text
@@ -217,7 +217,7 @@ export class TextBatcher {
   /**
    * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order - which is how
    * the renderer interleaves the lanes back to front. One draw, whatever styles the span
-   * mixes: every style is a layer of the one bound texture (see text/FontAtlas.ts).
+   * mixes: every style is a layer of the one bound texture (see webgpu/FontBook.ts).
    */
   drawRange(
     pass: GPURenderPassEncoder,

@@ -9,7 +9,7 @@
 // are only fetched when this function is actually called.
 
 import { VectorFontBook, type VectorFontOptions, type VectorFontSource } from './VectorFont'
-import type { FontStyle } from './FontAtlas'
+import type { FontStyle } from '../webgpu/FontBook'
 
 import interRegularTtf from './fonts/src/Inter-Regular.ttf?url'
 import interBoldTtf from './fonts/src/Inter-Bold.ttf?url'
