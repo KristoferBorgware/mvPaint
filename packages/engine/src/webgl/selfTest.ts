@@ -5,8 +5,9 @@
 //
 //   - the data texture's index maths, which decides where a record lands and which rows an
 //     upload has to cover (ObjectTexture.ts);
-//   - the generated GLSL's texel offsets, which have to agree with render/meshFormat.ts by
-//     construction rather than by luck.
+//   - every generated shader's texel offsets, which have to agree with the render/*Format.ts
+//     module they were generated from by construction rather than by luck - and, for the
+//     shadow lane, the two halves of the render-to-texture flip, which only work together.
 //
 // Run with: npx tsx src/webgl/selfTest.ts
 

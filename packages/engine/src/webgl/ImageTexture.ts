@@ -1,15 +1,14 @@
 // The fallback's image textures.
 //
-// The image LANE has not landed yet, but the textures have to exist before it does: an Image
-// node is constructed with one, and its width and height are what the node's default size, its
-// UVs, its bounds and its hit test are all derived from (see image/imageUv.ts). A scene that
-// could not build a texture on this path could not be built at all - it would throw in
-// populate() rather than merely drawing one lane short.
+// A texture is the one GPU resource an application has to build for itself, because only it
+// knows which pictures the scene wants - and it has to exist before anything is drawn: an
+// Image node is constructed with one, and its width and height are what the node's default
+// size, its UVs, its bounds and its hit test are all derived from (see image/imageUv.ts).
 //
-// So this uploads properly and reports its size properly, and the lane will bind it when it
-// arrives. Sampler state is set per texture rather than cached per combination the way the
-// WebGPU path does it, because WebGL has no sampler objects in a bind group to cache - wrap
-// and filter are texture parameters, and one texture is drawn one way.
+// Sampler state is applied per bind rather than cached per combination the way the WebGPU path
+// does it. There is nothing to cache: WebGL has no sampler object sitting inside a bind group,
+// so wrap and filter are parameters ON the texture, and re-applying them is only worth
+// skipping when they have not changed - which is what `applied` tracks.
 
 import {
   assertSvgFits,
