@@ -249,6 +249,14 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       camera: cameraRef.current,
       onDeviceError: (message) => onErrorRef.current?.(message),
       populate: (sceneGraph, _camera, resources) => {
+        // React StrictMode mounts, unmounts and remounts this effect in development, so TWO
+        // renderers are started and the first is thrown away. populate() runs before either
+        // promise resolves, so without this check the discarded renderer can be the one that
+        // lands last and leave these refs pointing at a scene graph nothing draws - after
+        // which every scene switch builds into the void while the canvas keeps showing the
+        // first scene. The `.then` below already guards for the same reason; this is the
+        // earlier half of it.
+        if (cancelled) return
         sceneGraphRef.current = sceneGraph
         resourcesRef.current = resources
         // The transformer and both debug/gesture overlays are added ONCE and deliberately

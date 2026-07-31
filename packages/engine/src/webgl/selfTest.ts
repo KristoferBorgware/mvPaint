@@ -17,12 +17,14 @@ import {
   rowsFor,
 } from './ObjectTexture'
 import { componentOf, meshFragmentGlsl, meshVertexGlsl, texelOf } from './shaders/mesh.glsl'
+import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
 import {
   OBJECT_DEPTH_OFFSET,
   OBJECT_FILL_COLOR_OFFSET,
   OBJECT_STRIDE,
   OBJECT_STROKE_COLOR_OFFSET,
 } from '../render/meshFormat'
+import { TEXT_OBJECT_ATLAS_LAYER_OFFSET, TEXT_OBJECT_STRIDE } from '../render/textFormat'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -113,6 +115,34 @@ function assert(cond: boolean, msg: string): void {
   for (const source of [meshVertexGlsl, meshFragmentGlsl]) {
     assert(source.startsWith('#version 300 es\n'), 'both stages declare GLSL ES 300 on the very first line')
   }
+}
+
+// --- the text lane's shader, on the same terms ----------------------------------------------
+{
+  const texels = recordTexels(TEXT_OBJECT_STRIDE)
+  assert(texels === 20, 'a 320-byte text record is 20 texels')
+  assert(rowsFor(1000, texels) === Math.ceil((1000 * 20) / OBJECT_TEXTURE_WIDTH), '1000 runs is 20 rows')
+
+  for (const source of [textVertexGlsl, textFragmentGlsl]) {
+    assert(source.startsWith('#version 300 es\n'), 'both text stages declare GLSL ES 300 first')
+    assert(source.includes(`const int OBJ_TEXELS = ${TEXT_OBJECT_STRIDE / 16};`), 'generated with the text record size')
+  }
+  assert(textVertexGlsl.includes('* 2.0 - 1.0) * clip.w'), 'the text vertex shader remaps depth into GL clip space')
+  assert(!textFragmentGlsl.includes('floatBitsToUint'), 'the text shader reads integer fields as floats too')
+
+  // The atlas layer is a per-RUN value in the record, and it is what lets a paragraph mixing
+  // four styles draw in one call. Reading it from the wrong texel draws every run in one style.
+  assert(
+    textFragmentGlsl.includes(`obj(id, ${TEXT_OBJECT_ATLAS_LAYER_OFFSET >> 4})`),
+    "the atlas layer is read from the record's own texel",
+  )
+  assert(textFragmentGlsl.includes('sampler2DArray'), 'all four styles are layers of one array texture')
+  // Derivatives are undefined in non-uniform control flow, and a quad can mix glyph and
+  // decoration fragments - so both fwidth() calls must precede the branch on the glyph bit.
+  const branch = textFragmentGlsl.indexOf('GLYPH_BIT) == 0u')
+  assert(textFragmentGlsl.indexOf('fwidth(v_uv)') < branch, 'the uv derivative is taken before the glyph branch')
+  assert(textFragmentGlsl.indexOf('fwidth(v_localPos)') < branch, 'and so is the local one')
+  assert(textFragmentGlsl.indexOf('texture(u_atlas') < branch, 'and the atlas sample, which is also a derivative read')
 }
 
 console.log(`[webgl] self-test passed (${count} assertions)`)

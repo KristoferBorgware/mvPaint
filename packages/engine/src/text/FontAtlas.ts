@@ -21,27 +21,13 @@
 // code that wants to measure text before a device exists - reach it directly.
 
 import { createAtlasBindGroupLayout } from '../render/layouts'
-import { normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
-import { ATLAS_LAYER_SIZE, resolveStyle, STYLE_JSON, STYLE_ORDER, type FontStyle } from './msdfProvider'
+import { normalizeMetrics, type FontMetrics } from './msdfMetrics'
+import { ATLAS_LAYER_SIZE, resolveStyle, STYLE_ORDER, type FontStyle } from './msdfProvider'
 
 export type { FontStyle } from './msdfProvider'
 export { msdfFontProvider, ATLAS_LAYER_SIZE } from './msdfProvider'
 
-import interRegularPng from './fonts/inter-regular.png?url'
-import interBoldPng from './fonts/inter-bold.png?url'
-import interItalicPng from './fonts/inter-italic.png?url'
-import interBoldItalicPng from './fonts/inter-bold-italic.png?url'
-
-const PNG_URLS: readonly string[] = [interRegularPng, interBoldPng, interItalicPng, interBoldItalicPng]
-// PNG_URLS is ordered to match STYLE_JSON (both list the four styles in STYLE_ORDER), so
-// zipping them index-for-index pairs each style with its own atlas image - and that shared
-// index IS the array layer the style occupies.
-interface StyleSource {
-  style: FontStyle
-  url: string
-  json: MsdfFontJson
-}
-const SOURCES: readonly StyleSource[] = STYLE_JSON.map((s, i) => ({ style: s.style, url: PNG_URLS[i], json: s.json }))
+import { MSDF_ATLAS_SOURCES as SOURCES } from './msdfAtlasImages'
 
 export class FontBook {
   /** group(2) layout for the atlas array + sampler, reused by the text pipeline. */

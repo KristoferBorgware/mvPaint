@@ -25,6 +25,7 @@ import type { CreateSceneRendererOptions, SceneRendererHandle } from '../rendere
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
+import { GlFontBook } from './FontBook'
 import { glImageFactory } from './ImageTexture'
 import { GlSceneRenderer } from './SceneRenderer'
 
@@ -52,10 +53,14 @@ export async function createWebGl2SceneRenderer(
     options.onDeviceError?.(message)
   })
 
+  // Load the MSDF atlases before building the renderer, so the text lane has its texture ready
+  // for the first frame rather than showing a page of nothing on the way to showing text.
+  const fonts = await GlFontBook.load(gl)
+
   let scene: GlSceneRenderer
   try {
     // Program links are where a shader/format mismatch shows up, and they happen in here.
-    scene = new GlSceneRenderer(context, options.camera)
+    scene = new GlSceneRenderer(context, fonts, options.camera)
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
     options.onDeviceError?.(message)

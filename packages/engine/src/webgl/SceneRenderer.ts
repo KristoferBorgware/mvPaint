@@ -30,11 +30,15 @@ import type { TransformableNode } from '../shapes/Group'
 import { meshGeometryEpoch } from '../shapes/contentEpoch'
 import { SceneGather, sameMembers } from '../render/gather'
 import type { LaneName } from '../render/drawOrder'
-import { msdfFontProvider } from '../text/msdfProvider'
+import { textShapingEpoch } from '../shapes/contentEpoch'
+import type { Text } from '../shapes/Text'
 import type { Gl2Context } from './Gl2Context'
+import type { GlFontBook } from './FontBook'
 import { GlProgram, GlStateCache } from './programs'
 import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
+import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
 import { GlMeshBatcher } from './lanes/MeshBatcher'
+import { GlTextBatcher } from './lanes/TextBatcher'
 
 /** Reported once each, not per frame - a lane that is missing is missing every frame. */
 const announced = new Set<LaneName>()
@@ -57,10 +61,12 @@ export class GlSceneRenderer {
   private readonly meshOverlay: GlProgram
   private readonly meshBatcher: GlMeshBatcher
 
-  // Shaping, measuring and culling need font METRICS and nothing else, so the fallback uses
-  // the device-free provider rather than an atlas it has no lane to draw with yet. When the
-  // text lane lands it adds a texture; this stays exactly as it is.
-  private readonly fonts = msdfFontProvider()
+  private readonly textProgram: GlProgram
+  private readonly textBatcher: GlTextBatcher
+
+  // Shaping, measuring and culling need font METRICS; drawing also needs the atlas. One object
+  // supplies both, and it is a FontProvider, so picking and culling never touch the texture.
+  private readonly fonts: GlFontBook
 
   private readonly gather = new SceneGather()
   private cullMargin = 0
@@ -71,11 +77,14 @@ export class GlSceneRenderer {
   private textGeometryDirty = true
   private imageGeometryDirty = true
   private builtMeshEpoch = -1
+  private builtTextEpoch = -1
   private visibleMeshShapes: readonly Shape[] = []
+  private visibleTexts: readonly Text[] = []
 
-  constructor(context: Gl2Context, camera?: Camera2D | null) {
+  constructor(context: Gl2Context, fonts: GlFontBook, camera?: Camera2D | null) {
     this.gl = context.gl
     this.canvas = context.canvas
+    this.fonts = fonts
     this.activeCamera = camera ?? new Camera2D()
     this.stateCache = new GlStateCache(this.gl)
 
@@ -100,6 +109,17 @@ export class GlSceneRenderer {
       state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.ALWAYS },
     })
     this.meshBatcher = new GlMeshBatcher(this.gl)
+
+    // Text is never opaque - an MSDF glyph's alpha IS its coverage, so every outline is a ring
+    // of partial-alpha fragments however solid the run's colour is. One depth-read-only program
+    // is all the lane can ever need (see render/opacity.ts).
+    this.textProgram = new GlProgram(this.gl, this.stateCache, {
+      label: 'text',
+      vertex: textVertexGlsl,
+      fragment: textFragmentGlsl,
+      state: { blend: true, depthTest: true, depthWrite: false, depthFunc: this.gl.LEQUAL },
+    })
+    this.textBatcher = new GlTextBatcher(this.gl)
   }
 
   get camera(): Camera2D {
@@ -231,7 +251,18 @@ export class GlSceneRenderer {
     }
     this.meshBatcher.updateObjects(g.visibleMeshShapes, g.visibleMeshDepths)
 
-    if (g.texts.length > 0) announceMissingLane('text')
+    if (
+      this.textGeometryDirty ||
+      this.builtTextEpoch !== textShapingEpoch() ||
+      !sameMembers(g.texts, this.visibleTexts)
+    ) {
+      this.textBatcher.rebuild(g.texts, this.fonts)
+      this.textGeometryDirty = false
+      this.builtTextEpoch = textShapingEpoch()
+    }
+    this.visibleTexts = g.texts
+    this.textBatcher.updateObjects(g.depths)
+
     if (g.images.length > 0) announceMissingLane('image')
     if (this.shadowsEnabled && g.meshShapes.some((s) => s.hasShadow())) announceMissingLane('shadow')
 
@@ -253,7 +284,7 @@ export class GlSceneRenderer {
     // so the depth buffer alone decides between two overlapping shapes, and one draw covers
     // the lot however finely they are stacked among the translucent ones.
     if (g.meshTranslucentStart > 0) {
-      this.useMesh(this.meshOpaque, viewProjection)
+      this.bindLane(this.meshOpaque, viewProjection)
       this.meshBatcher.draw(this.meshOpaque, this.meshBatcher.indexRangeFor(0, g.meshTranslucentStart))
     }
 
@@ -262,17 +293,21 @@ export class GlSceneRenderer {
     // list already is, and the lanes land into it unchanged.
     let boundLane: LaneName | null = null
     for (const run of g.runs) {
-      if (run.lane !== 'mesh') continue
+      if (run.lane !== 'mesh' && run.lane !== 'text') continue
       if (boundLane !== run.lane) {
-        this.useMesh(this.meshTranslucent, viewProjection)
+        this.bindLane(run.lane === 'mesh' ? this.meshTranslucent : this.textProgram, viewProjection)
         boundLane = run.lane
       }
-      this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
+      if (run.lane === 'mesh') {
+        this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
+      } else {
+        this.textBatcher.drawRange(this.textProgram, this.fonts, run.from, run.to)
+      }
     }
 
     // PASS 3 - the overlay tail, over every other lane, touching depth not at all.
     if (g.overlayStart < g.visibleMeshShapes.length) {
-      this.useMesh(this.meshOverlay, viewProjection)
+      this.bindLane(this.meshOverlay, viewProjection)
       this.meshBatcher.draw(
         this.meshOverlay,
         this.meshBatcher.indexRangeFor(g.overlayStart, g.visibleMeshShapes.length),
@@ -281,17 +316,20 @@ export class GlSceneRenderer {
   }
 
   /**
-   * Bind a mesh program and the frame-wide uniforms - what group(0) is on the other path.
-   * The mesh shader wants the view-projection and nothing else; the lanes that also need the
-   * viewport resolution get it when they land.
+   * Bind a lane's program and the frame-wide uniforms - what group(0) is on the other path.
+   * Every lane wants the view-projection and, so far, nothing else; the per-lane bindings (the
+   * object texture, an atlas) belong to the batcher that knows about them.
    */
-  private useMesh(program: GlProgram, viewProjection: Float32Array): void {
+  private bindLane(program: GlProgram, viewProjection: Float32Array): void {
     program.use()
     this.gl.uniformMatrix4fv(program.uniform('u_viewProjection'), false, viewProjection)
   }
 
   destroy(): void {
     this.meshBatcher.destroy()
+    this.textBatcher.destroy()
+    this.textProgram.destroy()
+    this.fonts.destroy()
     this.meshOpaque.destroy()
     this.meshTranslucent.destroy()
     this.meshOverlay.destroy()
