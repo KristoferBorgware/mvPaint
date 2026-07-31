@@ -30,6 +30,33 @@ import { GlSceneRenderer } from './SceneRenderer'
 
 export { GlImageTexture } from './ImageTexture'
 
+const GL_ERRORS: Record<number, string> = {
+  0x0500: 'INVALID_ENUM',
+  0x0501: 'INVALID_VALUE',
+  0x0502: 'INVALID_OPERATION',
+  0x0505: 'OUT_OF_MEMORY',
+  0x0506: 'INVALID_FRAMEBUFFER_OPERATION',
+  0x9242: 'CONTEXT_LOST_WEBGL',
+}
+
+/**
+ * The GPU behind this context, when the browser will say.
+ *
+ * WEBGL_debug_renderer_info is not always exposed - it is fingerprinting surface, and some
+ * browsers withhold it - so this is best effort. It exists because the failures this path is
+ * most likely to hit are per-driver, and "it is black on my phone" is a much harder report to
+ * act on than the same sentence with an Adreno or Mali string attached to it.
+ */
+function describeRenderer(gl: WebGL2RenderingContext): string {
+  try {
+    const info = gl.getExtension('WEBGL_debug_renderer_info')
+    if (info) return String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))
+  } catch {
+    // Withheld; the version string below is always available and still narrows it down.
+  }
+  return String(gl.getParameter(gl.VERSION))
+}
+
 /**
  * Composition root for the WebGL2 path. Applications call createSceneRenderer()
  * (renderer/createSceneRenderer.ts), which comes here only when WebGPU is unavailable or when
@@ -74,20 +101,64 @@ export async function createWebGl2SceneRenderer(
   let rafId = 0
   let lastTime = performance.now()
 
+  // One message, however many frames the problem lasts: a per-frame report would bury the
+  // first (and only useful) one under sixty a second.
+  let reported = false
+  const reportOnce = (message: string): void => {
+    if (reported) return
+    reported = true
+    options.onDeviceError?.(message)
+  }
+
+  // WebGL has no uncapturederror and no error scopes: an illegal call sets a flag and returns,
+  // and the canvas quietly comes out blank. Polling getError() every frame would stall the
+  // pipeline, so it is checked exactly ONCE, after the first frame - which is where a device
+  // that cannot do something this renderer needs will fail, and where the difference between
+  // "black screen" and a sentence naming the problem is worth one synchronous call.
+  let checkedFirstFrame = false
+  const checkFirstFrame = (): void => {
+    if (checkedFirstFrame) return
+    checkedFirstFrame = true
+    const code = gl.getError()
+    if (code === gl.NO_ERROR) return
+    const name = GL_ERRORS[code] ?? `0x${code.toString(16)}`
+    const renderer = describeRenderer(gl)
+    console.error(`WebGL2: the first frame reported ${name} on ${renderer}`)
+    reportOnce(`WebGL2 error on the first frame: ${name} (${renderer}).`)
+  }
+
   // The frame loop, which on this path is all there is to a frame: no command encoder to open,
   // no MSAA target to allocate and resolve, and the depth buffer belongs to the drawing buffer
   // the browser already made. Resizing the canvas resizes that buffer with it.
+  //
+  // The next frame is scheduled BEFORE the work, not after it. Scheduling last means a single
+  // throw - on one device, in one lane, on the first frame - ends the loop for good, and a
+  // canvas that is never written composites as transparent, which on a dark page is a black
+  // screen with nothing in the console to say why. That failure is unacceptable precisely
+  // because it is silent, so anything thrown here is caught, reported through onDeviceError
+  // (the application shows it) and the loop then stopped deliberately rather than by accident.
   const tick = (now: number): void => {
     if (!running) return
+    rafId = requestAnimationFrame(tick)
+
     const dt = (now - lastTime) / 1000
     lastTime = now
-    resizer.update()
-    options.onFrame?.(dt)
-    // Baking binds its own framebuffer, so it happens before the frame rather than inside it -
-    // the same ordering the WebGPU path gets from its prepass hook.
-    scene.prepareShadows()
-    scene.draw(resizer.width, resizer.height)
-    rafId = requestAnimationFrame(tick)
+    try {
+      resizer.update()
+      options.onFrame?.(dt)
+      // Baking binds its own framebuffer, so it happens before the frame rather than inside
+      // it - the same ordering the WebGPU path gets from its prepass hook.
+      scene.prepareShadows()
+      scene.draw(resizer.width, resizer.height)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      console.error('WebGL2 render error:', cause)
+      reportOnce(`WebGL2 render error: ${message}`)
+      running = false
+      cancelAnimationFrame(rafId)
+      return
+    }
+    checkFirstFrame()
   }
   rafId = requestAnimationFrame(tick)
 

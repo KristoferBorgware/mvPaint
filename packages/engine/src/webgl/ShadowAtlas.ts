@@ -148,8 +148,15 @@ export class GlShadowAtlas {
     // growing replaces the texture. Unlike WebGPU there is no recorded command buffer to
     // invalidate here, but keeping the ordering means the two paths stay easy to compare.
     const plan = this.planBakes(stale, casters)
-    for (const item of plan) this.bakeOne(item)
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null)
+    try {
+      for (const item of plan) this.bakeOne(item)
+    } finally {
+      // In a finally, not after the loop: a bake that throws would otherwise leave the atlas
+      // framebuffer bound, and every subsequent frame would draw the whole scene into the
+      // shadow atlas instead of the canvas - a black screen whose cause is nowhere near
+      // where it shows up.
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null)
+    }
   }
 
   private ensureTextures(size: number): void {
