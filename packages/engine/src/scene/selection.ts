@@ -9,7 +9,7 @@ import { Vector3 } from '../math/Vector3'
 import type { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
-import type { FontBook } from '../text/FontAtlas'
+import type { FontProvider } from '../text/layout'
 import { textLocalBounds } from './picking'
 
 export interface MarqueeOptions {
@@ -20,15 +20,15 @@ export interface MarqueeOptions {
    */
   mode?: 'intersect' | 'contain'
   /** Needed to measure Text nodes; without it they are skipped rather than mis-measured. */
-  fontBook?: FontBook
+  fontBook?: FontProvider
 }
 
 /** A shape's bounds in world space, or null when it has nothing to measure. */
-export function worldBounds(shape: Shape, fontBook?: FontBook): AABB | null {
+export function worldBounds(shape: Shape, fonts?: FontProvider): AABB | null {
   const local =
     shape instanceof Text
-      ? fontBook
-        ? textLocalBounds(shape.shaped(fontBook))
+      ? fonts
+        ? textLocalBounds(shape.shaped(fonts))
         : null
       : shape.localBounds()
   if (!local || !local.valid()) return null

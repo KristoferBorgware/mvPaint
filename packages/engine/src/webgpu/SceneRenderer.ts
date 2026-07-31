@@ -17,14 +17,18 @@
 //   3. Then the overlay tail, on top of everything, with depth off entirely.
 //
 // Only the mesh lane can currently fill pass 1; text and images are always translucent, and
-// render/opacity.ts says why. Shapes/text outside the camera's current
-// view rectangle are culled before reaching either batcher (see scene/culling.ts) - a
-// rebuild only re-runs when the visible SET changes (content added/removed, or something
-// crossing the view boundary), not on every frame just because something moved. Culling
-// itself can be switched off (setCullingEnabled) for a scene that specifically wants to
-// stress-test "everything, always" rather than benefit from - or be masked by - culling.
+// render/opacity.ts says why.
+//
+// WHAT IT DOES NOT DO is decide any of that. Which shapes are visible, what depth each one
+// takes, which lane it belongs to, where the opaque/translucent/overlay boundaries fall and
+// in what order the translucent half interleaves are all worked out by render/gather.ts,
+// which contains no GPU type and is shared with the WebGL fallback path. This file starts
+// where that answer arrives: it packs it into buffers and submits it. Culling can be switched
+// off (setCullingEnabled) for a scene that specifically wants to stress-test "everything,
+// always" rather than benefit from - or be masked by - culling.
+//
 // It does NOT own the GPU context, resize observer, frame loop, or any scene content -
-// those are wired by createSceneRenderer() below, with content supplied by the caller
+// those are wired by createWebGpuSceneRenderer() below, with content supplied by the caller
 // through the `populate` option.
 //
 // Nor does it own the CAMERA. Where a scene is looked at from is an application's business,
@@ -39,12 +43,16 @@ import { Text } from '../shapes/Text'
 import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
-import { collectZOrder, depthForRank, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
-import { buildDrawRuns, type DrawRun, type LaneName } from '../render/drawOrder'
-import { partitionByOpacity } from '../render/opacity'
+import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { buildDrawRuns, type LaneName } from '../render/drawOrder'
+import { SceneGather, sameMembers } from '../render/gather'
 import type { TransformableNode } from '../shapes/Group'
-import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
+import type {
+  CreateSceneRendererOptions,
+  SceneRendererHandle,
+} from '../renderer/SceneRendererHandle'
+import { webGpuImageFactory } from '../image/WebGpuImageTexture'
 import { screenToWorld } from '../input/viewport'
 import {
   createAtlasBindGroupLayout,
@@ -73,17 +81,6 @@ import { FrameRenderer, type FrameContext } from '../systems/FrameRenderer'
 
 const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
 const SAMPLE_COUNT = 4
-
-// Both arrays are filtered from the SAME zIndex-sorted list, so if the underlying set of
-// members is unchanged, filtering it again reproduces the identical order - a plain
-// elementwise reference comparison is enough to detect "did the visible set change".
-function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
-  }
-  return true
-}
 
 /** Shared empty list, so a shadowless frame allocates nothing to say so. */
 const NO_SHADOWS: readonly Shape[] = []
@@ -149,27 +146,11 @@ export class SceneRenderer {
   private visibleMeshShapes: readonly Shape[] = []
   private visibleTexts: readonly Text[] = []
   private visibleImages: readonly Image[] = []
-  // Last frame's gather-phase output (traversal, depth assignment, culling, overlay
-  // split), reused verbatim while cullingEnabled and zSortEnabled are both off and
-  // nothing has been marked dirty since - see draw()'s canReuseGather.
-  private cachedGather: {
-    ordered: readonly Shape[]
-    depths: ReadonlyMap<Shape, number>
-    meshShapes: readonly Shape[]
-    texts: readonly Text[]
-    textDepths: readonly number[]
-    images: readonly Image[]
-    imageDepths: readonly number[]
-    visibleMeshShapes: readonly Shape[]
-    visibleMeshDepths: readonly number[]
-    meshTranslucentStart: number
-    overlayStart: number
-    runs: readonly DrawRun[]
-  } | null = null
-  // The last frame's (margin-expanded) cull rectangle, for getCullBounds() - lets a
-  // caller draw it as a debug overlay. Null before the first draw, or whenever the
-  // active camera isn't an OrthographicCamera (no rectangular frustum to show).
-  private lastCullBounds: AABB | null = null
+  // Traversal, depth assignment, culling and the overlay/opacity splits - everything the
+  // frame decides before it draws anything. It owns last frame's answer and hands it back
+  // whole on the fast path; see render/gather.ts, and draw()'s canReuseGather for this
+  // renderer's half of that decision.
+  private readonly gather = new SceneGather()
 
   constructor(
     device: GPUDevice,
@@ -256,10 +237,10 @@ export class SceneRenderer {
 
   /** See `cullingEnabled`. Disabling also clears the debug cull-bounds overlay's rectangle. */
   setCullingEnabled(enabled: boolean): void {
-    // A stale cachedGather would otherwise let draw()'s fast path serve a viewport-culled
+    // A stale gather would otherwise let draw()'s fast path serve a viewport-culled
     // (or now-uncullled) set built under the OLD setting - flipping this always invalidates
     // it, whether or not the caller also happens to call markGeometryDirty().
-    if (enabled !== this.cullingEnabled) this.cachedGather = null
+    if (enabled !== this.cullingEnabled) this.gather.invalidate()
     this.cullingEnabled = enabled
   }
 
@@ -269,7 +250,7 @@ export class SceneRenderer {
 
   /** See `zSortEnabled`. */
   setZSortEnabled(enabled: boolean): void {
-    if (enabled !== this.zSortEnabled) this.cachedGather = null
+    if (enabled !== this.zSortEnabled) this.gather.invalidate()
     this.zSortEnabled = enabled
   }
 
@@ -288,7 +269,7 @@ export class SceneRenderer {
 
   /** The last frame's (margin-expanded) cull rectangle, world space - for a debug overlay. */
   getCullBounds(): AABB | null {
-    return this.lastCullBounds
+    return this.gather.getCullBounds()
   }
 
   /**
@@ -366,209 +347,73 @@ export class SceneRenderer {
 
     this.frameUniforms.write(camera.viewProjection(viewWidth, viewHeight).toGPU(), width, height)
 
-    // Culling and zIndex sort both off means nothing here can change the visible SET on
-    // its own: no camera-dependent membership (nothing is ever culled), no zIndex-driven
-    // reordering, and structural changes (shapes actually added/removed) always come with
-    // an explicit markGeometryDirty()/markTextGeometryDirty() call. In that state, this
-    // whole gather - traversal, depth assignment, split, filter - reproduces byte-identical
-    // output every single frame it isn't given a reason to change, which is most of them
-    // for a static scene. Reusing last frame's arrays instead of rebuilding them is what
-    // lets a scene like the shape stress test skip tens of thousands of shapes' worth of
-    // traversal and array-building on every frame it's just sitting there.
+    // Culling and the zIndex sort both off means nothing in the gather can change the visible
+    // SET on its own: no camera-dependent membership (nothing is ever culled), no zIndex-driven
+    // reordering, and structural changes (shapes actually added/removed) always come with an
+    // explicit markGeometryDirty()/markTextGeometryDirty() call. In that state last frame's
+    // arrays are handed straight back - see render/gather.ts, which explains what that buys and
+    // the one thing it costs (an alpha crossing 1 needs a markGeometryDirty() to be noticed).
     //
-    // The opaque/translucent split (see render/opacity.ts) is part of what gets reused, and
-    // it is the one thing here derived from something a caller can change silently: a fill
-    // or stroke alpha. Recomputing it every frame would mean classifying every visible shape
-    // every frame, which is precisely the per-object scan this cache exists to avoid - so in
-    // this state (culling AND the zIndex sort both off), an alpha that crosses 1 needs a
-    // markGeometryDirty() to be noticed. Every other state re-gathers, and re-splits, anyway.
+    // This half of the decision is the renderer's, because these flags are: the gather knows
+    // nothing about dirty marks or content epochs.
     const canReuseGather =
       !this.cullingEnabled &&
       !this.zSortEnabled &&
       !this.geometryDirty &&
       !this.textGeometryDirty &&
       !this.imageGeometryDirty &&
-      // The mesh rebuild lives inside the gather branch below, so reusing the gather would
-      // skip it. The text and image lanes rebuild outside it and need no say here.
+      // The mesh rebuild below is skipped on the reuse path along with the gather, so the mesh
+      // epoch has a say here. The text and image lanes rebuild outside it and need none.
       this.builtMeshEpoch === meshGeometryEpoch() &&
-      this.cachedGather !== null
+      this.gather.hasCache()
 
-    let ordered: readonly Shape[]
-    let depths: ReadonlyMap<Shape, number>
-    let meshShapes: readonly Shape[]
-    let visibleTexts: readonly Text[]
-    let visibleTextDepths: readonly number[]
-    let visibleImages: readonly Image[]
-    let visibleImageDepths: readonly number[]
-    let visibleMeshShapes: readonly Shape[]
-    let visibleMeshDepths: readonly number[]
-    let meshTranslucentStart: number
-    let overlayStart: number
-    let runs: readonly DrawRun[]
+    const {
+      ordered,
+      depths,
+      meshShapes,
+      texts: visibleTexts,
+      textDepths: visibleTextDepths,
+      images: visibleImages,
+      imageDepths: visibleImageDepths,
+      visibleMeshShapes,
+      visibleMeshDepths,
+      meshTranslucentStart,
+      overlayStart,
+      runs,
+    } = this.gather.run(
+      {
+        scene: this.scene,
+        camera,
+        // Culling measures Text, which needs metrics and nothing else - the atlas is not
+        // consulted here (see Text.shaped).
+        fonts: this.fontBook,
+        viewWidth,
+        viewHeight,
+        cullingEnabled: this.cullingEnabled,
+        zSortEnabled: this.zSortEnabled,
+        cullMargin: this.cullMargin,
+      },
+      canReuseGather,
+    )
 
-    if (canReuseGather) {
-      const g = this.cachedGather!
-      ordered = g.ordered
-      depths = g.depths
-      meshShapes = g.meshShapes
-      visibleTexts = g.texts
-      visibleTextDepths = g.textDepths
-      visibleImages = g.images
-      visibleImageDepths = g.imageDepths
-      visibleMeshShapes = g.visibleMeshShapes
-      visibleMeshDepths = g.visibleMeshDepths
-      meshTranslucentStart = g.meshTranslucentStart
-      overlayStart = g.overlayStart
-      runs = g.runs
-    } else {
-      // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and
-      // a Text can interleave correctly under the depth test regardless of which lane's
-      // draw call runs first (see scene/picking.ts). Depth ranks are scene-wide (based on
-      // EVERY shape), not affected by culling below.
-      const orderedLocal = collectZOrder(this.scene, this.zSortEnabled)
-      const depthsLocal = new Map<Shape, number>()
-      // Text is the only Shape kind that doesn't tessellate for the mesh lane (its
-      // tessellate() is the inherited no-op) - everything else belongs to the mesh batcher,
-      // VectorText very much included: it is text drawn AS mesh geometry, so it wants the
-      // mesh lane, not this filter's other side. One pass buckets both instead of filtering
-      // `ordered` twice - same result, half the iteration. meshDepthsLocal is built
-      // alongside meshShapesLocal, parallel by position - see MeshBatcher.updateObjects for
-      // why that's worth doing instead of a shape-keyed Map lookup per object.
-      const texts: Text[] = []
-      const images: Image[] = []
-      const meshShapesLocal: Shape[] = []
-      const meshDepthsLocal: number[] = []
-      for (let rank = 0; rank < orderedLocal.length; rank++) {
-        const shape = orderedLocal[rank]
-        const depth = depthForRank(rank, orderedLocal.length)
-        depthsLocal.set(shape, depth)
-        // An Image has mesh geometry - that is what its shadow and its hit test are made
-        // of - but the image lane paints those pixels, so it is bucketed out of the mesh
-        // draw here rather than excluded from having geometry at all.
-        if (shape instanceof Text) texts.push(shape)
-        else if (shape instanceof Image) images.push(shape)
-        else {
-          meshShapesLocal.push(shape)
-          meshDepthsLocal.push(depth)
-        }
-      }
-
-      // Viewport cull: skip anything whose bounds don't overlap the camera's current view
-      // rectangle (see scene/culling.ts). Switching cullingEnabled off skips the per-object
-      // test itself, not just its effect. Depths are filtered in step with their shapes via
-      // an explicit loop (not .filter(), which can't keep a second array in sync) whenever
-      // culling can actually drop something.
-      const viewBounds = this.cullingEnabled
-        ? camera.viewBounds(viewWidth, viewHeight).expanded(this.cullMargin)
-        : null
-      this.lastCullBounds = viewBounds
-      let onScreen: Shape[]
-      let onScreenDepths: number[]
-      if (viewBounds) {
-        onScreen = []
-        onScreenDepths = []
-        for (let i = 0; i < meshShapesLocal.length; i++) {
-          if (isShapeOnScreen(meshShapesLocal[i], viewBounds)) {
-            onScreen.push(meshShapesLocal[i])
-            onScreenDepths.push(meshDepthsLocal[i])
-          }
-        }
-      } else {
-        onScreen = meshShapesLocal
-        onScreenDepths = meshDepthsLocal
-      }
-      const visibleTextsLocal = viewBounds ? texts.filter((t) => isTextOnScreen(t, this.fontBook, viewBounds)) : texts
-      // An image's quad IS its local bounds, so the ordinary shape cull applies unchanged.
-      const visibleImagesLocal = viewBounds ? images.filter((i) => isShapeOnScreen(i, viewBounds)) : images
-      // Depths lifted out of the map into arrays aligned with each lane's own packed list -
-      // the draw-order merge below walks them once per object per frame, and a hash lookup
-      // in that loop is the same avoidable cost it is in MeshBatcher.updateObjects.
-      const visibleTextDepthsLocal = visibleTextsLocal.map((t) => depthsLocal.get(t)!)
-      const visibleImageDepthsLocal = visibleImagesLocal.map((i) => depthsLocal.get(i)!)
-
-      // Overlays are packed last so they occupy a contiguous tail of the index buffer, which
-      // is what lets ONE batch serve every pass: each draw is a half-open range of the same
-      // buffer, and the tail is the one drawn with depth off so editor furniture sits on top
-      // without occluding. Same one-pass bucketing as above, depths carried alongside; the
-      // overlay tail is only appended (a second, usually empty pair of arrays) when there's
-      // actually one to append.
-      const normal: Shape[] = []
-      const normalDepths: number[] = []
-      const overlays: Shape[] = []
-      const overlayDepths: number[] = []
-      for (let i = 0; i < onScreen.length; i++) {
-        const shape = onScreen[i]
-        if (shape.overlay) {
-          overlays.push(shape)
-          overlayDepths.push(onScreenDepths[i])
-        } else {
-          normal.push(shape)
-          normalDepths.push(onScreenDepths[i])
-        }
-      }
-      // Before that tail, the lane splits again: the shapes that provably paint no partial
-      // alpha (see render/opacity.ts) are moved to the FRONT of the list, so they too occupy
-      // a contiguous range and can be drawn as one call in the opaque pass. Both halves keep
-      // their rank order, which is what the translucent one needs and what lets a scene that
-      // is entirely one or the other be handed back untouched.
-      const split = partitionByOpacity(normal, normalDepths)
-      const visibleMeshShapesLocal = overlays.length > 0 ? split.shapes.concat(overlays) : split.shapes
-      const visibleMeshDepthsLocal = overlays.length > 0 ? split.depths.concat(overlayDepths) : split.depths
-      const meshTranslucentStartLocal = split.translucentStart
-      const overlayStartLocal = split.shapes.length
-
-      // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH
-      // objects belong in them changes - content added/removed, or the visible set itself
-      // changing as the camera pans/zooms or an object crosses the view boundary - not
-      // every frame just because something moved (that's updateObjects(), below, cheap and
-      // unconditional either way).
+    // rebuild() re-packs the shared GPU buffers, so it only needs to run when WHICH objects
+    // belong in them changes - content added/removed, or the visible set itself changing as the
+    // camera pans/zooms or an object crosses the view boundary - not every frame just because
+    // something moved (that's updateObjects(), below, cheap and unconditional either way).
+    //
+    // Guarded by the same condition the gather is: a reused gather is by definition the set
+    // that is already packed, so there is nothing for rebuild() to find.
+    if (!canReuseGather) {
       if (
         this.geometryDirty ||
         this.builtMeshEpoch !== meshGeometryEpoch() ||
-        !sameMembers(visibleMeshShapesLocal, this.visibleMeshShapes)
+        !sameMembers(visibleMeshShapes, this.visibleMeshShapes)
       ) {
-        this.batcher.rebuild(visibleMeshShapesLocal)
+        this.batcher.rebuild(visibleMeshShapes)
         this.geometryDirty = false
         this.builtMeshEpoch = meshGeometryEpoch()
       }
-      this.visibleMeshShapes = visibleMeshShapesLocal
-
-      // The translucent pass's order: furthest first, whatever lane that is. The mesh lane
-      // contributes only its translucent middle - its opaque head is drawn as one batch in
-      // the first pass, and its overlay tail last of all with depth off.
-      const runsLocal = buildDrawRuns({
-        mesh: { depths: visibleMeshDepthsLocal, from: meshTranslucentStartLocal, to: overlayStartLocal },
-        text: { depths: visibleTextDepthsLocal, from: 0, to: visibleTextsLocal.length },
-        image: { depths: visibleImageDepthsLocal, from: 0, to: visibleImagesLocal.length },
-      })
-
-      ordered = orderedLocal
-      depths = depthsLocal
-      meshShapes = onScreen
-      visibleTexts = visibleTextsLocal
-      visibleTextDepths = visibleTextDepthsLocal
-      visibleImages = visibleImagesLocal
-      visibleImageDepths = visibleImageDepthsLocal
-      visibleMeshShapes = visibleMeshShapesLocal
-      visibleMeshDepths = visibleMeshDepthsLocal
-      meshTranslucentStart = meshTranslucentStartLocal
-      overlayStart = overlayStartLocal
-      runs = runsLocal
-
-      this.cachedGather = {
-        ordered: orderedLocal,
-        depths: depthsLocal,
-        meshShapes: onScreen,
-        texts: visibleTextsLocal,
-        textDepths: visibleTextDepthsLocal,
-        images: visibleImagesLocal,
-        imageDepths: visibleImageDepthsLocal,
-        visibleMeshShapes: visibleMeshShapesLocal,
-        visibleMeshDepths: visibleMeshDepthsLocal,
-        meshTranslucentStart: meshTranslucentStartLocal,
-        overlayStart: overlayStartLocal,
-        runs: runsLocal,
-      }
+      this.visibleMeshShapes = visibleMeshShapes
     }
 
     this.batcher.updateObjects(visibleMeshShapes, visibleMeshDepths)
@@ -702,77 +547,16 @@ export class SceneRenderer {
   }
 }
 
-export interface SceneRendererHandle {
-  /** The scene graph root - add/remove content here, then call markGeometryDirty()/markTextGeometryDirty(). */
-  scene: Scene
-  /** The view the scene is drawn through - the one supplied, or the default. */
-  camera: Camera2D
-  /** Draw through a different camera; null goes back to the default (0,0 top-left, zoom 1). */
-  setCamera: (camera: Camera2D | null) => void
-  setZoom: (zoom: number) => void
-  getZoom: () => number
-  /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
-  setCullMargin: (margin: number) => void
-  getCullMargin: () => number
-  /** Turns viewport culling on/off entirely - see SceneRenderer's `cullingEnabled`. */
-  setCullingEnabled: (enabled: boolean) => void
-  getCullingEnabled: () => boolean
-  /** Turns the zIndex depth-sort on/off - see SceneRenderer's `zSortEnabled`. */
-  setZSortEnabled: (enabled: boolean) => void
-  getZSortEnabled: () => boolean
-  /** Turns the shadow lane on/off entirely - see SceneRenderer's `shadowsEnabled`. */
-  setShadowsEnabled: (enabled: boolean) => void
-  getShadowsEnabled: () => boolean
-  /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
-  getCullBounds: () => AABB | null
-  /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
-  pick: (screenX: number, screenY: number) => PickableNode | null
-  /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
-  localBoundsOf: (node: TransformableNode) => AABB
-  /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
-  nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
-  markGeometryDirty: () => void
-  markTextGeometryDirty: () => void
-  markImageGeometryDirty: () => void
-  /** The GPU device, for building an ImageTexture - the one resource an application has to
-   * create for itself, since only it knows which pictures the scene wants. */
-  device: GPUDevice
-  destroy: () => void
-}
-
-export interface CreateSceneRendererOptions {
-  /**
-   * Called with a human-readable message on a GPU device error (e.g. an invalid
-   * pipeline from a shader/bind-group-layout mismatch). Such errors do NOT throw - they
-   * surface asynchronously via the device - so without this they render as a silently
-   * blank canvas. Reporting them makes that failure mode visible instead.
-   */
-  onDeviceError?: (message: string) => void
-  /**
-   * Called once after the scene and camera are ready, before the first frame - build the
-   * initial scene content here (shapes, text, camera framing). `device` is passed because
-   * this runs before the handle exists, and content with images needs one to build a
-   * texture from.
-   */
-  populate?: (scene: Scene, camera: Camera2D, device: GPUDevice) => void
-  /**
-   * The camera to draw through. Omit it and the scene renders through a default one, which
-   * puts world (0, 0) at the viewport's top-left corner at one world unit per CSS pixel -
-   * a deliberate framing, not a fallback. Supply one to own the view, and keep the
-   * reference: moving it is how an application pans and zooms.
-   */
-  camera?: Camera2D
-  /** Called every frame, before the draw - e.g. to animate scene content. */
-  onFrame?: (dt: number) => void
-}
-
 /**
- * Composition root: wires the GPU context, resize observer and frame loop (system
- * components) to a SceneRenderer, loads the MSDF font atlases, and starts the render loop
- * on a white background through a 2D orthographic camera, MSAA 4x. Scene content is supplied
- * by the caller via `options.populate`. Throws if WebGPU is unavailable.
+ * Composition root for the WebGPU path: wires the GPU context, resize observer and frame loop
+ * (system components) to a SceneRenderer, loads the MSDF font atlases, and starts the render
+ * loop on a white background through a 2D orthographic camera, MSAA 4x. Scene content is
+ * supplied by the caller via `options.populate`. Throws if WebGPU is unavailable.
+ *
+ * Applications call createSceneRenderer() (renderer/createSceneRenderer.ts) instead, which
+ * comes here first and only falls back if this throws.
  */
-export async function createSceneRenderer(
+export async function createWebGpuSceneRenderer(
   canvas: HTMLCanvasElement,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
@@ -801,7 +585,11 @@ export async function createSceneRenderer(
     }
   })
 
-  options.populate?.(scene.scene, scene.camera, gpu.device)
+  // One layout for every texture a scene builds, so the image lane can bind any of them
+  // without a pipeline change (see webGpuImageFactory).
+  const images = webGpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
+
+  options.populate?.(scene.scene, scene.camera, { images })
 
   const resizer = new CanvasResizer(canvas)
 
@@ -824,6 +612,8 @@ export async function createSceneRenderer(
   frameRenderer.start()
 
   return {
+    path: 'webgpu',
+    images,
     scene: scene.scene,
     // A getter, not a captured reference: setCamera() below can replace it, and a handle
     // holding the camera from construction would keep handing back the old one.
@@ -884,7 +674,6 @@ export async function createSceneRenderer(
     markImageGeometryDirty() {
       scene.markImageGeometryDirty()
     },
-    device: gpu.device,
     destroy() {
       frameRenderer.stop()
       scene.destroy()

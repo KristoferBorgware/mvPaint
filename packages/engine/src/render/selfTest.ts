@@ -22,6 +22,11 @@ import { strokeContours, strokePolyline, type LineCap, type Point2 } from './str
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
 import { depthForRank } from '../scene/picking'
+import { SceneGather, type GatherInput } from './gather'
+import { Scene } from '../scene/Scene'
+import { Text } from '../shapes/Text'
+import { Camera2D } from '../camera/Camera2D'
+import { msdfFontProvider } from '../text/msdfProvider'
 import {
   SLOT_GRANULARITY,
   blurMarginUnits,
@@ -926,6 +931,128 @@ assert(
     middleOnly.map((r) => `${r.lane}:${r.from}-${r.to}`).join(',') === 'mesh:1-2,text:0-1,mesh:2-3',
     "the mesh lane's opaque head and overlay tail stay out, and its middle still interleaves by depth",
   )
+}
+
+
+// ---------------------------------------------------------------------------------------
+// The gather (render/gather.ts)
+//
+// It used to be the first 200 lines of webgpu/SceneRenderer.draw(). Moving it out is only
+// safe if it still answers exactly as it did, so this covers the things that were previously
+// only ever exercised by looking at the screen: which lane each node goes to, that ranks are
+// scene-wide rather than per-lane, that the mesh list comes out as [opaque | translucent |
+// overlay] with the two boundaries in the right place, that culling drops shapes and their
+// depths together, and that the fast path hands back the SAME arrays rather than equal ones.
+{
+  const provider = msdfFontProvider()
+  const camera = new Camera2D()
+  const VIEW = { viewWidth: 200, viewHeight: 100 }
+
+  function input(scene: Scene, over: Partial<GatherInput> = {}): GatherInput {
+    return {
+      scene,
+      camera,
+      fonts: provider,
+      ...VIEW,
+      cullingEnabled: false,
+      zSortEnabled: true,
+      cullMargin: 0,
+      ...over,
+    }
+  }
+
+  // --- lanes, ranks and the opaque/translucent/overlay layout -----------------------------
+  {
+    const scene = new Scene()
+    // Deliberately mixed: a solid rect (opaque), a half-transparent one (translucent), a
+    // Text (its own lane, never opaque) and an overlay handle (the tail).
+    const solid = new Rect({ width: 10, height: 10, fill: [1, 0, 0, 1] })
+    const faded = new Rect({ width: 10, height: 10, fill: [0, 1, 0, 0.4] })
+    const label = new Text({ text: 'hi' })
+    const handle = new Rect({ width: 4, height: 4, fill: [0, 0, 1, 1] })
+    handle.overlay = true
+    for (const n of [solid, faded, label, handle]) scene.root.addChild(n)
+
+    const g = new SceneGather().run(input(scene), false)
+
+    assert(g.ordered.length === 4, 'the gather ranks every shape in the scene, whatever lane it lands in')
+    assert(g.texts.length === 1 && g.texts[0] === label, 'Text buckets into the text lane')
+    assert(g.images.length === 0, 'nothing buckets into the image lane here')
+    assert(
+      g.visibleMeshShapes.length === 3 && !g.visibleMeshShapes.includes(label as unknown as Rect),
+      'every other drawable buckets into the mesh lane, and Text does not',
+    )
+
+    // Ranks are scene-wide: the Text sits at rank 2 of 4 even though it is the only member of
+    // its own lane, which is what lets the two lanes interleave under one depth test.
+    assert(near(g.textDepths[0], depthForRank(2, 4)), "a lane's depths are its members' SCENE-wide ranks")
+    assert(g.depths.get(label) === g.textDepths[0], 'the depth map and the lane-aligned array agree')
+
+    // [ opaque | translucent | overlay ]
+    assert(g.meshTranslucentStart === 1, 'the one provably-opaque shape occupies the head')
+    assert(g.overlayStart === 2, 'the overlay tail starts after the translucent middle')
+    assert(g.visibleMeshShapes[0] === solid, 'the opaque head is the solid rect')
+    assert(g.visibleMeshShapes[1] === faded, 'the translucent middle is the faded one')
+    assert(g.visibleMeshShapes[2] === handle, 'and the overlay is last, however opaque it is')
+
+    // The run list covers only the translucent middle of the mesh lane - the head is one
+    // batch in pass 1 and the tail is drawn with depth off in pass 3.
+    // Furthest first: the faded rect is at rank 1 (depth 0.6) and the text at rank 2 (0.4),
+    // so the mesh run comes first even though they are different lanes. That interleaving IS
+    // the point of the merge.
+    const spans = g.runs.map((r) => `${r.lane}:${r.from}-${r.to}`).join(',')
+    assert(spans === 'mesh:1-2,text:0-1', `the merge takes the mesh lane's middle only (got ${spans})`)
+  }
+
+  // --- culling keeps shapes and their depths in step --------------------------------------
+  {
+    const scene = new Scene()
+    const onScreen = new Rect({ x: 0, y: 0, width: 10, height: 10, fill: [1, 0, 0, 1] })
+    const offScreen = new Rect({ x: 100000, y: 0, width: 10, height: 10, fill: [1, 0, 0, 1] })
+    scene.root.addChild(onScreen)
+    scene.root.addChild(offScreen)
+
+    const g = new SceneGather().run(input(scene, { cullingEnabled: true }), false)
+    assert(g.visibleMeshShapes.length === 1 && g.visibleMeshShapes[0] === onScreen, 'the off-screen rect is culled')
+    assert(g.visibleMeshDepths.length === 1, 'its depth goes with it - the two arrays stay the same length')
+    assert(
+      near(g.visibleMeshDepths[0], depthForRank(0, 2)),
+      'and the survivor keeps the rank it had BEFORE culling, so ranks never shift as content scrolls away',
+    )
+  }
+
+  // --- the fast path ----------------------------------------------------------------------
+  {
+    const scene = new Scene()
+    scene.root.addChild(new Rect({ width: 10, height: 10, fill: [1, 0, 0, 1] }))
+    const gather = new SceneGather()
+    const opts = input(scene, { cullingEnabled: false, zSortEnabled: false })
+
+    assert(!gather.hasCache(), 'a fresh gather has nothing to reuse')
+    const first = gather.run(opts, false)
+    assert(gather.hasCache(), 'and has something to reuse once it has run')
+
+    const reused = gather.run(opts, true)
+    assert(reused === first, 'the fast path hands back the SAME object, so nothing is rebuilt')
+    assert(reused.visibleMeshShapes === first.visibleMeshShapes, 'including the arrays inside it')
+
+    const recomputed = gather.run(opts, false)
+    assert(recomputed !== first, 'and not reusing really does re-gather')
+
+    gather.invalidate()
+    assert(!gather.hasCache(), 'invalidate() drops it - which is what toggling culling or the z-sort does')
+  }
+
+  // --- culling off means no cull rectangle to draw -----------------------------------------
+  {
+    const scene = new Scene()
+    scene.root.addChild(new Rect({ width: 10, height: 10 }))
+    const gather = new SceneGather()
+    gather.run(input(scene, { cullingEnabled: true }), false)
+    assert(gather.getCullBounds() !== null, 'culling on leaves a rectangle behind')
+    gather.run(input(scene, { cullingEnabled: false }), false)
+    assert(gather.getCullBounds() === null, 'culling off clears it, so the debug overlay disappears with it')
+  }
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

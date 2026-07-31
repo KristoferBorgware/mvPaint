@@ -16,7 +16,8 @@
 // which texture it shows, or how it is cropped or tiled, does.
 
 import type { Image } from '../shapes/Image'
-import type { ImageTexture, ImageSampling } from '../image/ImageTexture'
+import type { ImageSampling } from '../image/ImageTexture'
+import { WebGpuImageTexture } from '../image/WebGpuImageTexture'
 import {
   IMAGE_OBJECT_DEPTH_OFFSET,
   IMAGE_OBJECT_STRIDE,
@@ -27,10 +28,28 @@ import {
 
 /** A stretch of indices sharing one texture + sampler bind group. */
 interface DrawRange {
-  texture: ImageTexture
+  texture: WebGpuImageTexture
   sampling: ImageSampling
   firstIndex: number
   indexCount: number
+}
+
+/**
+ * An Image node holds the backend-neutral ImageTexture interface, because the scene graph
+ * knows no GPU API (see image/ImageTexture.ts). This lane does know, and only ever sees
+ * textures its own renderer created - so the narrowing always succeeds. It is checked rather
+ * than asserted because the one way to get here otherwise is to build a texture on one render
+ * path and draw it on the other, and "your image is blank" is a far worse way to find that
+ * out than a sentence saying so.
+ */
+function webGpuTextureOf(image: Image): WebGpuImageTexture {
+  const texture = image.texture
+  if (!(texture instanceof WebGpuImageTexture)) {
+    throw new Error(
+      `ImageBatcher: "${image.name || image.nodeName}" carries an image texture built for a different render path`,
+    )
+  }
+  return texture
 }
 
 function sameSampling(a: ImageSampling, b: ImageSampling): boolean {
@@ -101,11 +120,12 @@ export class ImageBatcher {
       vertexCount += 4
 
       const sampling: ImageSampling = { wrapX: image.wrapX, wrapY: image.wrapY, filter: image.filter }
+      const texture = webGpuTextureOf(image)
       const last = this.ranges[this.ranges.length - 1]
-      if (last && last.texture === image.texture && sameSampling(last.sampling, sampling)) {
+      if (last && last.texture === texture && sameSampling(last.sampling, sampling)) {
         last.indexCount += 6
       } else {
-        this.ranges.push({ texture: image.texture, sampling, firstIndex: indices.length - 6, indexCount: 6 })
+        this.ranges.push({ texture, sampling, firstIndex: indices.length - 6, indexCount: 6 })
       }
       this.nodeIndexEnds.push(indices.length)
     }

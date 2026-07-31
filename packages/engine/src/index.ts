@@ -43,6 +43,7 @@ export * from './svg/flattenPath'
 export * from './svg/loadSvg'
 
 export * from './image/ImageTexture'
+export * from './image/WebGpuImageTexture'
 export * from './image/imageUv'
 export * from './image/svgSize'
 
@@ -66,4 +67,7 @@ export * from './shapes/Transformer'
 export * from './shapes/transformerMath'
 export * from './input/MarqueeTool'
 
-export * from './webgpu/SceneRenderer'
+export * from './renderer/SceneRendererHandle'
+export { createSceneRenderer } from './renderer/createSceneRenderer'
+// The WebGPU path's own entry point, for an application that wants it and no fallback.
+export { SceneRenderer, createWebGpuSceneRenderer } from './webgpu/SceneRenderer'

@@ -2,7 +2,7 @@
 // metadata the picker lists it with, so adding one means adding a file and an entry in
 // index.ts - nothing in the canvas or the app shell needs to know about it.
 
-import type { Scene } from '@mvpaint/engine'
+import type { Scene, SceneResources } from '@mvpaint/engine'
 
 /** What a scene hands back to the frame loop after building itself. */
 export interface SceneContent {
@@ -27,9 +27,10 @@ export interface ExampleScene {
    * would be dead weight for every other scene, so they're fetched on first open instead,
    * and rasterizing an SVG is asynchronous whether or not anything is fetched. The device is
    * there for assets that live on the GPU; the canvas keeps the previous scene on screen
-   * while this runs.
+   * while this runs. It is the renderer's own factory, so the same scene builds on whichever
+   * render path is drawing.
    */
-  prepare?: (device: GPUDevice) => Promise<void>
+  prepare?: (resources: SceneResources) => Promise<void>
   /**
    * Skip viewport culling entirely for this scene (every shape is tested and drawn every
    * frame, regardless of the camera's current view) - for a scene specifically stress-testing
@@ -55,8 +56,9 @@ export interface ExampleScene {
   disableShadows?: boolean
   /**
    * Populates `scene.root`. The root is already emptied of the previous scene's content.
-   * `device` is there for the one thing a scene has to create for itself - an ImageTexture,
-   * since only the scene knows which pictures it wants; scenes without images ignore it.
+   * `resources` is there for the one thing a scene has to create for itself - an image
+   * texture, since only the scene knows which pictures it wants; scenes without images
+   * ignore it.
    */
-  build: (scene: Scene, device: GPUDevice) => SceneContent
+  build: (scene: Scene, resources: SceneResources) => SceneContent
 }

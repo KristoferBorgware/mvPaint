@@ -5,16 +5,16 @@
 // and interleaves with ordinary shapes and text by zIndex rather than by lane.
 //
 // The textures are drawn here with a 2D canvas and uploaded as raw pixels, so the scene
-// carries no asset and doubles as the worked example of ImageTexture.fromPixels(). It goes
+// carries no asset and doubles as the worked example of images.fromPixels(). It goes
 // through getImageData() rather than handing the canvas straight to fromSource() because
 // Chromium will not copy from a canvas that was never in the document. A real application
-// would more often reach for ImageTexture.load(url).
+// would more often reach for images.load(url).
 //
-// The last row comes from an inline SVG through ImageTexture.fromSvg() instead, at two
+// The last row comes from an inline SVG through images.fromSvg() instead, at two
 // different pixel sizes, since choosing that size is the one decision rasterizing a document
 // forces on you.
 
-import { Circle, Image, ImageTexture, Rect, Text, type Scene } from '@mvpaint/engine'
+import { Circle, Image, Rect, Text, type ImageTexture, type Scene, type SceneResources } from '@mvpaint/engine'
 import { DARK } from './palette'
 import type { SceneContent } from './types'
 
@@ -82,11 +82,11 @@ const BADGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 // screen, different numbers of pixels behind it.
 let svgTextures: { coarse: ImageTexture; fine: ImageTexture } | null = null
 
-export async function prepareImageScene(device: GPUDevice): Promise<void> {
+export async function prepareImageScene({ images }: SceneResources): Promise<void> {
   if (svgTextures) return
   const [coarse, fine] = await Promise.all([
-    ImageTexture.fromSvg(device, BADGE_SVG, { width: 24, height: 24, label: 'badge-24' }),
-    ImageTexture.fromSvg(device, BADGE_SVG, { width: 128, height: 128, scale: 2, label: 'badge-256' }),
+    images.fromSvg(BADGE_SVG, { width: 24, height: 24, label: 'badge-24' }),
+    images.fromSvg(BADGE_SVG, { width: 128, height: 128, scale: 2, label: 'badge-256' }),
   ])
   svgTextures = { coarse, fine }
 }
@@ -124,10 +124,10 @@ function label(x: number, y: number, text: string): Text {
   return new Text({ x, y, text, style: { fontStyle: 'bold', fontSize: 15, color: DARK } })
 }
 
-export function buildImageScene(scene: Scene, device: GPUDevice): SceneContent {
+export function buildImageScene(scene: Scene, { images }: SceneResources): SceneContent {
   const root = scene.root
   const toTexture = (data: ImageData, label: string) =>
-    ImageTexture.fromPixels(device, data.data, data.width, data.height, undefined, label)
+    images.fromPixels(data.data, data.width, data.height, label)
   const checker = toTexture(checkerPixels(256, 8), 'checker')
   const strip = toTexture(spriteStripPixels(64, 4), 'sprites')
   const pixels = toTexture(pixelArtPixels(), 'pixel-art')

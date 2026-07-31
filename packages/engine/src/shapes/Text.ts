@@ -11,8 +11,7 @@
 // uses is a choice of constructor; see text/VectorFont.ts for what actually differs.
 
 import { TextBlock, type TextBlockOptions } from './TextBlock'
-import type { FontBook } from '../text/FontAtlas'
-import { layoutText, type ShapedText } from '../text/layout'
+import { layoutText, type FontProvider, type ShapedText } from '../text/layout'
 
 export type TextOptions = TextBlockOptions
 
@@ -21,10 +20,17 @@ export class Text extends TextBlock {
 
   private shapedCache: ShapedText | null = null
 
-  /** Shape the runs into quads + materials, cached until the content or layout changes. */
-  shaped(fontBook: FontBook): ShapedText {
+  /**
+   * Shape the runs into quads + materials, cached until the content or layout changes.
+   *
+   * The parameter is a FontProvider rather than the GPU-owning FontBook because shaping
+   * reads metrics and an atlas INDEX and nothing else - no texture, no device. Keeping it
+   * at that width is what lets text be measured, culled and hit-tested with no renderer at
+   * all (see text/msdfProvider.ts, which is how the self-tests shape under node).
+   */
+  shaped(fonts: FontProvider): ShapedText {
     if (!this.shapedCache) {
-      this.shapedCache = layoutText(this.runsData, this.layoutOptions(), fontBook)
+      this.shapedCache = layoutText(this.runsData, this.layoutOptions(), fonts)
     }
     return this.shapedCache
   }

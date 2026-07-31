@@ -211,7 +211,11 @@ scope.
 
 ## The gather
 
-The first thing `SceneRenderer.draw()` does each frame, before any drawing.
+The first thing a frame does, before any drawing — and the one part of a frame that knows
+nothing about the GPU. It lives in `render/gather.ts`, names no graphics type at all, and is
+shared by both render paths (see [Two render paths](#two-render-paths)): which shapes are
+visible, what depth each takes and in what order they interleave are not rendering decisions,
+and the answer is the same whichever API ends up submitting it.
 
 **Z-order.** `collectZOrder()` walks the tree and stable-sorts every shape by `zIndex`. Stable,
 so ties keep scene-graph order.
@@ -689,6 +693,36 @@ only for slot 37.
 
 ---
 
+## Two render paths
+
+The engine is WebGPU. `webgl/` is a **second, separate implementation** for machines that do
+not have WebGPU yet, and it is meant to be deleted again once they are rare enough.
+
+It is separate in the strong sense. There is no device abstraction, no backend interface and
+no lane abstraction anywhere in this engine, because building one would mean shaping the
+permanent path around the temporary one. The WebGPU files call `device.queue.writeBuffer` and
+`pass.drawIndexed` directly, exactly as they always have, and nothing in them knows a second
+path exists.
+
+What the two share is everything that was never about graphics in the first place: the whole
+scene graph, the gather, the byte layouts in `render/*Format.ts`, the draw-order merge, the
+opacity split, the stroker, the shadow maths, the shaper. What they do not share is anything
+that touches an API.
+
+The seam between them is one function with one branch —
+`renderer/createSceneRenderer.ts` — and one interface, `SceneRendererHandle`, which is just
+"everything an application does with a renderer" and mentions no API. The fallback is reached
+through a dynamic `import()`, so a browser with WebGPU never downloads it. Removing it later
+is deleting `src/webgl/` and a `catch`.
+
+Where the fallback differs, visibly: **no MSAA**, so mesh edges are aliased (text is
+unaffected — MSDF antialiases in the fragment shader), and it targets tens of thousands of
+objects rather than hundreds of thousands. WebGL2 has no storage buffers, so the per-object
+records that carry every transform and material become a float data texture read with
+`texelFetch` — the same architecture, reached a slower way.
+
+---
+
 ## Where to look
 
 | Concern | Files |
@@ -702,7 +736,10 @@ only for slot 37.
 | Packing and uploads | `render/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |
 | Shaders | `render/mesh.wgsl.ts`, `text.wgsl.ts`, `image.wgsl.ts`, `shadowQuad.wgsl.ts`, `shadowBake.wgsl.ts` |
 | Pipelines, bind layouts | `render/*Pipeline.ts`, `render/layouts.ts`, `render/depthFormat.ts` |
+| The gather (shared, GPU-free) | `render/gather.ts` |
 | Orchestration | `webgpu/SceneRenderer.ts`, `systems/FrameRenderer.ts`, `systems/GpuContext.ts` |
+| Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
+| The WebGL2 fallback (temporary) | `webgl/` |
 | Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
 | Draw order and the two passes | `render/opacity.ts`, `render/drawOrder.ts` |
 | Invalidation | `shapes/contentEpoch.ts` |

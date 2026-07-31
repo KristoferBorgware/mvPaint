@@ -17,6 +17,7 @@ import {
   type Node,
   type Scene,
   type SceneRendererHandle,
+  type SceneResources,
 } from '@mvpaint/engine'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
 import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
@@ -91,8 +92,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // The live scene graph + what the current scene handed back, so a switch can swap content
   // without touching anything the renderer owns.
   const sceneGraphRef = useRef<Scene | null>(null)
-  // Captured in populate(), which runs before the handle exists - see applyScene.
-  const deviceRef = useRef<GPUDevice | null>(null)
+  // Captured in populate(), which runs before the handle exists - see applyScene. The
+  // renderer's own image factory, so a scene builds the same textures on either render path.
+  const resourcesRef = useRef<SceneResources | null>(null)
   const contentRef = useRef<SceneContent>({})
   const sceneDefRef = useRef(scene)
   // The application owns the camera - the engine renders through whatever it is given, and
@@ -129,7 +131,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       const sceneGraph = sceneGraphRef.current
       const handle = handleRef.current
       const transformer = transformerRef.current
-      if (!sceneGraph || !deviceRef.current) return
+      if (!sceneGraph || !resourcesRef.current) return
 
       if (replace && handle && transformer) {
         // Drop the selection first: the transformer holds references to nodes that are about
@@ -142,9 +144,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         }
       }
 
-      // The device is only needed by scenes that build their own textures (images); the
-      // renderer must exist for there to be one, which the `handle` guard above ensures.
-      contentRef.current = def.build(sceneGraph, deviceRef.current)
+      // The resources are only needed by scenes that build their own textures (images); the
+      // renderer must exist for there to be any, which the guard above ensures.
+      contentRef.current = def.build(sceneGraph, resourcesRef.current)
 
       // Re-frame: each scene lays itself out around the origin, so a pan left over from the
       // previous one would otherwise start the new scene half off-screen.
@@ -167,10 +169,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       commit()
       return
     }
-    const device = deviceRef.current
-    if (!device) return
+    const resources = resourcesRef.current
+    if (!resources) return
     def
-      .prepare(device)
+      .prepare(resources)
       .then(() => {
         if (sceneDefRef.current === def) commit()
       })
@@ -219,9 +221,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     createSceneRenderer(canvas, {
       camera: cameraRef.current,
       onDeviceError: (message) => onError?.(message),
-      populate: (sceneGraph, _camera, device) => {
+      populate: (sceneGraph, _camera, resources) => {
         sceneGraphRef.current = sceneGraph
-        deviceRef.current = device
+        resourcesRef.current = resources
         // The transformer and both debug/gesture overlays are added ONCE and deliberately
         // outlive every scene switch: they are editor furniture, not content, so loadScene
         // below skips them when clearing (see the `keep` set above).

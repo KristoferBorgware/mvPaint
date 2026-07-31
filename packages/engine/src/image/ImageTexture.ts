@@ -1,27 +1,32 @@
-// ImageTexture - one decoded image on the GPU, plus the bind groups the image lane binds it
-// through.
+// What an image IS to a scene, with no opinion about which API is holding it.
 //
-// Wrapping (clamp / repeat / mirror) and filtering are SAMPLER state, and a sampler is part
-// of a bind group, so a texture drawn clamped and the same texture drawn tiled are two bind
-// groups over one texture. They are built on demand and cached here, keyed by the
-// combination, because an application typically uses one or two across a whole scene - which
-// keeps the batcher's draw ranges merged (see ImageBatcher).
+// An Image node carries a texture (shapes/Image.ts), so the type of that texture reaches the
+// scene graph - and the scene graph owns no GPU resources and knows no GPU API. So the type
+// here is an interface: a size, and the promise that it can be released. Everything a render
+// path actually needs to BIND is its own business, declared on its own implementation
+// (image/WebGpuImageTexture.ts, and the WebGL fallback's own), never here.
+//
+// Wrapping and filtering live here rather than on an implementation because they are a
+// property of the picture as the application describes it, not of the machinery: "this one
+// tiles, that one is pixel art". Each render path maps them onto its own sampler state.
 //
 // Doing the wrap in the shader instead would make it a per-object property and never need a
-// second bind group, but fract()-style wrapping and linear filtering disagree at the seam:
-// the filter blends across the discontinuity and leaves a visible line at every tile edge.
+// second sampler, but fract()-style wrapping and linear filtering disagree at the seam: the
+// filter blends across the discontinuity and leaves a visible line at every tile edge.
 // Hardware address modes do not have that problem, so the sampler is the right place for it.
+//
+// The SVG rasterizer sits here too. It produces PIXELS - <img> decode, draw, getImageData -
+// and touches no GPU API at all, so both render paths hand its output to their own upload.
 
-import { createAtlasBindGroupLayout } from '../render/layouts'
-import { resizeSvgDocument, resolveSvgPixelSize, type SvgSizeOptions } from './svgSize'
+import type { SvgSizeOptions } from './svgSize'
 
-/** How texture coordinates outside [0,1] resolve. Maps to GPUAddressMode. */
+/** How texture coordinates outside [0,1] resolve. */
 export type ImageWrap = 'clamp' | 'repeat' | 'mirror'
 
 /** How a texel is sampled: smooth for photographs, sharp for pixel art. */
 export type ImageFilter = 'linear' | 'nearest'
 
-/** The sampler state one bind group covers. */
+/** The sampler state one cached binding covers. */
 export interface ImageSampling {
   wrapX: ImageWrap
   wrapY: ImageWrap
@@ -30,23 +35,74 @@ export interface ImageSampling {
 
 export const DEFAULT_SAMPLING: ImageSampling = { wrapX: 'clamp', wrapY: 'clamp', filter: 'linear' }
 
-const ADDRESS_MODE: Record<ImageWrap, GPUAddressMode> = {
-  clamp: 'clamp-to-edge',
-  repeat: 'repeat',
-  mirror: 'mirror-repeat',
+/** Cache key for one sampler combination - shared, so both paths key their caches alike. */
+export function samplingKey(s: ImageSampling): string {
+  return `${s.wrapX}|${s.wrapY}|${s.filter}`
 }
 
-function samplingKey(s: ImageSampling): string {
-  return `${s.wrapX}|${s.wrapY}|${s.filter}`
+/**
+ * One decoded image on the GPU.
+ *
+ * Deliberately small: a size, which an Image node needs to resolve its default width/height
+ * and its UVs (see image/imageUv.ts), and a release. A renderer that is handed one of these
+ * knows which implementation it created and narrows to it; nothing in `shapes/` ever does.
+ */
+export interface ImageTexture {
+  readonly width: number
+  readonly height: number
+  destroy(): void
+}
+
+/**
+ * How a scene asks for an image texture without knowing which path will draw it.
+ *
+ * A renderer hands one of these out (`handle.images`, and `populate`'s `resources`) because
+ * building a texture is the one piece of GPU work an application cannot avoid doing itself -
+ * only it knows which pictures the scene wants. Four ways in, matching the four things an
+ * application actually has: a URL, an already-decoded bitmap, raw pixels it computed, or an
+ * SVG document it wants rasterized at a size of its choosing.
+ */
+export interface ImageTextureFactory {
+  /**
+   * Fetches and decodes an image, then uploads it. An SVG is rasterized at its own intrinsic
+   * size - a document has no one right pixel size, so call `fromSvg` when the size or scale
+   * should be yours to choose.
+   */
+  load(url: string): Promise<ImageTexture>
+  /** Uploads an already-decoded bitmap or canvas. The source is read once and not retained. */
+  fromSource(source: ImageBitmap | HTMLCanvasElement | OffscreenCanvas, label?: string): ImageTexture
+  /**
+   * Uploads raw RGBA8 pixels, row-major from the top-left, 4 bytes per pixel, straight
+   * (non-premultiplied) alpha - which is what getImageData already holds, and what the image
+   * lane's blend expects.
+   */
+  fromPixels(pixels: Uint8Array | Uint8ClampedArray, width: number, height: number, label?: string): ImageTexture
+  /**
+   * Rasterizes an SVG document at a chosen size and uploads the result. What this produces is
+   * pixels, fixed at that resolution - for something that must stay sharp at any zoom, load
+   * the document as vectors instead (loadSvgDocument) and let it be geometry.
+   */
+  fromSvg(svgText: string, options?: SvgRasterOptions): Promise<ImageTexture>
 }
 
 /** What an SVG rasterization may be told, beyond its size. */
 export interface SvgRasterOptions extends SvgSizeOptions {
-  layout?: GPUBindGroupLayout
   label?: string
 }
 
-const SVG_TYPE = 'image/svg+xml'
+export const SVG_TYPE = 'image/svg+xml'
+
+/** True when a response or url is an SVG document rather than a raster image. */
+export function isSvgSource(url: string, contentType: string): boolean {
+  return contentType.includes(SVG_TYPE) || /\.svgz?(?:[?#]|$)/i.test(url)
+}
+
+/**
+ * The pixel size an SVG document will be rasterized at, and the document resized to match.
+ * Split out so each render path can check the size against its own device limit before
+ * spending anything on the raster.
+ */
+export { resolveSvgPixelSize, resizeSvgDocument } from './svgSize'
 
 /**
  * Draws an SVG document with the browser's decoder and returns its pixels, RGBA8.
@@ -57,14 +113,23 @@ const SVG_TYPE = 'image/svg+xml'
  * blank, with no error anywhere.
  *
  * It goes through a canvas and comes back as pixels rather than being handed to the GPU as
- * an external image, so the upload is writeTexture, which every implementation supports.
- * That costs one copy of the image through system memory, once, at load.
+ * an external image, so the upload is a plain raw-pixel write, which every implementation
+ * supports. That costs one copy of the image through system memory, once, at load.
  *
  * The width and height are passed to drawImage even though the document has already been
  * resized to match: whether an <img> rasterizes an SVG at its intrinsic size or at the size
  * it is drawn varies, and giving both the same number means the answer does not matter.
+ *
+ * The browser rasterizes an <img>-loaded SVG in its restricted mode: no scripts, no
+ * animation, and no external references - webfonts, external stylesheets and linked images
+ * are not fetched, so text falls back to whatever font is already available. Everything the
+ * document needs has to be inline.
  */
-async function rasterizeSvgPixels(svgText: string, width: number, height: number): Promise<Uint8ClampedArray> {
+export async function rasterizeSvgPixels(
+  svgText: string,
+  width: number,
+  height: number,
+): Promise<Uint8ClampedArray> {
   const url = URL.createObjectURL(new Blob([svgText], { type: `${SVG_TYPE};charset=utf-8` }))
   try {
     const img = document.createElement('img')
@@ -87,186 +152,11 @@ async function rasterizeSvgPixels(svgText: string, width: number, height: number
   }
 }
 
-export class ImageTexture {
-  readonly width: number
-  readonly height: number
-
-  private readonly device: GPUDevice
-  private readonly layout: GPUBindGroupLayout
-  private readonly texture: GPUTexture
-  private readonly bindGroups = new Map<string, GPUBindGroup>()
-
-  private constructor(device: GPUDevice, layout: GPUBindGroupLayout, texture: GPUTexture, width: number, height: number) {
-    this.device = device
-    this.layout = layout
-    this.texture = texture
-    this.width = width
-    this.height = height
-  }
-
-  /**
-   * Fetches and decodes an image, then uploads it.
-   *
-   * An SVG is rasterized at its own intrinsic size - createImageBitmap cannot take an SVG
-   * blob directly, and a document has no one right pixel size anyway. Call fromSvg() when
-   * the size or scale should be yours to choose.
-   */
-  static async load(device: GPUDevice, url: string, layout = createAtlasBindGroupLayout(device)): Promise<ImageTexture> {
-    const response = await fetch(url)
-    if (!response.ok) throw new Error(`ImageTexture.load: ${url} responded ${response.status}`)
-
-    const contentType = response.headers.get('content-type') ?? ''
-    if (contentType.includes(SVG_TYPE) || /\.svgz?(?:[?#]|$)/i.test(url)) {
-      return ImageTexture.fromSvg(device, await response.text(), { layout, label: url })
-    }
-
-    const bitmap = await createImageBitmap(await response.blob())
-    try {
-      return ImageTexture.fromSource(device, bitmap, layout, url)
-    } finally {
-      bitmap.close()
-    }
-  }
-
-  /**
-   * Uploads anything copyExternalImageToTexture accepts, letting the driver move the image
-   * without it passing through system memory. The source is read once here and not retained.
-   *
-   * Support for that copy is not universal - a software adapter may reject every source it
-   * is given, including ones the specification allows. fromPixels() uploads through
-   * writeTexture instead and has no such gap, at the cost of a copy; fromSvg() uses it for
-   * that reason.
-   */
-  static fromSource(
-    device: GPUDevice,
-    source: ImageBitmap | HTMLCanvasElement | OffscreenCanvas,
-    layout = createAtlasBindGroupLayout(device),
-    label = 'image',
-  ): ImageTexture {
-    const width = source.width
-    const height = source.height
-    const texture = device.createTexture({
-      label: `image:${label}`,
-      size: [width, height],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    })
-    device.queue.copyExternalImageToTexture({ source }, { texture }, [width, height])
-    return new ImageTexture(device, layout, texture, width, height)
-  }
-
-  /**
-   * Uploads raw RGBA8 pixels, row-major from the top-left, 4 bytes per pixel. Unlike
-   * fromSource this asks nothing of the browser's image pipeline, so it works for pixels
-   * computed rather than decoded - a procedural texture, a decoded frame, a canvas read back
-   * through getImageData().
-   *
-   * Rows are padded to the 256-byte multiple writeTexture requires for a multi-row copy,
-   * which raw pixel data almost never satisfies on its own: any width that is not a multiple
-   * of 64 pixels needs it.
-   *
-   * Pixels are taken as straight (non-premultiplied) alpha, which is what getImageData and
-   * ImageData already hold, and what the image lane's blend expects.
-   */
-  static fromPixels(
-    device: GPUDevice,
-    pixels: Uint8Array | Uint8ClampedArray,
-    width: number,
-    height: number,
-    layout = createAtlasBindGroupLayout(device),
-    label = 'pixels',
-  ): ImageTexture {
-    if (width <= 0 || height <= 0) throw new Error(`ImageTexture.fromPixels: ${width}x${height} has no area`)
-    const needed = width * height * 4
-    if (pixels.length < needed) {
-      throw new Error(`ImageTexture.fromPixels: ${pixels.length} bytes for a ${width}x${height} RGBA image, need ${needed}`)
-    }
-
-    const texture = device.createTexture({
-      label: `image:${label}`,
-      size: [width, height],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    })
-
-    const tightRow = width * 4
-    const paddedRow = Math.ceil(tightRow / 256) * 256
-    // Copied into a buffer this owns either way: a padded upload needs a new one, and the
-    // unpadded case still needs the bytes in a plain ArrayBuffer for writeTexture's types.
-    const data = new Uint8Array(paddedRow * height)
-    for (let y = 0; y < height; y++) {
-      data.set(pixels.subarray(y * tightRow, (y + 1) * tightRow), y * paddedRow)
-    }
-    device.queue.writeTexture({ texture }, data, { bytesPerRow: paddedRow, rowsPerImage: height }, [width, height])
-
-    return new ImageTexture(device, layout, texture, width, height)
-  }
-
-  /**
-   * Rasterizes an SVG document and uploads the result.
-   *
-   * The size is settled before anything is drawn: the requested width/height, or the
-   * document's own, times `scale`. That size is written into the markup so the browser
-   * rasterizes at it directly, rather than drawing small and being stretched afterwards.
-   *
-   * What this produces is pixels, so it is fixed at that resolution - zoom past `scale` and
-   * it softens like any other image. Rasterize once for artwork that is drawn at a settled
-   * size or repeated many times; for something that must stay sharp at any zoom, load the
-   * document as vectors instead (loadSvgDocument) and let it be geometry.
-   *
-   * The browser rasterizes an <img>-loaded SVG in its restricted mode: no scripts, no
-   * animation, and no external references - webfonts, external stylesheets and linked images
-   * are not fetched, so text falls back to whatever font is already available. Everything
-   * the document needs has to be inline.
-   */
-  static async fromSvg(device: GPUDevice, svgText: string, options: SvgRasterOptions = {}): Promise<ImageTexture> {
-    const { width, height } = resolveSvgPixelSize(svgText, options)
-
-    const limit = device.limits?.maxTextureDimension2D
-    if (limit !== undefined && (width > limit || height > limit)) {
-      throw new Error(
-        `svg raster: ${width}x${height} exceeds this device's maximum texture size of ${limit} - lower scale or the requested size`,
-      )
-    }
-
-    const pixels = await rasterizeSvgPixels(resizeSvgDocument(svgText, width, height), width, height)
-    return ImageTexture.fromPixels(
-      device,
-      pixels,
-      width,
-      height,
-      options.layout ?? createAtlasBindGroupLayout(device),
-      options.label ?? 'svg',
+/** Shared guard: an SVG whose chosen size exceeds what the device can hold. */
+export function assertSvgFits(width: number, height: number, limit: number | undefined): void {
+  if (limit !== undefined && (width > limit || height > limit)) {
+    throw new Error(
+      `svg raster: ${width}x${height} exceeds this device's maximum texture size of ${limit} - lower scale or the requested size`,
     )
-  }
-
-  /** The bind group for one sampler combination, built once and reused. */
-  bindGroupFor(sampling: ImageSampling): GPUBindGroup {
-    const key = samplingKey(sampling)
-    const existing = this.bindGroups.get(key)
-    if (existing) return existing
-
-    const sampler = this.device.createSampler({
-      label: `image-sampler:${key}`,
-      magFilter: sampling.filter,
-      minFilter: sampling.filter,
-      addressModeU: ADDRESS_MODE[sampling.wrapX],
-      addressModeV: ADDRESS_MODE[sampling.wrapY],
-    })
-    const bindGroup = this.device.createBindGroup({
-      label: `image:${key}`,
-      layout: this.layout,
-      entries: [
-        { binding: 0, resource: this.texture.createView() },
-        { binding: 1, resource: sampler },
-      ],
-    })
-    this.bindGroups.set(key, bindGroup)
-    return bindGroup
-  }
-
-  destroy(): void {
-    this.bindGroups.clear()
-    this.texture.destroy()
   }
 }

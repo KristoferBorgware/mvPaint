@@ -20,7 +20,7 @@
 // The bottom row is shadows, which are on the receiving end of the same question: a shadow
 // never writes depth either, but it is still tested against what the opaque pass wrote.
 
-import { Circle, Image, ImageTexture, Rect, Text, type Scene } from '@mvpaint/engine'
+import { Circle, Image, Rect, Text, type Scene, type SceneResources } from '@mvpaint/engine'
 import { NAVY, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -79,26 +79,13 @@ function holedCheckerPixels(size: number, squares: number): ImageData {
 const CELL_W = 150
 const CELL_H = 100
 
-export function buildTransparencyScene(scene: Scene, device?: GPUDevice): SceneContent {
+export function buildTransparencyScene(scene: Scene, resources?: SceneResources): SceneContent {
   const root = scene.root
-  if (!device) return {}
+  if (!resources) return {}
+  const { images } = resources
 
-  const checker = ImageTexture.fromPixels(
-    device,
-    checkerPixels(256, 8).data,
-    256,
-    256,
-    undefined,
-    'transparency-checker',
-  )
-  const holed = ImageTexture.fromPixels(
-    device,
-    holedCheckerPixels(256, 8).data,
-    256,
-    256,
-    undefined,
-    'transparency-holes',
-  )
+  const checker = images.fromPixels(checkerPixels(256, 8).data, 256, 256, 'transparency-checker')
+  const holed = images.fromPixels(holedCheckerPixels(256, 8).data, 256, 256, 'transparency-holes')
 
   // --- row 1: within one lane, which is the control ------------------------------------
   //

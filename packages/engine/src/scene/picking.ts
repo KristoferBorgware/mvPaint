@@ -22,7 +22,7 @@ import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
 import { Text } from '../shapes/Text'
-import type { FontBook } from '../text/FontAtlas'
+import type { FontProvider } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
@@ -76,8 +76,8 @@ export function textLocalBounds(shaped: { quads: readonly QuadBounds[] }): AABB 
 }
 
 /** True if the world point falls inside the text's shaped bounding box. */
-export function hitTestText(text: Text, fontBook: FontBook, worldX: number, worldY: number): boolean {
-  const bounds = textLocalBounds(text.shaped(fontBook))
+export function hitTestText(text: Text, fonts: FontProvider, worldX: number, worldY: number): boolean {
+  const bounds = textLocalBounds(text.shaped(fonts))
   if (!bounds.valid()) return false
   return bounds.contains(worldToLocal(text, worldX, worldY))
 }
@@ -134,16 +134,16 @@ export function depthForRank(rank: number, count: number): number {
  * The topmost pickable node under a world point, or null. Walks the SAME zIndex-sorted
  * order the renderer derives depth from (see collectZOrder), front-to-back (highest
  * zIndex/rank first), so picking always matches what's visually on top. Invisible and
- * non-pickable nodes (see `pickable`) are skipped. `fontBook` may be omitted when the
+ * non-pickable nodes (see `pickable`) are skipped. `fonts` may be omitted when the
  * scene has no Text nodes worth testing (e.g. before the atlases have loaded) - text
  * candidates are then skipped rather than matched.
  */
-export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?: FontBook): PickableNode | null {
+export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: FontProvider): PickableNode | null {
   const ordered = collectSortedShapes(scene, (shape) => shape.visible && shape.pickable)
   for (let i = ordered.length - 1; i >= 0; i--) {
     const node = ordered[i]
     if (node instanceof Text) {
-      if (fontBook && hitTestText(node, fontBook, worldX, worldY)) return node
+      if (fonts && hitTestText(node, fonts, worldX, worldY)) return node
     } else if (hitTestShape(node, worldX, worldY)) {
       return node
     }
@@ -157,15 +157,15 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fontBook?
  * this same function so text inside a group is bounded by its glyphs like text anywhere
  * else.
  */
-export function localBoundsOf(node: TransformableNode, fontBook: FontBook): AABB {
-  if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fontBook))
-  return node instanceof Text ? textLocalBounds(node.shaped(fontBook)) : shapeLocalBounds(node)
+export function localBoundsOf(node: TransformableNode, fonts: FontProvider): AABB {
+  if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fonts))
+  return node instanceof Text ? textLocalBounds(node.shaped(fonts)) : shapeLocalBounds(node)
 }
 
 // The resolver a group measures its contents with. It never sees a nested Group - the
 // group walks into those itself, composing their matrices as it goes - so this only has to
 // answer for leaves, and return null for anything that is not one.
-function nodeLocalBounds(node: Node, fontBook: FontBook): AABB | null {
-  if (node instanceof Text) return textLocalBounds(node.shaped(fontBook))
+function nodeLocalBounds(node: Node, fonts: FontProvider): AABB | null {
+  if (node instanceof Text) return textLocalBounds(node.shaped(fonts))
   return node instanceof Shape ? shapeLocalBounds(node) : null
 }

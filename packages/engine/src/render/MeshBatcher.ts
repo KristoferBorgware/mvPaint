@@ -44,8 +44,13 @@ const STOP_FIELDS = 5
  * writes) instead of redoing it every frame regardless. `model` is compared by reference,
  * not value: Matrix4x4 instances are never mutated after being returned (see Node.ts), so
  * an unchanged reference already proves an unchanged transform.
+ *
+ * Exported because it is pure CPU - it names no GPU type and reads only a material - and the
+ * WebGL fallback's mesh lane has to answer exactly the same question before deciding what to
+ * re-upload. Shared rather than copied: this is the comparison the whole per-frame cost model
+ * rests on, and two of it would be two to keep right.
  */
-class ObjectCache {
+export class ObjectCache {
   model: Float32Array | null = null
   depth = NaN
   fillType = -1
