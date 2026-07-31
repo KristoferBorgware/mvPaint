@@ -56,7 +56,7 @@ export interface ImageTexture {
 /**
  * How a scene asks for an image texture without knowing which path will draw it.
  *
- * A renderer hands one of these out (`handle.images`, and `populate`'s `resources`) because
+ * A renderer hands one of these out (`handle.images`) because
  * building a texture is the one piece of GPU work an application cannot avoid doing itself -
  * only it knows which pictures the scene wants. Four ways in, matching the four things an
  * application actually has: a URL, an already-decoded bitmap, raw pixels it computed, or an

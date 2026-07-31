@@ -1,8 +1,8 @@
 // The WebGPU render path's entry point - the engine's primary renderer.
 //
 // Its counterpart is webgl/index.ts, and the two are deliberately the same shape: acquire a
-// device, load the font atlases, build a renderer, populate the scene, start a frame loop, and
-// hand back a SceneRendererHandle. Everything below that line differs completely, and neither
+// device, load the font atlases, build a renderer, start a frame loop, and hand back a
+// SceneRendererHandle over an EMPTY scene, which the caller then fills. Everything below that line differs completely, and neither
 // path knows the other exists; renderer/createSceneRenderer.ts is the only thing that does.
 
 import type { Camera2D } from '../camera/Camera2D'
@@ -25,7 +25,7 @@ const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
  * Composition root for the WebGPU path: wires the GPU context, resize observer and frame loop
  * (system components) to a SceneRenderer, loads the MSDF font atlases, and starts the render
  * loop on a white background through a 2D orthographic camera, MSAA 4x. Scene content is
- * supplied by the caller via `options.populate`. Throws if WebGPU is unavailable.
+ * added afterwards, through the returned handle's `scene`. Throws if WebGPU is unavailable.
  *
  * Applications call createSceneRenderer() (renderer/createSceneRenderer.ts) instead, which
  * comes here first and only falls back if this throws.
@@ -63,7 +63,6 @@ export async function createWebGpuSceneRenderer(
   // without a pipeline change (see webGpuImageFactory).
   const images = webGpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
 
-  options.populate?.(scene.scene, scene.camera, { images })
 
   const resizer = new CanvasResizer(canvas)
 

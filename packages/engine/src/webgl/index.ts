@@ -94,7 +94,6 @@ export async function createWebGl2SceneRenderer(
   }
 
   const images = glImageFactory(gl, context.maxTextureSize)
-  options.populate?.(scene.scene, scene.camera, { images })
 
   const resizer = new CanvasResizer(canvas)
   let running = true

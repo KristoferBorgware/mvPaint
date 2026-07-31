@@ -114,8 +114,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // The live scene graph + what the current scene handed back, so a switch can swap content
   // without touching anything the renderer owns.
   const sceneGraphRef = useRef<Scene | null>(null)
-  // Captured in populate(), which runs before the handle exists - see applyScene. The
-  // renderer's own image factory, so a scene builds the same textures on either render path.
+  // The renderer's own image factory, so a scene builds the same textures on whichever path
+  // is drawing. Captured once the handle exists - see applyScene.
   const resourcesRef = useRef<SceneResources | null>(null)
   const contentRef = useRef<SceneContent>({})
   const sceneDefRef = useRef(scene)
@@ -248,25 +248,6 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       backend,
       camera: cameraRef.current,
       onDeviceError: (message) => onErrorRef.current?.(message),
-      populate: (sceneGraph, _camera, resources) => {
-        // React StrictMode mounts, unmounts and remounts this effect in development, so TWO
-        // renderers are started and the first is thrown away. populate() runs before either
-        // promise resolves, so without this check the discarded renderer can be the one that
-        // lands last and leave these refs pointing at a scene graph nothing draws - after
-        // which every scene switch builds into the void while the canvas keeps showing the
-        // first scene. The `.then` below already guards for the same reason; this is the
-        // earlier half of it.
-        if (cancelled) return
-        sceneGraphRef.current = sceneGraph
-        resourcesRef.current = resources
-        // The transformer and both debug/gesture overlays are added ONCE and deliberately
-        // outlive every scene switch: they are editor furniture, not content, so loadScene
-        // below skips them when clearing (see the `keep` set above).
-        sceneGraph.root.addChild(transformer)
-        sceneGraph.root.addChild(cullBoundsOverlay)
-        sceneGraph.root.addChild(marqueeOverlay)
-        applyScene(sceneDefRef.current, false)
-      },
       onFrame: (dt) => {
         // A scene's own animation. It would overwrite anything the transformer's rotate
         // handle did, so at speed 0 the animation lets go entirely and shapes can be turned
@@ -311,6 +292,21 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         }
         handleRef.current = handle
         onPathChangeRef.current?.(handle.path)
+
+        // A renderer arrives with an EMPTY scene and draws it every frame, so content is
+        // added here rather than through a construction-time callback. The first frame or two
+        // may show an empty canvas; that is the trade for not having to know the scene before
+        // the renderer exists.
+        sceneGraphRef.current = handle.scene
+        resourcesRef.current = handle
+        // The transformer and both debug/gesture overlays are added ONCE and deliberately
+        // outlive every scene switch: they are editor furniture, not content, so applyScene
+        // skips them when clearing (see the `keep` set above).
+        handle.scene.root.addChild(transformer)
+        handle.scene.root.addChild(cullBoundsOverlay)
+        handle.scene.root.addChild(marqueeOverlay)
+        applyScene(sceneDefRef.current, false)
+
         handle.setZoom(zoom)
         frameSceneOrigin(handle.camera, canvas)
         handle.setCullMargin(cullMargin)
@@ -541,7 +537,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // survive; only the scene graph's content is replaced.
   useEffect(() => {
     sceneDefRef.current = scene
-    // Before the first frame the initial scene is built by `populate` instead, so there is
+    // The very first scene is built where the renderer is created, so before that there is
     // nothing to swap yet.
     if (!handleRef.current || !sceneGraphRef.current || !transformerRef.current) return
     applyScene(scene, true)

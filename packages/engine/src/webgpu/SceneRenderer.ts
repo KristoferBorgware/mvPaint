@@ -28,8 +28,8 @@
 // always" rather than benefit from - or be masked by - culling.
 //
 // It does NOT own the GPU context, resize observer, frame loop, or any scene content -
-// those are wired by createWebGpuSceneRenderer() in webgpu/index.ts, with content supplied by
-// the caller through the `populate` option.
+// those are wired by createWebGpuSceneRenderer() in webgpu/index.ts. Nor does it own its
+// CONTENT: it starts with an empty scene, and the caller adds nodes to it afterwards.
 //
 // Nor does it own the CAMERA. Where a scene is looked at from is an application's business,
 // so a Camera2D is supplied (createSceneRenderer's `camera` option, or setCamera later) and

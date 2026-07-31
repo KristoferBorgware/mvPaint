@@ -25,7 +25,8 @@ export type RenderPathKind = 'webgpu' | 'webgl2'
 
 /**
  * The GPU resources a scene has to create for itself, because only it knows what it wants.
- * Handed to `populate` (before any handle exists) and available on the handle afterwards.
+ * Every renderer handle provides them, so a function that builds content can take this
+ * narrower type instead of the whole renderer.
  */
 export interface SceneResources {
   /** Build an image texture for whichever path is drawing - see image/ImageTexture.ts. */
@@ -35,7 +36,16 @@ export interface SceneResources {
 export interface SceneRendererHandle extends SceneResources {
   /** Which path this renderer actually took - `'webgl2'` means WebGPU was unavailable. */
   readonly path: RenderPathKind
-  /** The scene graph root - add/remove content here, then call markGeometryDirty()/markTextGeometryDirty(). */
+  /**
+   * The scene graph. A renderer starts with an empty one and draws it every frame, so content
+   * is added here after the renderer exists - `handle.scene.root.addChild(node)` - rather than
+   * being supplied at construction.
+   *
+   * Adding and removing nodes needs no dirty mark: the visible set is recomputed each frame
+   * and a lane repacks when its membership changes. The exception is a scene that has turned
+   * BOTH culling and the zIndex sort off, which reuses the previous frame's visible set
+   * wholesale (see render/gather.ts) and needs markGeometryDirty() to notice.
+   */
   scene: Scene
   /** The view the scene is drawn through - the one supplied, or the default. */
   camera: Camera2D
@@ -83,13 +93,6 @@ export interface CreateSceneRendererOptions {
    * mode visible instead.
    */
   onDeviceError?: (message: string) => void
-  /**
-   * Called once after the scene and camera are ready, before the first frame - build the
-   * initial scene content here (shapes, text, camera framing). `resources` is passed because
-   * this runs before the handle exists, and content with images needs somewhere to build a
-   * texture from.
-   */
-  populate?: (scene: Scene, camera: Camera2D, resources: SceneResources) => void
   /**
    * The camera to draw through. Omit it and the scene renders through a default one, which
    * puts world (0, 0) at the viewport's top-left corner at one world unit per CSS pixel - a
