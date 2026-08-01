@@ -69,29 +69,30 @@ export default function App() {
   const [activePath, setActivePath] = useState<'webgpu' | 'webgl2' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [snapshotBusy, setSnapshotBusy] = useState(false)
-  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null)
-  const [snapshotName, setSnapshotName] = useState('mvpaint.png')
 
   /**
-   * Capture, then hand the result to the UI rather than to a synthetic download.
+   * Capture, then save it.
    *
-   * Every outcome is visible: the button says so while it is working, a failure lands in the
-   * error banner, and a success appears as a thumbnail with a link. Nothing about this button
-   * can now happen silently, which is the whole point - the version that saved the file without
-   * showing anything was doing its job and was still reported as broken.
+   * The two things kept from the version that showed a preview instead are the ones that cost
+   * no screen space: the button reads "Capturing..." while it works, and a failure goes to the
+   * error banner. Neither is decoration - a capture that fails is otherwise indistinguishable
+   * from a capture that saved, which is exactly how this button once came to be reported as
+   * broken while it was working.
    */
   const takeSnapshot = async () => {
     setSnapshotBusy(true)
     setError(null)
     try {
       const blob = await canvasRef.current!.captureSnapshot(2)
-      setSnapshotUrl((previous) => {
-        // The old object URL pins its blob in memory until it is revoked, and these are several
-        // megabytes each.
-        if (previous) URL.revokeObjectURL(previous)
-        return URL.createObjectURL(blob)
-      })
-      setSnapshotName(`mvpaint-${Date.now()}.png`)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `mvpaint-${Date.now()}.png`
+      link.click()
+      // Revoked on the next turn of the loop: the click is synchronous but the fetch the
+      // browser does for the download is not. Left un-revoked, each capture pins several
+      // megabytes for the life of the page.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
     } catch (cause) {
       setError(`Snapshot failed: ${cause instanceof Error ? cause.message : String(cause)}`)
     } finally {
@@ -186,61 +187,14 @@ export default function App() {
                   onClick={() => void takeSnapshot()}
                   sx={{ alignSelf: 'flex-start' }}
                 >
-                  {snapshotBusy ? 'Capturing...' : 'Take a PNG'}
+                  {snapshotBusy ? 'Capturing...' : 'Save a PNG'}
                 </Button>
                 <Typography variant="caption" color="text.secondary">
-                  Renders the current view again offscreen, at twice the resolution. It's a
-                  second render rather than a copy of the canvas, so the image can be any size
-                  and any region - and the selection frame is left out of it, since handles
-                  aren't part of the drawing.
+                  Renders the current view again offscreen, at twice the resolution, and saves
+                  it. It's a second render rather than a copy of the canvas, so the image can be
+                  any size and any region - and the selection frame is left out of it, since
+                  handles aren't part of the drawing.
                 </Typography>
-                {/*
-                  The result is SHOWN rather than only downloaded, and the reason is worth
-                  recording accurately because the first guess was wrong.
-                  
-                  The button used to fire a synthetic anchor click and nothing else. That WORKED
-                  - the files were landing in the download folder the whole time - but it worked
-                  invisibly, and on a phone, where the browser's own download notice is easy to
-                  miss, an operation that gives no sign of having run is indistinguishable from a
-                  broken one. It was reported as a broken button, and the only evidence it had
-                  ever worked was several copies of the same PNG found later.
-                  
-                  So the fix is feedback, not mechanism: a thumbnail proves the capture happened,
-                  and a real link makes saving a thing the user does rather than a thing that
-                  happens to them.
-                */}
-                {snapshotUrl && (
-                  <Stack spacing={0.5} sx={{ alignSelf: 'stretch' }}>
-                    <Box
-                      component="img"
-                      src={snapshotUrl}
-                      alt="The captured PNG"
-                      sx={{
-                        width: '100%',
-                        borderRadius: 1,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        backgroundColor: '#fff',
-                      }}
-                    />
-                    <Button
-                      size="small"
-                      variant="contained"
-                      component="a"
-                      href={snapshotUrl}
-                      download={snapshotName}
-                      target="_blank"
-                      rel="noopener"
-                      sx={{ alignSelf: 'flex-start' }}
-                    >
-                      Save it
-                    </Button>
-                    <Typography variant="caption" color="text.secondary">
-                      Tap to save, or press and hold the picture. On a phone, saving straight
-                      from the capture can be dropped silently - a tap on this cannot.
-                    </Typography>
-                  </Stack>
-                )}
               </Stack>
 
               <Stack spacing={0.5}>

@@ -89,9 +89,8 @@ export interface WebGPUCanvasHandle {
   /**
    * Captures the current view offscreen and hands back the encoded PNG.
    *
-   * It does NOT save the file. Delivering the bytes is the app's business, and on a phone that
-   * is a decision with consequences - see App.tsx, which shows the result rather than saving it
-   * behind the user's back.
+   * It does NOT save the file - delivering the bytes is the app's business. See App.tsx, which
+   * downloads them.
    *
    * The selection frame is taken off first and put back afterwards, because editor furniture is
    * not part of the picture - a screenshot with resize handles baked into it is a screenshot of
