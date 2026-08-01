@@ -29,8 +29,8 @@ export function buildTextScene(scene: Scene): SceneContent {
           start: { x: 0, y: 0 },
           end: { x: 520, y: 0 },
           stops: [
-            { offset: 0, color: [0.9, 0.2, 0.32, 1] },
-            { offset: 1, color: [0.38, 0.22, 0.86, 1] },
+            { offset: 0, color: '#e63352' },
+            { offset: 1, color: '#6138db' },
           ],
         },
       },
@@ -160,8 +160,8 @@ export function buildTextScene(scene: Scene): SceneContent {
       style: {
         fontStyle: 'bold',
         fontSize: 44,
-        color: [0.15, 0.4, 0.85, 1],
-        shadow: { color: [0, 0, 0, 0.35], offsetX: 3, offsetY: 4 },
+        color: '#2666d9',
+        shadow: { color: '#00000059', offsetX: 3, offsetY: 4 },
       },
     }),
   )
@@ -173,7 +173,7 @@ export function buildTextScene(scene: Scene): SceneContent {
       x: 90,
       y: 155,
       text: 'Soft glow',
-      style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: { color: [1, 0.8, 0.15, 1], radius: 6 } },
+      style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: { color: '#ffcc26', radius: 6 } },
     }),
   )
 

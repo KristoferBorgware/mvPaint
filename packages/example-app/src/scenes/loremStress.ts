@@ -23,7 +23,7 @@
 // and never spills past its own edge. Word count per page is therefore an outcome, not a
 // setting - which is also why the layout reports the total it actually placed.
 
-import { layoutText, msdfFontProvider, Rect, Text, type Container, type RGBA, type TextRun, type TextRunStyle } from '@mvpaint/engine'
+import { layoutText, msdfFontProvider, Rect, Text, type Container, type ColorInput, type TextRun, type TextRunStyle } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 
 // --- page grid ------------------------------------------------------------------------
@@ -172,7 +172,7 @@ function tokenize(text: string): string[] {
   return text.match(/\S+\s*/g) ?? []
 }
 
-const ACCENT_COLORS: readonly RGBA[] = [NAVY, TEAL, CRIMSON, SLATE]
+const ACCENT_COLORS: readonly ColorInput[] = [NAVY, TEAL, CRIMSON, SLATE]
 
 // One run's style: mostly plain body text, with bold/italic, an accent colour, a decoration
 // or a bit of tracking thrown in often enough that a page reads as "richly, randomly styled"
@@ -282,7 +282,7 @@ export function addPageFrame(root: Container, index: number, layout: LoremLayout
     y: origin.y,
     width: PAGE_WIDTH,
     height: layout.pageHeight,
-    fill: [0.99, 0.99, 1, 1],
+    fill: '#fcfcff',
     stroke: SLATE,
     strokeWidth: 1.5,
   })

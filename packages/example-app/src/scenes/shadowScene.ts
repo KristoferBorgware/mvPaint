@@ -7,14 +7,14 @@
 // falls on the card behind it and is hidden by the card in front, resolved per-pixel by the
 // depth test rather than by draw order.
 
-import { Circle, Polyline, Rect, Text, type Scene } from '@mvpaint/engine'
+import { Circle, Polyline, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
-const CARD_FILL: [number, number, number, number][] = [
-  [0.96, 0.42, 0.35, 1],
-  [0.35, 0.68, 0.94, 1],
-  [0.45, 0.82, 0.55, 1],
+const CARD_FILL: ColorInput[] = [
+  '#f56b59',
+  '#59adf0',
+  '#73d18c',
 ]
 
 function label(scene: Scene, x: number, y: number, text: string): void {
@@ -74,7 +74,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
       y: y + 65,
       width: 130,
       height: 130,
-      fill: [0.85, 0.85, 0.88, 1],
+      fill: '#d9d9e0',
       // No blur: a hard, offset copy - what canvas gives you with shadowBlur left at 0.
       shadowOffsetX: 12,
       shadowOffsetY: 14,
@@ -89,7 +89,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
       y: y + 65,
       width: 130,
       height: 130,
-      fill: [0.85, 0.85, 0.88, 1],
+      fill: '#d9d9e0',
       // shadowBlur is the canvas blur radius: a Gaussian of sigma = blur/2.
       shadowOffsetX: 12,
       shadowOffsetY: 14,
@@ -104,7 +104,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
       x: 40,
       y,
       radius: 65,
-      fill: [0.85, 0.85, 0.88, 1],
+      fill: '#d9d9e0',
       // spread grows the silhouette before the blur softens it - CSS box-shadow's spread,
       // which the canvas model has no equivalent for.
       shadowOffsetY: 10,
@@ -122,8 +122,8 @@ export function buildShadowScene(scene: Scene): SceneContent {
       x: 240,
       y,
       radius: 55,
-      fill: [0.85, 0.85, 0.88, 1],
-      stroke: [0.25, 0.25, 0.3, 1],
+      fill: '#d9d9e0',
+      stroke: '#40404c',
       strokeWidth: 20,
       shadowOffsetY: 14,
       shadowBlur: 18,
@@ -144,7 +144,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
         { x: 540, y: y + 60 },
       ],
       closed: false,
-      stroke: [0.45, 0.3, 0.75, 1],
+      stroke: '#734cbf',
       strokeWidth: 16,
       lineJoin: 'round',
       lineCap: 'round',

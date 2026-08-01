@@ -1,6 +1,7 @@
 // The example-scene registry. The picker lists whatever is in here, in this order, and the
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
+import { buildColorScene } from './colorScene'
 import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildLayerScene } from './layerScene'
@@ -80,6 +81,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Translucent objects stacked within one lane and across two. The top row is the control - overlapping translucent mesh shapes, text and images, each blending against its own kind. The middle row puts the same pair in two lanes and stacks it both ways round, so any difference between the two halves is the lanes\' doing - and there should be none. The bottom row is shadows, including one under an image with real holes in it. In every cell the back object is opaque and the front one is translucent, so the back object should show through.',
     build: buildTransparencyScene,
+  },
+  {
+    id: 'colors',
+    title: 'Colour forms',
+    description:
+      'Every way a colour can be written, each one paired with the same colour as the [r, g, b, a] tuple it should parse to - hex in all four lengths, rgb()/rgba() and hsl()/hsla() in both syntaxes with numbers or percentages, hues in turns/degrees/radians, the keywords, and transparent. A parser that got a form wrong would show as a visible seam between a pair. Below them, a colour string in each of the other places one goes: a stroke, a shadow, gradient stops, and text with a highlight and shadow.',
+    build: buildColorScene,
   },
   {
     id: 'opacity',

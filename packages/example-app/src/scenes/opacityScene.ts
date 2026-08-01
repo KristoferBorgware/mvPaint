@@ -11,8 +11,8 @@
 // Everything sits over a set of bars, because transparency you cannot see through is just a
 // paler colour - the bars are what make the difference visible.
 
-import { Circle, Container, Rect, Text, type RGBA, type Scene } from '@mvpaint/engine'
-import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
+import { Circle, Container, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { CRIMSON, DARK, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
 const PANEL_H = 204
@@ -44,7 +44,7 @@ function bars(root: Container, col: number, row: number, width: number): void {
         y: top,
         width: 17,
         height: BAND,
-        fill: [0.87, 0.89, 0.92, 1],
+        fill: '#dee3eb',
         rotation: -0.5,
       }),
     )
@@ -53,7 +53,7 @@ function bars(root: Container, col: number, row: number, width: number): void {
 
 export function buildOpacityScene(scene: Scene): SceneContent {
   const root = scene.root
-  const swatch = (x: number, row: number, fill: RGBA, opacity: number, w = 78): Rect =>
+  const swatch = (x: number, row: number, fill: ColorInput, opacity: number, w = 78): Rect =>
     new Rect({ x, y: ROW[row] + BODY, width: w, height: BAND, fill, cornerRadius: 8, opacity })
 
   // --- a fade, not a colour ---------------------------------------------------------------
@@ -73,9 +73,9 @@ export function buildOpacityScene(scene: Scene): SceneContent {
   // two ways and should be identical; the third has both at once and is the product.
   root.addChild(heading(1, 0, "It multiplies the colour's own alpha"))
   bars(root, 1, 0, 440)
-  root.addChild(swatch(COL[1], 0, [CRIMSON[0], CRIMSON[1], CRIMSON[2], 1], 0.5, 120))
-  root.addChild(swatch(COL[1] + 150, 0, [CRIMSON[0], CRIMSON[1], CRIMSON[2], 0.5], 1, 120))
-  root.addChild(swatch(COL[1] + 300, 0, [CRIMSON[0], CRIMSON[1], CRIMSON[2], 0.5], 0.5, 120))
+  root.addChild(swatch(COL[1], 0, CRIMSON, 0.5, 120))
+  root.addChild(swatch(COL[1] + 150, 0, withAlpha(CRIMSON, 0.5), 1, 120))
+  root.addChild(swatch(COL[1] + 300, 0, withAlpha(CRIMSON, 0.5), 0.5, 120))
   root.addChild(caption(COL[1], 0, 'opacity 0.5'))
   root.addChild(caption(COL[1] + 150, 0, 'alpha 0.5'))
   root.addChild(caption(COL[1] + 300, 0, 'both - so 0.25'))
@@ -110,7 +110,7 @@ export function buildOpacityScene(scene: Scene): SceneContent {
       fill: CRIMSON,
       cornerRadius: 10,
       opacity: 0.45,
-      shadowColor: [0, 0, 0, 0.9],
+      shadowColor: '#000000e6',
       shadowBlur: 20,
       shadowOffsetX: 14,
       shadowOffsetY: 14,

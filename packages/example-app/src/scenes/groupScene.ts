@@ -8,8 +8,8 @@
 // visibility governing a whole subtree, a group whose extent changes as its contents do,
 // and the one case where a group is deliberately NOT the thing you grab.
 
-import { Circle, Group, Rect, Text, type Scene } from '@mvpaint/engine'
-import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
+import { Circle, Group, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
 function label(x: number, y: number, text: string): Text {
@@ -17,12 +17,12 @@ function label(x: number, y: number, text: string): Text {
 }
 
 /** A little robot: a body, a head, two eyes and two legs, built around its own origin. */
-function robot(fill: [number, number, number, number]): Group {
+function robot(fill: ColorInput): Group {
   const g = new Group()
   g.addChild(new Rect({ x: -35, y: 20, width: 70, height: 60, fill, cornerRadius: 10 }))
   g.addChild(new Rect({ x: -22, y: 74, width: 44, height: 34, fill: NAVY, cornerRadius: 8 }))
-  g.addChild(new Circle({ x: -10, y: 58, radius: 5, fill: [1, 1, 1, 1] }))
-  g.addChild(new Circle({ x: 10, y: 58, radius: 5, fill: [1, 1, 1, 1] }))
+  g.addChild(new Circle({ x: -10, y: 58, radius: 5, fill: '#fff' }))
+  g.addChild(new Circle({ x: 10, y: 58, radius: 5, fill: '#fff' }))
   g.addChild(new Rect({ x: -26, y: -40, width: 16, height: 40, fill: DARK, cornerRadius: 5 }))
   g.addChild(new Rect({ x: 10, y: -40, width: 16, height: 40, fill: DARK, cornerRadius: 5 }))
   return g
@@ -36,18 +36,18 @@ export function buildGroupScene(scene: Scene): SceneContent {
   // Three copies of the same assembly, differing only in what their GROUP is set to. Not one
   // child knows it has been moved, turned or scaled: the group's matrix sits between theirs
   // and the world, which is the whole of what a group does.
-  const plain = root.addChild(robot([0.24, 0.62, 0.7, 1]))
+  const plain = root.addChild(robot('#3d9eb2'))
   plain.name = 'robot-plain'
   plain.x = -420
   plain.y = 210
 
-  const turned = root.addChild(robot([0.85, 0.45, 0.2, 1]))
+  const turned = root.addChild(robot('#d97333'))
   turned.name = 'robot-turned'
   turned.x = -220
   turned.y = 210
   turned.rotation = -0.35
 
-  const shrunk = root.addChild(robot([0.45, 0.35, 0.75, 1]))
+  const shrunk = root.addChild(robot('#7359bf'))
   shrunk.name = 'robot-small'
   shrunk.x = -40
   shrunk.y = 210
@@ -61,10 +61,10 @@ export function buildGroupScene(scene: Scene): SceneContent {
   // The pair is a group holding two robot groups. Turning the OUTER one turns both, about
   // the pair's origin rather than each robot's - which is exactly what nesting buys.
   const pair = root.addChild(new Group({ name: 'pair', x: 300, y: 230, rotation: 0.18 }))
-  const left = pair.addChild(robot([0.2, 0.65, 0.4, 1]))
+  const left = pair.addChild(robot('#33a666'))
   left.name = 'pair-left'
   left.x = -70
-  const right = pair.addChild(robot([0.75, 0.3, 0.45, 1]))
+  const right = pair.addChild(robot('#bf4c73'))
   right.name = 'pair-right'
   right.x = 70
   right.scaleX = -1 // facing back the other way
@@ -88,15 +88,15 @@ export function buildGroupScene(scene: Scene): SceneContent {
   const extent = root.addChild(
     // Negative, which is how you say "behind everything": the counter every other shape
     // takes its zIndex from only ever counts up from zero.
-    new Rect({ name: 'orbit-extent', width: 1, height: 1, fill: [HIGHLIGHT[0], HIGHLIGHT[1], HIGHLIGHT[2], 0.18], zIndex: -2 }),
+    new Rect({ name: 'orbit-extent', width: 1, height: 1, fill: withAlpha(HIGHLIGHT, 0.18), zIndex: -2 }),
   )
   root.addChild(label(-470, -300, 'the tinted patch is group.bounds() - a group is only ever as big as what it holds'))
 
   // --- visibility governs the whole subtree ---------------------------------------------
   const blinking = root.addChild(new Group({ name: 'blinking', x: 120, y: -180 }))
   blinking.addChild(new Rect({ x: -70, y: 60, width: 140, height: 120, fill: NAVY, cornerRadius: 16 }))
-  blinking.addChild(new Circle({ x: -30, y: 0, radius: 18, fill: [1, 1, 1, 1] }))
-  blinking.addChild(new Circle({ x: 30, y: 0, radius: 18, fill: [1, 1, 1, 1] }))
+  blinking.addChild(new Circle({ x: -30, y: 0, radius: 18, fill: '#fff' }))
+  blinking.addChild(new Circle({ x: 30, y: 0, radius: 18, fill: '#fff' }))
   blinking.addChild(new Rect({ x: -40, y: -40, width: 80, height: 14, fill: CRIMSON, cornerRadius: 7 }))
   root.addChild(label(40, -300, 'group.visible = false hides everything inside it'))
 
@@ -114,7 +114,7 @@ export function buildGroupScene(scene: Scene): SceneContent {
         y: 30,
         width: 40,
         height: 60,
-        fill: [0.55, 0.55, 0.6, 1],
+        fill: '#8c8c99',
         cornerRadius: 6,
       }),
     )

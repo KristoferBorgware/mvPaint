@@ -13,8 +13,8 @@
 //   send one behind everything  a negative value, which the counter can never reach
 //   slot one between two        (a.zIndex + b.zIndex) / 2 - the numbers are not integers
 
-import { Circle, Rect, Text, nextZIndex, type RGBA, type Scene } from '@mvpaint/engine'
-import { CRIMSON, DARK, NAVY, SLATE, TEAL, YELLOW } from './palette'
+import { Circle, Rect, Text, nextZIndex, type ColorInput, type Scene } from '@mvpaint/engine'
+import { CRIMSON, DARK, NAVY, SLATE, TEAL, YELLOW, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
 // Two rows of three, centred on the origin: the panels reach the same distance above and
@@ -37,15 +37,15 @@ const caption = (x: number, row: number, text: string): Text =>
   new Text({ x, y: ROW[row] + FOOT, text, style: { fontSize: 13, color: SLATE } })
 
 /** A card with a white keyline, so an overlap reads as one card over another. */
-const card = (x: number, y: number, width: number, height: number, fill: RGBA): Rect =>
-  new Rect({ x, y, width, height, fill, stroke: [1, 1, 1, 1], strokeWidth: 3, cornerRadius: 8 })
+const card = (x: number, y: number, width: number, height: number, fill: ColorInput): Rect =>
+  new Rect({ x, y, width, height, fill, stroke: '#fff', strokeWidth: 3, cornerRadius: 8 })
 
-const STEPS: RGBA[] = [
-  [0.13, 0.55, 0.6, 1],
-  [0.9, 0.5, 0.18, 1],
-  [0.25, 0.4, 0.72, 1],
-  [0.8, 0.28, 0.42, 1],
-  [0.35, 0.62, 0.3, 1],
+const STEPS: ColorInput[] = [
+  '#218c99',
+  '#e6802e',
+  '#4066b8',
+  '#cc476b',
+  '#599e4c',
 ]
 
 export function buildZIndexScene(scene: Scene): SceneContent {
@@ -56,7 +56,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
   // geometry, so the only thing that ever differs between two cells is the stacking.
   const word = (cx: number, row: number) =>
     new Text({ x: cx - 52, y: ROW[row] + BODY - BAND / 2 + 18, text: 'ABC', style: { fontSize: 34, fontStyle: 'bold', color: NAVY } })
-  const disc = (cx: number, row: number, fill: RGBA) =>
+  const disc = (cx: number, row: number, fill: ColorInput) =>
     new Circle({ x: cx + 22, y: ROW[row] + BODY - BAND / 2, radius: 34, fill })
 
   // --- made later is in front -----------------------------------------------------------
@@ -128,7 +128,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
       y: ROW[1] + BODY,
       width: 300,
       height: BAND,
-      fill: [YELLOW[0], YELLOW[1], YELLOW[2], 0.85],
+      fill: withAlpha(YELLOW, 0.85),
       cornerRadius: 10,
       zIndex: -1,
     }),

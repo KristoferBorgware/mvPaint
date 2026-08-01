@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, FormControlLabel, Slider, Stack, Switch, Typography } from '@mui/material'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
-import { Text, type RGBA, type Shape } from '@mvpaint/engine'
+import { parseColor, Text, type RGBA, type Shape } from '@mvpaint/engine'
 
 /** The shadow fields this panel edits, in UI units (colour as a hex string). */
 interface ShadowUi {
@@ -55,7 +55,9 @@ function readShadow(node: Shape, fallback: ShadowUi): ShadowUi {
       offsetX: shadow.offsetX,
       offsetY: shadow.offsetY,
       opacity: shadow.opacity ?? 1,
-      color: rgbToHex(shadow.color),
+      // The style may hold either form; the picker wants a hex, so it goes through the parser
+      // rather than assuming the tuple.
+      color: rgbToHex(parseColor(shadow.color)),
     }
   }
   return {

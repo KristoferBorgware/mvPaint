@@ -50,7 +50,7 @@ function guide(path: TextPathGeometry, name: string): Path {
     name,
     contours: [{ points: outline(path), closed: path.closed }],
     filled: false,
-    stroke: [0.62, 0.66, 0.72, 0.9],
+    stroke: '#9ea8b8e6',
     strokeWidth: 1.5,
   })
 }
@@ -76,7 +76,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   root.addChild(guide(topRing, 'tp-badge-guide'))
   // Negative puts it behind everything: shapes that say nothing take their zIndex from a
   // counter that only ever counts up from zero.
-  root.addChild(new Circle({ name: 'tp-badge-disc', x: badgeCenter.x, y: badgeCenter.y, radius: badgeRadius - 34, fill: [0.94, 0.95, 0.97, 1], zIndex: -1 }))
+  root.addChild(new Circle({ name: 'tp-badge-disc', x: badgeCenter.x, y: badgeCenter.y, radius: badgeRadius - 34, fill: '#f0f2f7', zIndex: -1 }))
   root.addChild(
     new Text({
       name: 'tp-badge-top',

@@ -10,7 +10,7 @@
 //   bottom right  a layer's transform reaches its contents, and `enabled` never touches a
 //                 shape's own `visible`
 
-import { Circle, Group, Layer, Polyline, Rect, Text, type RGBA, type Scene } from '@mvpaint/engine'
+import { Circle, Group, Layer, Polyline, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -33,10 +33,10 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // layer rather than asking each of its shapes about its ancestors.
   const plate = root.addChild(new Layer({ name: 'plate' }))
   plate.addChild(
-    new Rect({ x: -470, y: 280, width: 380, height: 170, fill: [0.93, 0.95, 0.96, 1], cornerRadius: 10 }),
+    new Rect({ x: -470, y: 280, width: 380, height: 170, fill: '#edf2f5', cornerRadius: 10 }),
   )
-  plate.addChild(new Circle({ x: -370, y: 175, radius: 42, fill: [0.78, 0.87, 0.9, 1] }))
-  plate.addChild(new Rect({ x: -230, y: 250, width: 110, height: 60, fill: [0.85, 0.89, 0.86, 1], cornerRadius: 6 }))
+  plate.addChild(new Circle({ x: -370, y: 175, radius: 42, fill: '#c7dee6' }))
+  plate.addChild(new Rect({ x: -230, y: 250, width: 110, height: 60, fill: '#d9e3db', cornerRadius: 6 }))
 
   const routes = root.addChild(new Layer({ name: 'routes' }))
   routes.addChild(
@@ -62,7 +62,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
         { x: -330, y: 130 },
         { x: -240, y: 120 },
       ],
-      stroke: [0.85, 0.55, 0.2, 1],
+      stroke: '#d98c33',
       strokeWidth: 5,
       lineJoin: 'round',
       lineCap: 'round',
@@ -75,7 +75,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
     [-280, 165],
     [-190, 215],
   ]) {
-    pins.addChild(new Circle({ x, y, radius: 9, fill: CRIMSON, stroke: [1, 1, 1, 1], strokeWidth: 3 }))
+    pins.addChild(new Circle({ x, y, radius: 9, fill: CRIMSON, stroke: '#fff', strokeWidth: 3 }))
   }
 
   root.addChild(caption(-470, 118, 'plate / routes / pins'))
@@ -89,8 +89,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // deciding depth is each card's own zIndex - exactly as if the layers were not there.
   const cool = root.addChild(new Layer({ name: 'cool' }))
   const warm = root.addChild(new Layer({ name: 'warm' }))
-  const COOL: RGBA = [0.13, 0.55, 0.6, 1]
-  const WARM: RGBA = [0.9, 0.5, 0.18, 1]
+  const COOL: ColorInput = '#218c99'
+  const WARM: ColorInput = '#e6802e'
 
   for (let i = 0; i < 6; i++) {
     const even = i % 2 === 0
@@ -103,7 +103,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
         width: 120,
         height: 150,
         fill: even ? COOL : WARM,
-        stroke: [1, 1, 1, 1],
+        stroke: '#fff',
         strokeWidth: 3,
         cornerRadius: 8,
         // No zIndex at all: made left to right, so each card takes a higher number from the
@@ -142,7 +142,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // LAYER and is never written onto its children, so when the layer comes back the dot is in
   // whatever state its own `visible` is in, rather than being forced back on with the rest.
   const drifting = root.addChild(new Layer({ name: 'drifting', x: 235, y: -180 }))
-  drifting.addChild(new Rect({ x: -20, y: 40, width: 250, height: 80, fill: [0.9, 0.91, 0.93, 1], cornerRadius: 12 }))
+  drifting.addChild(new Rect({ x: -20, y: 40, width: 250, height: 80, fill: '#e6e8ed', cornerRadius: 12 }))
   const dots: Circle[] = []
   for (let i = 0; i < 3; i++) {
     dots.push(drifting.addChild(new Circle({ x: 30 + i * 75, y: 0, radius: 22, fill: i === 1 ? CRIMSON : DARK })))

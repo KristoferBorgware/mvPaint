@@ -237,8 +237,8 @@ verified in a browser instead.
 
 ### Demo scenes
 
-Shapes and gradients · Groups · Layers · Object opacity · MSDF text · Outline text · Text on a path · Images ·
-Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
+Shapes and gradients · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
+Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
 (100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
 
 ---

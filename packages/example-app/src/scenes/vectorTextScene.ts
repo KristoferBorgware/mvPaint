@@ -56,8 +56,8 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
           start: { x: 0, y: 0 },
           end: { x: 380, y: 0 },
           stops: [
-            { offset: 0, color: [0.9, 0.2, 0.32, 1] },
-            { offset: 1, color: [0.38, 0.22, 0.86, 1] },
+            { offset: 0, color: '#e63352' },
+            { offset: 1, color: '#6138db' },
           ],
         },
       },
@@ -108,7 +108,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       x: LEFT,
       y: 130,
       runs: [
-        { text: 'Stroked', style: { fontStyle: 'bold', fontSize: 44, color: [1, 1, 1, 1], strokeColor: NAVY, strokeWidth: 2.5 } },
+        { text: 'Stroked', style: { fontStyle: 'bold', fontSize: 44, color: '#fff', strokeColor: NAVY, strokeWidth: 2.5 } },
         { text: ' glyphs', style: { fontStyle: 'bold', fontSize: 44, color: NAVY } },
       ],
     }),
@@ -169,7 +169,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       x: RIGHT,
       y: 330,
       text: 'Blurred',
-      style: { fontStyle: 'bold', fontSize: 64, color: [1, 1, 1, 1] },
+      style: { fontStyle: 'bold', fontSize: 64, color: '#fff' },
       shadowColor: NAVY,
       shadowBlur: 18,
       shadowOffsetX: 6,
@@ -185,7 +185,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       y: 250,
       text: 'shadows',
       style: { fontStyle: 'bold', fontSize: 64, color: CRIMSON },
-      shadowColor: [0.9, 0.2, 0.32, 1],
+      shadowColor: '#e63352',
       shadowBlur: 26,
       shadowSpread: 3,
       shadowOpacity: 0.55,
@@ -231,7 +231,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
     offsetX: 95,
     offsetY: 0,
     text: 'zoom in',
-    style: { fontStyle: 'bold-italic', fontSize: 46, color: [0.38, 0.22, 0.86, 1] },
+    style: { fontStyle: 'bold-italic', fontSize: 46, color: '#6138db' },
   })
   root.addChild(spun)
   root.addChild(label(RIGHT, -208, 'Scroll to zoom: outlines have no resolution to run out of.'))

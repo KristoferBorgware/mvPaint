@@ -34,7 +34,8 @@ export interface TextGradient {
  * the cheap, crisp duplicate instead. `offsetY` is downward-positive, matching Shape's.
  */
 export interface TextShadow {
-  color: RGBA
+  /** Accepts a string as well as the tuple. */
+  color: ColorInput
   offsetX: number
   offsetY: number
   /** Multiplies `color`'s own alpha. Default 1. */
@@ -43,7 +44,8 @@ export interface TextShadow {
 
 /** Soft glow: a dilated copy of the glyphs behind them; `radius` is the spread in world px. */
 export interface TextGlow {
-  color: RGBA
+  /** Accepts a string as well as the tuple. */
+  color: ColorInput
   radius: number
   /** Multiplies `color`'s own alpha. Default 1. */
   opacity?: number
@@ -170,8 +172,11 @@ interface RunResolved {
   mainMaterial: number
   shadowMaterial: number
   glowMaterial: number
-  shadow: TextShadow | undefined
-  glow: TextGlow | undefined
+  // The style's own shadow/glow with their colours already parsed. Resolved here rather than
+  // at quad time: the colour is read once per GLYPH down there, and a string would be parsed
+  // that many times over.
+  shadow: (Omit<TextShadow, 'color'> & { color: RGBA }) | undefined
+  glow: (Omit<TextGlow, 'color'> & { color: RGBA }) | undefined
 }
 
 // One laid-out character: a glyph, or a space/spacer that only advances the pen (rr = -1).
@@ -270,8 +275,8 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       mainMaterial,
       shadowMaterial,
       glowMaterial,
-      shadow: style.shadow,
-      glow: style.glow,
+      shadow: style.shadow ? { ...style.shadow, color: parseColor(style.shadow.color) } : undefined,
+      glow: style.glow ? { ...style.glow, color: parseColor(style.glow.color) } : undefined,
     })
   }
 

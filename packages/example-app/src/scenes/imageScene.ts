@@ -157,7 +157,7 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
       offsetX: 70,
       offsetY: -70,
       rotation: 0.12,
-      shadowColor: [0, 0, 0, 0.45],
+      shadowColor: '#00000073',
       shadowBlur: 18,
       shadowOffsetX: 10,
       shadowOffsetY: 12,
@@ -221,7 +221,7 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
 
   root.addChild(label(-330, -150, 'tint + fade'))
   root.addChild(
-    new Image({ name: 'image-tinted', texture: checker, x: -310, y: -170, width: 120, height: 120, tint: [1, 0.6, 0.3, 0.75] }),
+    new Image({ name: 'image-tinted', texture: checker, x: -310, y: -170, width: 120, height: 120, tint: '#ff994cbf' }),
   )
 
   root.addChild(label(-140, -150, 'nearest (pixel art)'))
@@ -236,8 +236,8 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
   // three lines are in.
   root.addChild(label(280, -150, 'stacking vs shapes'))
   root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 340, y: -150, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 } }))
-  root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1] }))
-  root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: [0.9, 0.3, 0.5, 0.9] }))
+  root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: '#2ea65c' }))
+  root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: '#e64c80e6' }))
 
   // Row 4: an SVG as the source. Both quads are the same size on screen and come from the
   // same document; only the pixel size they were rasterized at differs, which is the whole
@@ -280,7 +280,7 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
         offsetX: 65,
         offsetY: -65,
         rotation: -0.15,
-        shadowColor: [0, 0, 0, 0.45],
+        shadowColor: '#00000073',
         shadowBlur: 16,
         shadowOffsetX: 8,
         shadowOffsetY: 10,

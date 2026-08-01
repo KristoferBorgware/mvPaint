@@ -23,8 +23,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
       height: 160,
       offsetX: 80,
       offsetY: -80,
-      fill: [0.9, 0.28, 0.24, 1],
-      stroke: [0.5, 0.1, 0.08, 1],
+      fill: '#e6473d',
+      stroke: '#801a14',
       strokeWidth: 6,
     }),
   )
@@ -35,8 +35,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
   left.fillLinearGradientStartPoint = { x: 0, y: -160 }
   left.fillLinearGradientEndPoint = { x: 160, y: 0 }
   left.fillLinearGradientColorStops = [
-    { offset: 0, color: [1, 0.9, 0.3, 1] },
-    { offset: 1, color: [0.9, 0.1, 0.2, 1] },
+    { offset: 0, color: '#ffe64c' },
+    { offset: 1, color: '#e61a33' },
   ]
   const right = scene.root.addChild(
     new Rect({
@@ -47,8 +47,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
       height: 130,
       offsetX: 100,
       offsetY: -65,
-      fill: [0.2, 0.45, 0.9, 1],
-      stroke: [0.08, 0.18, 0.5, 1],
+      fill: '#3373e6',
+      stroke: '#142e80',
       strokeWidth: 6,
     }),
   )
@@ -62,8 +62,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
       x: 0,
       y: 0,
       radius: 90,
-      fill: [0.2, 0.72, 0.36, 1],
-      stroke: [0.1, 0.4, 0.2, 1],
+      fill: '#33b85c',
+      stroke: '#1a6633',
       strokeWidth: 6,
     }),
   )
@@ -75,8 +75,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
   circle.fillRadialGradientEndPoint = { x: 0, y: 0 }
   circle.fillRadialGradientEndRadius = 90
   circle.fillRadialGradientColorStops = [
-    { offset: 0, color: [0.9, 1, 0.6, 1] },
-    { offset: 1, color: [0.1, 0.5, 0.2, 1] },
+    { offset: 0, color: '#e6ff99' },
+    { offset: 1, color: '#1a8033' },
   ]
 
   // An open zigzag polyline below the shapes, demonstrating the general contour
@@ -92,7 +92,7 @@ export function buildShapesScene(scene: Scene): SceneContent {
         { x: 90, y: -120 },
         { x: 180, y: -180 },
       ],
-      stroke: [0.55, 0.35, 0.85, 1],
+      stroke: '#8c59d9',
       strokeWidth: 14,
       lineJoin: 'round',
       lineCap: 'round',
@@ -120,8 +120,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
         width: 130,
         height: 90,
         cornerRadius: spec.cornerRadius,
-        fill: [0.16, 0.55, 0.62, 1],
-        stroke: [0.95, 0.75, 0.3, 1],
+        fill: '#298c9e',
+        stroke: '#f2bf4c',
         strokeWidth: spec.stroked ? 8 : 0,
         lineJoin: 'round',
       }),
