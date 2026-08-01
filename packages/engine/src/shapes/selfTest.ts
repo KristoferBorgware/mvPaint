@@ -16,6 +16,7 @@ import { meshGeometryEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
+import { nextZIndex, peekZIndex, resetAutoZIndex } from './zOrder'
 import { Layer } from './Layer'
 import { Text } from './Text'
 import { Transformer } from './Transformer'
@@ -1154,6 +1155,51 @@ function TWO_PI_PLUS(a: number): number {
   assert(bare.attrs.x === 12 && bare.attrs.skewY === 0, 'the transform is in every node\'s attrs')
   bare.setAttr('y', 42)
   assert(bare.y === 42, 'and is writable through setAttr')
+}
+
+// --- the stacking counter: what an unset zIndex means ---------------------------------
+{
+  // From a known starting point, so the exact values can be asserted. Nothing in a running
+  // application resets this - see zOrder.ts.
+  resetAutoZIndex(0)
+
+  const first = new Rect({ width: 1, height: 1 })
+  const second = new Rect({ width: 1, height: 1 })
+  const third = new Circle({ radius: 1 })
+
+  assert(first.zIndex === 0, 'the first shape made is at 0')
+  assert(second.zIndex === 1, 'the next is at 1, which is in front of it')
+  assert(third.zIndex === 2, 'and the counter is shared by every kind of Shape, not one per class')
+
+  // Text is a Shape and draws through a different lane, which is exactly why it has to share
+  // the same counter: the two lanes resolve against one depth buffer.
+  assert(new Text({ text: 'x' }).zIndex === 3, 'Text takes its number from the same counter')
+
+  // The counter is what makes the ordering a promise rather than a coincidence: it only ever
+  // goes up, so a shape made now is in front of every shape made before it, whatever else
+  // happened in between.
+  assert(peekZIndex() === 4, 'peeking does not take a number')
+  assert(peekZIndex() === 4, 'however often it is asked')
+  assert(nextZIndex() === 4 && peekZIndex() === 5, 'taking one does')
+
+  // An explicit zIndex is taken as given, and deliberately does NOT advance the counter -
+  // otherwise one shape asking for a huge number would push every later shape past it.
+  const pinned = new Rect({ width: 1, height: 1, zIndex: 900 })
+  assert(pinned.zIndex === 900, 'an explicit zIndex wins')
+  assert(peekZIndex() === 5, 'and leaves the counter where it was')
+  assert(new Rect({ width: 1, height: 1 }).zIndex === 5, 'so the next unset shape carries on from there')
+
+  // The two idioms the counter is designed around. Bringing a shape to the front is asking
+  // for a fresh number; sending one to the back needs no helper at all, because the counter
+  // only ever counts up from zero.
+  first.zIndex = nextZIndex()
+  assert(first.zIndex > third.zIndex, 'nextZIndex() brings an existing shape to the front')
+  second.zIndex = -1
+  assert(second.zIndex < first.zIndex && second.zIndex < third.zIndex, 'and any negative is behind everything')
+
+  // Put it back, so a later test that happens to care about absolute values is not reading
+  // whatever this block left behind.
+  resetAutoZIndex(0)
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

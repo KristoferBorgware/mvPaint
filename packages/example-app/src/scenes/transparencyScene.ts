@@ -89,10 +89,11 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
 
   // --- row 1: within one lane, which is the control ------------------------------------
   //
-  // Three overlapping translucent objects of the SAME kind. A lane packs its shapes
-  // back-to-front (ascending zIndex rank), so they composite in the order they are stacked
-  // and every overlap is a real blend. If any of these three cells looks wrong, nothing
-  // below it means anything.
+  // Three overlapping translucent objects of the SAME kind, made back to front - which is
+  // all the stacking any of these rows needs, since an unset zIndex takes the next number
+  // from the counter and each object therefore lands in front of the one before it. A lane
+  // packs its shapes back-to-front, so every overlap is a real blend. If any of these three
+  // cells looks wrong, nothing below it means anything.
   const rowY = 330
   root.addChild(heading(-540, rowY + 40, 'One lane at a time - every overlap should blend'))
 
@@ -104,7 +105,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         y: rowY - 60 + (i % 2) * 30,
         radius: 46,
         fill: [i === 0 ? 0.9 : 0.1, i === 1 ? 0.75 : 0.15, i === 2 ? 0.9 : 0.2, 0.55],
-        zIndex: i,
       }),
     )
   }
@@ -118,7 +118,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         y: rowY - 30 - i * 26,
         text: 'BLEND',
         style: { fontSize: 46, fontStyle: 'bold', color: [i === 0 ? 0.9 : 0.15, i === 1 ? 0.7 : 0.2, i === 2 ? 0.9 : 0.25, 0.55] },
-        zIndex: i,
       }),
     )
   }
@@ -134,7 +133,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         width: 110,
         height: 110,
         tint: [i === 0 ? 1 : 0.4, i === 1 ? 1 : 0.4, i === 2 ? 1 : 0.5, 0.55],
-        zIndex: i,
       }),
     )
   }
@@ -143,7 +141,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   // --- row 2: the same two objects in two lanes, stacked both ways ----------------------
   //
   // Each pair gets two cells that are exact mirrors: same two objects, same overlap, only
-  // the zIndex swapped so that whichever was behind is now in front. In both cells the
+  // the ORDER THEY ARE MADE IN swapped, so whichever was behind is now in front. In both cells the
   // FRONT object is the translucent one and the BACK object is opaque, so in both cells the
   // back object should show through. If one half of a pair looks different from the other,
   // that difference is the lane order, because nothing else about them differs - and the
@@ -158,10 +156,10 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
    * across roughly half their area. `alpha` is the whole point: the front object of a pair
    * gets FRONT_ALPHA, the back one is opaque.
    */
-  const makeObject = (kind: LaneKind, name: string, cx: number, cy: number, alpha: number, zIndex: number) => {
+  const makeObject = (kind: LaneKind, name: string, cx: number, cy: number, alpha: number) => {
     const rgb: [number, number, number] = alpha < 1 ? [0.13, 0.33, 0.78] : [0.87, 0.35, 0.16]
     if (kind === 'mesh') {
-      return new Circle({ name, x: cx, y: cy, radius: 56, fill: [...rgb, alpha], zIndex })
+      return new Circle({ name, x: cx, y: cy, radius: 56, fill: [...rgb, alpha] })
     }
     if (kind === 'text') {
       return new Text({
@@ -170,7 +168,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         y: cy + 24,
         text: 'ABC',
         style: { fontSize: 54, fontStyle: 'bold', color: [...rgb, alpha] },
-        zIndex,
       })
     }
     return new Image({
@@ -181,7 +178,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       width: CELL_W,
       height: CELL_H,
       tint: [1, 1, 1, alpha],
-      zIndex,
     })
   }
 
@@ -195,8 +191,9 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
 
   /** Two objects at one centre: `back` opaque and behind, `front` translucent and over it. */
   const cell = (id: string, cx: number, cy: number, back: LaneKind, front: LaneKind) => {
-    root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1, 0))
-    root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA, 1))
+    // Made back first, so the front one takes the higher number and lands over it.
+    root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1))
+    root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA))
     root.addChild(label(cx - 96, cy - 96, `${front} over ${back}`, NAVY))
     root.addChild(label(cx - 96, cy - 116, `back drawn in the ${passOf(back, 1)} pass`))
   }
@@ -231,7 +228,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       shadowBlur: 26,
       shadowOffsetX: 26,
       shadowOffsetY: 26,
-      zIndex: 0,
     }),
   )
   root.addChild(
@@ -242,7 +238,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       width: 150,
       height: 90,
       fill: [0.95, 0.75, 0.2, FRONT_ALPHA],
-      zIndex: 1,
     }),
   )
   root.addChild(label(-470, lowY - 116, 'a shadow under a translucent panel'))
@@ -261,7 +256,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       shadowBlur: 26,
       shadowOffsetX: 26,
       shadowOffsetY: 26,
-      zIndex: 0,
     }),
   )
   root.addChild(
@@ -272,7 +266,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       y: lowY - 10,
       width: 150,
       height: 90,
-      zIndex: 1,
     }),
   )
   root.addChild(label(-150, lowY - 116, 'and under an image with transparent holes'))
@@ -291,7 +284,6 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         shadowBlur: 22,
         shadowOffsetX: 18,
         shadowOffsetY: 18,
-        zIndex: i,
       }),
     )
   }

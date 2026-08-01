@@ -74,6 +74,8 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const bottomRing = circlePath(badgeRadius, { center: badgeCenter, startAngle: -Math.PI / 2, clockwise: false })
 
   root.addChild(guide(topRing, 'tp-badge-guide'))
+  // Negative puts it behind everything: shapes that say nothing take their zIndex from a
+  // counter that only ever counts up from zero.
   root.addChild(new Circle({ name: 'tp-badge-disc', x: badgeCenter.x, y: badgeCenter.y, radius: badgeRadius - 34, fill: [0.94, 0.95, 0.97, 1], zIndex: -1 }))
   root.addChild(
     new Text({

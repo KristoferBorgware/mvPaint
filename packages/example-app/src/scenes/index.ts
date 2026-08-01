@@ -69,7 +69,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'images',
     title: 'Images',
     description:
-      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, zIndex against ordinary shapes, and an inline SVG rasterized at two different resolutions.',
+      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, stacking against ordinary shapes, and an inline SVG rasterized at two different resolutions.',
     prepare: prepareImageScene,
     build: buildImageScene,
   },
@@ -98,14 +98,14 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'zindex',
     title: 'Stacking order',
     description:
-      'Mesh shapes and text share one depth buffer, so zIndex can put a shape in front of text instead of the text lane always winning.',
+      'What decides which of two overlapping objects is in front. By default the order they were made in - every shape takes the next number from a running counter, so a new one lands on top with nothing to set - and then the same pair again with an explicit zIndex overriding it. Mesh shapes and text share one depth buffer either way, so the text lane never wins merely by drawing second.',
     build: buildZIndexScene,
   },
   {
     id: 'shape-stress',
     title: 'Shape stress test',
     description:
-      '100000 rects, circles, polygons and stars scattered randomly - size, rotation and colour vary, but every shape is a solid opaque fill with no stroke, and deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan, and the zIndex depth-sort is off too (every shape ties at zIndex 0 anyway). Reload scene for a fresh layout.',
+      '100000 rects, circles, polygons and stars scattered randomly - size, rotation and colour vary, but every shape is a solid opaque fill with no stroke, and deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan, and the zIndex depth-sort is off too (each shape is made and added in one step, so traversal order already is the stacking order). Reload scene for a fresh layout.',
     disableCulling: true,
     disableZSort: true,
     disableShadows: true,

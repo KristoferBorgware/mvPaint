@@ -53,6 +53,13 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+**Stacking that just works**
+Things stack in the order you make them — every shape takes the next number from a running
+counter as its `zIndex`, so a new one lands on top with nothing to set, across lanes as much as
+within one. Override it when you mean to: `front.zIndex = back.zIndex + 1` to put one shape over
+another, `shape.zIndex = nextZIndex()` to bring an existing one to the front, and any negative
+value to send one behind everything.
+
 **Grouping and layers**
 A `Group` is a *unit*: it places its contents, sizes itself to them, hides them together, and a
 drag inside one takes hold of the whole thing. A `Layer` is the opposite trade — optional (not a
@@ -200,7 +207,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,543 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,560 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 

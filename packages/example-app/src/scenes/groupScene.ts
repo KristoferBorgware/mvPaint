@@ -86,6 +86,8 @@ export function buildGroupScene(scene: Scene): SceneContent {
   // height: those are baked into geometry, so resizing one every frame would repack the
   // whole mesh lane (see ARCHITECTURE.md). Driving it through the transform costs nothing.
   const extent = root.addChild(
+    // Negative, which is how you say "behind everything": the counter every other shape
+    // takes its zIndex from only ever counts up from zero.
     new Rect({ name: 'orbit-extent', width: 1, height: 1, fill: [HIGHLIGHT[0], HIGHLIGHT[1], HIGHLIGHT[2], 0.18], zIndex: -2 }),
   )
   root.addChild(label(-470, -300, 'the tinted patch is group.bounds() - a group is only ever as big as what it holds'))

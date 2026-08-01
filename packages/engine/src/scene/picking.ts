@@ -119,11 +119,14 @@ function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean)
  * selection-highlight overlay still needs a correct depth to render at).
  *
  * `sorted = false` skips the zIndex sort and returns plain traversal order instead - an
- * O(n log n) cost that's pure waste for a scene that never sets zIndex (every comparison
- * ties, so the stable sort reproduces traversal order anyway) or that doesn't care which
- * of its shapes ends up in front. The renderer exposes this as a per-scene opt-out (see
- * SceneRenderer.setZSortEnabled); pickNode always sorts, since picking still needs a
- * correct top-to-bottom order regardless of what depth the renderer is assigning.
+ * O(n log n) cost that's waste for a scene built front-to-back in one pass, where creation
+ * order (which is what an unset zIndex now follows - see shapes/zOrder.ts) and traversal
+ * order are the same walk, or for a scene that doesn't care which of its shapes ends up in
+ * front. Note what it is NOT safe for any more: a scene that builds its nodes in one order
+ * and adds them in another gets a different answer with the sort off. The renderer exposes
+ * this as a per-scene opt-out (see SceneRenderer.setZSortEnabled); pickNode always sorts,
+ * since picking still needs a correct top-to-bottom order regardless of what depth the
+ * renderer is assigning.
  */
 export function collectZOrder(scene: Scene, sorted = true): Shape[] {
   const all: Shape[] = []

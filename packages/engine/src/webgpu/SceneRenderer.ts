@@ -115,9 +115,10 @@ export class SceneRenderer {
   // rather than culling itself, can turn that scan off and submit everything unconditionally.
   private cullingEnabled = true
   // Whether the depth-rank pass sorts by zIndex at all. Every shape is still collected and
-  // depth-ranked every frame either way - only the O(n log n) sort itself is skippable, for
-  // a scene that never sets zIndex (every comparison ties, so the stable sort reproduces
-  // traversal order anyway) or that doesn't care which shape ends up in front.
+  // depth-ranked every frame either way - only the O(n log n) sort itself is skippable, for a
+  // scene built front-to-back in one pass (creation order and traversal order are then the
+  // same walk, so the sort would only reproduce what is already there) or that doesn't care
+  // which shape ends up in front.
   private zSortEnabled = true
   // Whether the shadow lane runs at all. Even with nothing to bake, prepareShadows() and
   // draw()'s shadow section each scan every shape looking for one that casts a shadow -

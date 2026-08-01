@@ -81,14 +81,26 @@ import { Vector3 } from '../math/Vector3'
 import type { FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
+import { nextZIndex } from './zOrder'
 
 export interface ShapeOptions extends NodeOptions {
   width?: number
   height?: number
   /**
-   * Stacking-order hint: shapes with a higher zIndex render in front, resolved by the
-   * renderer's depth buffer (so mesh shapes and text can freely interleave). Integer-
-   * valued by convention; ties fall back to scene-graph order. Default 0.
+   * Where the shape sits in the scene-wide stack: higher renders in front, resolved by the
+   * renderer's depth buffer (so mesh shapes and text can freely interleave). Ties fall back
+   * to scene-graph order.
+   *
+   * OMIT IT unless you mean to override the stacking. Left out, the shape takes the next
+   * number from the running counter (see zOrder.ts) and therefore lands in front of every
+   * shape made before it - which is what stacking means and what a caller who has not thought
+   * about it wants.
+   *
+   * An explicit value is absolute, on the same scale as those counter-assigned numbers, and
+   * does not advance the counter. So a small literal is not "near the bottom of this group of
+   * shapes", it is near the bottom of the WHOLE SCENE - `zIndex: 1` in a scene that has
+   * already made a thousand shapes puts this one behind almost all of them. To place a shape
+   * relative to another, say so: `front.zIndex = back.zIndex + 1`.
    */
   zIndex?: number
   /**
@@ -136,6 +148,14 @@ export abstract class Shape extends Node {
    */
   draggable = true
 
+  /**
+   * Where this shape sits in the scene-wide stack: higher is in FRONT. Assigned from a
+   * running counter at construction (see zOrder.ts), so shapes stack in the order they were
+   * made and a new one lands on top - the constructor overwrites this initialiser.
+   *
+   * Set it directly to restack: `shape.zIndex = nextZIndex()` brings it to the front, and any
+   * negative value puts it behind everything that took its number from the counter.
+   */
   zIndex = 0
   /**
    * When true the shape is drawn in the overlay pass, after everything else and without
@@ -234,7 +254,10 @@ export abstract class Shape extends Node {
     super(options)
     this.width = options.width ?? 0
     this.height = options.height ?? 0
-    this.zIndex = options.zIndex ?? 0
+    // No explicit value means "on top of what exists", which is what a caller who has not
+    // thought about stacking almost always wants. An explicit one is taken as given and does
+    // NOT advance the counter - see ShapeOptions.zIndex for what that costs.
+    this.zIndex = options.zIndex ?? nextZIndex()
     this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
     this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]

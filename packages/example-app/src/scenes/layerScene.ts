@@ -106,9 +106,9 @@ export function buildLayerScene(scene: Scene): SceneContent {
         stroke: [1, 1, 1, 1],
         strokeWidth: 3,
         cornerRadius: 8,
-        // Ascending left to right, so each card overlaps the one before it. Which layer a
-        // card is in has nothing to do with it.
-        zIndex: i,
+        // No zIndex at all: made left to right, so each card takes a higher number from the
+        // counter than the one before and overlaps it. Which layer a card is in has nothing
+        // to do with it, which is the point.
       }),
     )
   }

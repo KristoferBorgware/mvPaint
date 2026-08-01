@@ -41,10 +41,11 @@ export interface ExampleScene {
   disableCulling?: boolean
   /**
    * Skip the zIndex depth-sort for this scene: shapes still get a depth rank every frame,
-   * just in scene-traversal order rather than sorted by zIndex - free for a scene that
-   * never sets zIndex (every comparison would tie, so the sort reproduces traversal order
-   * anyway) and where stacking order genuinely doesn't matter. Default false (sorted, as
-   * normal); the canvas restores it on switching to any scene that doesn't set this.
+   * just in scene-traversal order rather than sorted by zIndex - free for a scene built
+   * front-to-back in one pass, where creation order (which is what an unset zIndex follows)
+   * and traversal order are the same walk, and where stacking order genuinely doesn't
+   * matter. Default false (sorted, as normal); the canvas restores it on switching to any
+   * scene that doesn't set this.
    */
   disableZSort?: boolean
   /**

@@ -47,8 +47,8 @@ export function buildShadowScene(scene: Scene): SceneContent {
         width: 260,
         height: 180,
         fill,
-        // Later cards sit in front, so their shadows fall on the earlier ones.
-        zIndex: i,
+        // Later cards sit in front - which is simply what being made later means now - so
+        // their shadows fall on the earlier ones.
         shadowOffsetX: 10,
         shadowOffsetY: 18,
         shadowBlur: 28,

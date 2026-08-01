@@ -178,22 +178,27 @@ class TransformGroup extends Container {
   front.pickable = true
 }
 
-// --- zIndex: overrides insertion order for both stacking (collectZOrder) and picking ---
+// --- stacking: made later means in front, and zIndex overrides that for both
+//     collectZOrder and picking ---
 {
   const scene = new Scene()
   const early = scene.root.addChild(centredRect({ name: 'early', x: 0, y: 0, width: 100, height: 100 }))
   const late = scene.root.addChild(centredRect({ name: 'late', x: 0, y: 0, width: 100, height: 100 }))
-  assert((centredRect()).zIndex === 0, 'zIndex defaults to 0')
 
-  // Added later (would normally paint on top), but a lower zIndex sends it to the back.
-  late.zIndex = -1
-  assert(pickNode(scene, 0, 0) === early, 'lower zIndex loses the pick even though it was added first')
+  // The default, with nothing set on either: the one made second is in front.
+  assert(late.zIndex > early.zIndex, 'a shape made later takes a higher zIndex than one made before it')
+  assert(pickNode(scene, 0, 0) === late, 'so it is what a pick finds')
+  assert(collectZOrder(scene).indexOf(late) > collectZOrder(scene).indexOf(early), 'and it ranks in front')
+
+  // Made later (so painting on top by default), but a lower zIndex sends it to the back.
+  late.zIndex = early.zIndex - 1
+  assert(pickNode(scene, 0, 0) === early, 'lower zIndex loses the pick even though it was made second')
 
   const ordered = collectZOrder(scene)
   assert(ordered.indexOf(late) < ordered.indexOf(early), 'collectZOrder ranks the lower zIndex first (furthest back)')
 
   // Equal zIndex falls back to scene/insertion order (stable sort).
-  late.zIndex = 0
+  late.zIndex = early.zIndex
   assert(pickNode(scene, 0, 0) === late, 'equal zIndex falls back to insertion order - the later node wins')
 
   // depthForRank is monotonic (higher rank = higher zIndex = smaller/closer depth) and
@@ -204,13 +209,32 @@ class TransformGroup extends Container {
   for (let i = 1; i < n; i++) assert(depths[i] < depths[i - 1], 'depthForRank decreases as rank (zIndex) increases')
 }
 
+// --- higher zIndex is in FRONT, end to end -------------------------------------------
+//
+// The direction the counter-assigned stacking depends on, asserted against the depth the
+// renderer actually draws with rather than against a comment. Under 'less-equal' (WebGPU) /
+// LEQUAL (WebGL) a SMALLER depth wins, so the frontmost shape must come out with the
+// smallest one.
+{
+  const scene = new Scene()
+  const back = scene.root.addChild(centredRect({ name: 'back', width: 40, height: 40 }))
+  const front = scene.root.addChild(centredRect({ name: 'front', width: 40, height: 40 }))
+  assert(front.zIndex > back.zIndex, 'sanity: front was made second')
+
+  const order = collectZOrder(scene)
+  const depthOf = (shape: Shape) => depthForRank(order.indexOf(shape), order.length)
+  assert(depthOf(front) < depthOf(back), 'the higher zIndex gets the smaller depth, which is the one that wins')
+  assert(pickNode(scene, 0, 0) === front, 'and picking agrees with it')
+}
+
 // --- Text is a Shape now (not a lane-specific special case): it inherits zIndex,
 //     offset, visible/pickable from the same base as every mesh shape, which is what
 //     makes cross-lane zIndex ordering (a shape in front of text, or vice versa)
 //     possible without picking/depth needing to special-case "which lane" a node is in ---
 {
   assert(Text.prototype instanceof Shape, 'Text extends Shape, carrying zIndex/offset/pickable like a mesh shape')
-  assert(new Text().zIndex === 0, 'Text inherits the zIndex default')
+  const beforeText = new Rect({ width: 1, height: 1 })
+  assert(new Text().zIndex > beforeText.zIndex, 'Text takes its zIndex from the same counter every mesh shape does')
   assert(new Text().pickable, 'Text inherits the pickable default')
 
   // Shape's full styling vocabulary (width/height/fill/stroke/...) is inherited too, even
@@ -322,10 +346,11 @@ class TransformGroup extends Container {
   left.visible = true
 
   // Results come back in z-order, matching collectZOrder rather than traversal order.
+  const rightZ = right.zIndex
   right.zIndex = -5
   const ordered = nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 })
   assert(ordered[0] === right, 'marquee results come back in z-order, back to front')
-  right.zIndex = 0
+  right.zIndex = rightZ
 
   // A moved shape is picked up at its new position: bounds are read live, not cached.
   assert(!nodesInBox(scene, { x: 800, y: 800 }, { x: 1000, y: 1000 }).includes(left), 'sanity: left is not out there yet')

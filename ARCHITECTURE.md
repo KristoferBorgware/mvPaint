@@ -245,6 +245,25 @@ and the answer is the same whichever API ends up submitting it.
 **Z-order.** `collectZOrder()` walks the tree and stable-sorts every shape by `zIndex`. Stable,
 so ties keep scene-graph order.
 
+**Where `zIndex` comes from.** Every `Shape` takes the next number from a running counter
+(`shapes/zOrder.ts`) at construction, so shapes stack in the order they were made: the first is
+at 0, the next at 1 and therefore in front of it, and drawing something new puts it on top with
+nothing to set. Higher is in **front** — `collectZOrder()` sorts ascending and `depthForRank()`
+turns a higher rank into a nearer depth.
+
+Creation order, not tree order: a shape exists before it is added to anything and may be moved
+between parents afterwards, and neither should silently restack it. The counter is module-global
+because a `Shape` is constructed without knowing which scene it will join; two scenes sharing it
+costs nothing, since a `zIndex` is only ever compared against another in the same scene. It never
+goes backwards, so the numbers climb for as long as the page lives — which is free, because depth
+comes from a shape's **rank** in the sorted list and never from the `zIndex` value itself.
+
+An explicit `zIndex` overrides all of that and is absolute on the same scale, so a small literal
+is not "near the bottom of these few shapes", it is near the bottom of the whole scene. To place
+one shape relative to another, say so: `front.zIndex = back.zIndex + 1`. The two idioms the
+counter is built around are `shape.zIndex = nextZIndex()` (bring to front) and any negative value
+(send behind everything, since the counter only counts up from zero).
+
 **Depth assignment.** Each shape's rank becomes a depth:
 
 ```ts

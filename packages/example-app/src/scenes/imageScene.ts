@@ -230,12 +230,14 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
   root.addChild(label(60, -150, 'linear (same 8x8)'))
   root.addChild(new Image({ name: 'image-linear', texture: pixels, x: 90, y: -170, width: 120, height: 120, filter: 'linear' }))
 
-  // An image is an ordinary scene node: it stacks with shapes and text by zIndex, and a
-  // higher one wins whichever lane drew it.
-  root.addChild(label(280, -150, 'zIndex vs shapes'))
-  root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1], zIndex: 1 }))
-  root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 340, y: -150, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 }, zIndex: 0 }))
-  root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: [0.9, 0.3, 0.5, 0.9], zIndex: 2 }))
+  // An image is an ordinary scene node: it stacks with shapes and text like anything else,
+  // and whichever is in front wins regardless of which lane drew it. Made back to front -
+  // image, then rect over it, then circle over both - so the stack is just the order these
+  // three lines are in.
+  root.addChild(label(280, -150, 'stacking vs shapes'))
+  root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 340, y: -150, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 } }))
+  root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: [0.18, 0.65, 0.36, 1] }))
+  root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: [0.9, 0.3, 0.5, 0.9] }))
 
   // Row 4: an SVG as the source. Both quads are the same size on screen and come from the
   // same document; only the pixel size they were rasterized at differs, which is the whole
