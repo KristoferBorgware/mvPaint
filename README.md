@@ -57,6 +57,15 @@ Every colour takes either form — the `[r, g, b, a]` tuple in 0..1, or a string
 `'transparent'`. Strings are converted on assignment and read back as the tuple, so nothing
 below the scene graph ever sees one.
 
+**Shapes you write yourself**
+`CustomShape` is the base for a shape the engine does not know about: subclass it, implement
+`describe(ctx)`, and draw the outline into a path builder that speaks `moveTo`/`lineTo`/curves/
+arcs/`closePath` and produces mesh geometry rather than pixels. It is then a shape like any
+other — picked on its real outline, framed by its real bounds, casting a blurred shadow from its
+own silhouette, wearing a gradient, and stacked with everything else. `ctx.style()` gives an
+individual run of segments its own colour and thickness, so one continuous outline can change
+partway along without becoming several nodes.
+
 **Object opacity**
 `shape.opacity` fades a whole object — fill, stroke, gradient, glyph, texture and its shadow
 alike — and is kept out of its colours, so a fade never has to know or restore what it touched.
@@ -231,13 +240,13 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,811 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,836 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
 ### Demo scenes
 
-Shapes and gradients · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
+Shapes and gradients · Custom shapes · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
 Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
 (100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
 

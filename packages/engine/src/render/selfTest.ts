@@ -8,6 +8,8 @@
 
 import { Rect , type RectOptions } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
+import { CustomShape } from '../shapes/CustomShape'
+import type { ShapeContext } from '../shapes/ShapeContext'
 import { Polyline } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
 import {
@@ -69,6 +71,8 @@ interface CapturedVertex {
   x: number
   y: number
   isFill: boolean
+  /** Which of the shape's materials() paints it - 0 for every single-material shape. */
+  material: number
 }
 interface Captured {
   verts: CapturedVertex[]
@@ -79,8 +83,8 @@ function capturingSink(): { sink: MeshSink } & Captured {
   const verts: CapturedVertex[] = []
   const tris: [number, number, number][] = []
   const sink: MeshSink = {
-    vertex: (x, y, isFill) => {
-      verts.push({ x, y, isFill })
+    vertex: (x, y, isFill, material = 0) => {
+      verts.push({ x, y, isFill, material })
       return verts.length - 1
     },
     triangle: (a, b, c) => {
@@ -1321,6 +1325,196 @@ assert(
   assert(isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'red', stroke: 'black' })), 'opaque strings are opaque')
   assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'rgba(255,0,0,0.5)' })), 'and translucent ones are not')
   assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'transparent' })), 'transparent included')
+}
+
+// --- CustomShape: a described outline is geometry like any other ---------------------------
+//
+// The point of every assertion here is that nothing downstream can tell a described shape
+// from a built-in one. What is checked is therefore the OUTPUT - triangles, materials,
+// bounds, hits - and never that describe() was called in some particular way.
+{
+  class Triangle extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.moveTo(-50, -40)
+      ctx.lineTo(0, 60)
+      ctx.lineTo(50, -40)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+
+  const tri = new Triangle({ fill: 'crimson' })
+  const drawn = capture(tri)
+  assert(drawn.tris.length === 1, 'a described triangle triangulates to one triangle')
+  assert(
+    drawn.verts.length === 3 && drawn.verts.every((v) => v.isFill),
+    'and its vertices are fill vertices, so a gradient would reach them',
+  )
+  assert(tri.hitTestLocal(0, 0), 'a point inside it hits')
+  assert(!tri.hitTestLocal(-49, 55), 'a point outside it, but inside its bounding box, does not')
+
+  const bounds = tri.localBounds()
+  assert(
+    near(bounds.min.x, -50) && near(bounds.max.y, 60),
+    'bounds come from the described outline, so groups and marquees frame it correctly',
+  )
+
+  // A path left open is still a region when filled - the only reading of "fill this" that
+  // means anything for three points that do not meet.
+  class OpenTriangle extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.moveTo(-50, -40)
+      ctx.lineTo(0, 60)
+      ctx.lineTo(50, -40)
+      ctx.fill()
+    }
+  }
+  assert(capture(new OpenTriangle()).tris.length === 1, 'an unclosed path fills as if it were closed')
+}
+
+// --- ...including the parts that only a real outline gets right -----------------------------
+{
+  // A subpath inside another cuts a hole, exactly as it does for a Path built from SVG data:
+  // the nesting rule is shared code, not a second implementation.
+  class Ring extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.rect(-60, 60, 120, 120)
+      ctx.rect(-25, 25, 50, 50)
+      ctx.fill()
+    }
+  }
+  const ring = new Ring()
+  assert(ring.hitTestLocal(-45, 0), 'the solid part of a ring hits')
+  assert(!ring.hitTestLocal(0, 0), 'and the hole does not')
+
+  // rect() places its corner the way a Rect node does - top-left, extending down in a y-up
+  // scene - so the two can be written interchangeably without anything flipping.
+  const box = new Ring().localBounds()
+  assert(near(box.min.y, -60) && near(box.max.y, 60), 'rect(x, y, w, h) hangs downward from (x, y)')
+
+  // Curves flatten to within the tolerance, which is what makes it a knob worth having: a
+  // finer one is more triangles and a closer circle.
+  class Disc extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.circle(0, 0, 100)
+      ctx.fill()
+    }
+  }
+  const coarse = capture(new Disc({ tolerance: 4 }))
+  const fine = capture(new Disc({ tolerance: 0.1 }))
+  assert(fine.verts.length > coarse.verts.length * 2, 'a tighter tolerance flattens a circle into more segments')
+  for (const v of fine.verts) {
+    assert(Math.abs(Math.hypot(v.x, v.y) - 100) <= 1e-6, 'and every point of it sits on the circle')
+    break
+  }
+  const discBounds = new Disc({ tolerance: 0.01 }).localBounds()
+  assert(near(discBounds.max.x, 100, 0.01) && near(discBounds.min.y, -100, 0.01), 'a described circle is round')
+}
+
+// --- segments carry their own properties ----------------------------------------------------
+{
+  // One continuous outline, three colours. Each distinct paint is one material record and the
+  // vertices of the segments using it name it - the same mechanism a styled text run uses.
+  class Wire extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.style({ stroke: '#ff0000', strokeWidth: 10, lineCap: 'round' })
+      ctx.moveTo(0, 0)
+      ctx.lineTo(100, 0)
+      ctx.style({ stroke: '#00ff00' })
+      ctx.lineTo(200, 0)
+      ctx.style({ stroke: '#0000ff' })
+      ctx.lineTo(300, 0)
+      ctx.stroke()
+    }
+  }
+
+  const wire = new Wire()
+  const materials = wire.materials()
+  assert(materials.length === 4, 'the shape itself plus one record per distinct paint')
+  assert(near(materials[1].stroke[0], 1) && near(materials[3].stroke[2], 1), 'each record holds its own stroke colour')
+
+  const used = new Set(capture(wire).verts.map((v) => v.material))
+  assert(used.size === 3 && !used.has(0), 'every segment is painted by the style it was added in')
+
+  // A style change that only alters GEOMETRY is already in the triangles, so it does not cost
+  // a record - the distinction the mesh format actually cares about.
+  class Tapered extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.style({ stroke: 'black', strokeWidth: 4 })
+      ctx.moveTo(0, 0)
+      ctx.lineTo(50, 0)
+      ctx.style({ strokeWidth: 20 })
+      ctx.lineTo(100, 0)
+      ctx.stroke()
+    }
+  }
+  const tapered = new Tapered()
+  assert(tapered.materials().length === 2, 'changing only the width adds no material record')
+  // Half the width to each side, so the thin run's ribbon is 2 deep and the thick one's 10 -
+  // the change is in the triangles, where a stroke width has always lived.
+  const spans = capture(tapered).verts.map((v) => Math.abs(v.y))
+  assert(Math.max(...spans) === 10 && Math.min(...spans) === 2, 'but it does change the ribbon it meshes')
+
+  // And a description that never styles anything is indistinguishable from any other shape.
+  class Plain extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.rect(0, 0, 10, 10)
+      ctx.fill()
+    }
+  }
+  const plain = new Plain({ fill: 'teal' })
+  assert(plain.materials().length === 1 && plain.materials()[0] === plain, 'an unstyled description is its own material')
+  assert(isOpaqueShape(plain), 'so the opacity classifier reads it exactly as it reads a Rect')
+
+  // The classifier reaches THROUGH the described materials, which is the part that would
+  // punch a hole in the picture if it did not: one translucent segment makes the object
+  // translucent, however solid the shape's own colours are.
+  class Faded extends CustomShape {
+    protected override describe(ctx: ShapeContext): void {
+      ctx.style({ stroke: 'rgba(0,0,0,0.5)', strokeWidth: 4 })
+      ctx.moveTo(0, 0)
+      ctx.lineTo(10, 0)
+      ctx.stroke()
+    }
+  }
+  assert(!isOpaqueShape(new Faded({ fill: 'red', stroke: 'red' })), 'a translucent segment makes the whole object translucent')
+}
+
+// --- describe() runs once, and again exactly when the outline is invalidated -----------------
+{
+  let runs = 0
+  class Counted extends CustomShape {
+    span = 40
+    protected override describe(ctx: ShapeContext): void {
+      runs++
+      ctx.moveTo(0, 0)
+      ctx.lineTo(this.span, 0)
+      ctx.lineTo(this.span, this.span)
+      ctx.fill()
+    }
+  }
+
+  const node = new Counted()
+  capture(node)
+  capture(node)
+  node.materials()
+  assert(runs === 1, 'describe() is not re-run per tessellation, nor to answer materials()')
+
+  // Moving, turning and recolouring are all applied per frame from the object record, so none
+  // of them touches the outline.
+  node.x = 500
+  node.rotation = 1
+  node.fill = 'gold'
+  capture(node)
+  assert(runs === 1, 'and not when the shape merely moves, turns or changes colour')
+
+  // A property the outline reads is the caller's to announce, the same as Circle.radius.
+  node.span = 90
+  node.markGeometryDirty()
+  const grown = capture(node)
+  assert(runs === 2, 'markGeometryDirty() asks for a fresh description')
+  assert(grown.verts.some((v) => near(v.x, 90)), 'and the new one is what gets drawn')
+  assert(node.localBounds().max.x === 90, 'with the picking layout rebuilt from it too')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

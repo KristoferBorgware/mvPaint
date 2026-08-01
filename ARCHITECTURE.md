@@ -317,6 +317,49 @@ flat). `material` selects which of the shape's materials paints the vertex — u
 | `Image` | its quad — for the silhouette, bounds and hit test only; the pixels come from the image lane |
 | `Text` | **nothing**; it inherits the no-op, because it draws through the text lane |
 | `VectorText` | real glyph outlines, tessellated like any other path |
+| `CustomShape` | whatever the subclass's `describe()` drew — see below |
+
+### Shapes the engine does not know about
+
+`CustomShape` is `buildGeometry()` turned outward. Subclass it, implement `describe(ctx)`, and
+draw the outline into the context you are handed:
+
+```ts
+class Star extends CustomShape {
+  protected describe(ctx: ShapeContext): void {
+    ctx.moveTo(0, 90)
+    ctx.lineTo(26, 28)
+    // ...
+    ctx.closePath()
+    ctx.fillAndStroke()
+  }
+}
+```
+
+`ShapeContext` is a path builder with the vocabulary everyone already has — `beginPath`,
+`moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc`, `ellipse`, `rect`, `circle`,
+`closePath`, plus `pathData(d)` for SVG path data — and it produces **mesh geometry, not
+pixels**. Closed subpaths go through the same earcut path a `Path` node's contours do (so a
+subpath inside another is a hole); open ones go through the shared stroker. Coordinates are the
+shape's own local space, y-up.
+
+Everything downstream then treats it as what it is — triangles. Picking tests the real outline,
+bounds come from it, a shadow is baked from that silhouette, and gradients, object opacity and
+the scene-wide stacking order all work because none of them ever asked what drew the geometry.
+
+**Segments carry their own properties.** `ctx.style({ stroke, strokeWidth, lineJoin, ... })`
+applies to everything added after it, and each segment remembers the style it was added in, so
+one continuous outline can change colour and thickness partway along without becoming several
+nodes. Each distinct *paint* becomes one material record on the shape — the same `materials()`
+mechanism a styled `VectorText` run uses — while a change to stroke *geometry* adds no record,
+because that difference is already in the triangles. A run of segments sharing a style is
+stroked as one polyline with proper joins throughout; where the style changes, the runs meet end
+to end with a cap each.
+
+`describe()` runs **once**, lazily, and then not again until `markGeometryDirty()`. So it is the
+right place for real work and the wrong place for anything per-frame: moving, turning or
+recolouring the node never re-runs it, and a shape whose outline depends on a property of its
+own has to say so when that property changes — exactly like `Circle.radius`.
 
 ### The tessellation cache
 
@@ -955,6 +998,7 @@ every generated shader's agreement with the record layout it was generated from.
 | Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `shapes/Group.ts`, `shapes/Layer.ts`, `events/` |
 | The view: pan, zoom, rotate | `camera/Camera2D.ts`, `input/viewport.ts`, `input/cameraControls.ts` |
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
+| Shapes you write yourself | `shapes/CustomShape.ts`, `shapes/ShapeContext.ts` |
 | Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |

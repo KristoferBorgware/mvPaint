@@ -2,6 +2,7 @@
 // canvas loads by id - so adding a demo is one new file plus one entry below.
 
 import { buildColorScene } from './colorScene'
+import { buildCustomShapeScene } from './customShapeScene'
 import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildLayerScene } from './layerScene'
@@ -29,6 +30,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Rects, a circle and an open polyline: linear and radial gradient fills in local space, stroke joins and caps, corner rounding (uniform, per-corner, and scaled down to fit), and two shapes spinning about their own centres.',
     build: buildShapesScene,
+  },
+  {
+    id: 'custom-shapes',
+    title: 'Custom shapes',
+    description:
+      'Five shapes the engine knows nothing about, each a class in the scene file that draws its own contour into a path-building context - moveTo/lineTo/curves/arcs, then fill and stroke. A star and a heart from a description and nothing else; one continuous route whose legs each carry their own colour and width; a gear with a bore through it, wearing a gradient and a shadow it never asks for; and a wave whose outline really does change, which is the one that has to say so. All of them are picked on the real outline and stacked with everything else.',
+    build: buildCustomShapeScene,
   },
   {
     id: 'groups',
