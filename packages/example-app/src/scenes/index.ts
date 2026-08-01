@@ -98,7 +98,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'zindex',
     title: 'Stacking order',
     description:
-      'What decides which of two overlapping objects is in front. By default the order they were made in - every shape takes the next number from a running counter, so a new one lands on top with nothing to set - and then the same pair again with an explicit zIndex overriding it. Mesh shapes and text share one depth buffer either way, so the text lane never wins merely by drawing second.',
+      'The rule - a shape made later is in front, because each takes the next number from a running counter as its zIndex - and every way there is to say otherwise. Six panels: the default with nothing set; a Text and a mesh shape obeying it despite drawing through different pipelines; one assignment lifting a shape over another; a card taking its turn on top through nextZIndex(); a panel made last and still behind everything on a negative; and one slotted between two others at their midpoint, since a zIndex is a number rather than an integer.',
     build: buildZIndexScene,
   },
   {

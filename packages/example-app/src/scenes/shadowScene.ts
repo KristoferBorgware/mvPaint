@@ -37,7 +37,14 @@ export function buildShadowScene(scene: Scene): SceneContent {
   )
 
   // --- overlapping cards: each shadow lands on the card behind it -----------------------
-  CARD_FILL.forEach((fill, i) => {
+  //
+  // Made RIGHT TO LEFT, so the leftmost card is the one in front. That direction is the whole
+  // reason this row shows anything: these shadows are cast down and to the right, and each
+  // card's neighbour in that direction is the next one along - so the shadow only has
+  // somewhere to land if the caster is the card IN FRONT. Built left to right, every shadow
+  // would fall behind the card that comes next and be covered by it, and the row would look
+  // like three cards with one shadow at the end.
+  for (let i = CARD_FILL.length - 1; i >= 0; i--) {
     root.addChild(
       new Rect({
         name: `card-${i}`,
@@ -46,16 +53,14 @@ export function buildShadowScene(scene: Scene): SceneContent {
         y: 230 - i * 40,
         width: 260,
         height: 180,
-        fill,
-        // Later cards sit in front - which is simply what being made later means now - so
-        // their shadows fall on the earlier ones.
+        fill: CARD_FILL[i],
         shadowOffsetX: 10,
         shadowOffsetY: 18,
         shadowBlur: 28,
         shadowOpacity: 0.45,
       }),
     )
-  })
+  }
   label(scene, -430, 260, 'Overlapping: each shadow falls on the card behind it')
 
   // --- one parameter at a time ----------------------------------------------------------
