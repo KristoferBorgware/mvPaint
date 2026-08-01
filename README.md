@@ -53,6 +53,13 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+**Grouping and layers**
+A `Group` is a *unit*: it places its contents, sizes itself to them, hides them together, and a
+drag inside one takes hold of the whole thing. A `Layer` is the opposite trade — optional (not a
+canvas, and not a draw-order boundary; `zIndex` still decides what is on top, scene-wide), it
+names a slice of the scene and switches it off with one `enabled`, while every shape inside stays
+independently selectable and draggable.
+
 **Text, two ways**
 `Text` draws through the MSDF atlas — cheap, four vertices per glyph. `VectorText` tessellates
 the real glyph outlines through the mesh lane, so letterforms get true blurred shadows and
@@ -185,7 +192,7 @@ npm run build    # typecheck + production build
 
 ```
 packages/engine        the renderer - no demo content, no framework
-  src/shapes/          Node, Container, Group, Shape and the concrete shapes
+  src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
   src/text/            MSDF metrics + atlas, the shaper, outline glyph extraction
   src/webgpu/          SceneRenderer: the gather, the passes, createSceneRenderer()
@@ -193,8 +200,8 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,412 assertions
-across ten suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,543 assertions
+across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
 ### Demo scenes

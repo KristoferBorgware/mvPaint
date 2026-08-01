@@ -90,6 +90,31 @@ one is the only place grouping is mechanism rather than policy. Which node a cli
 an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
 that wants to ask.
 
+### Layers, which are not canvases
+
+`Layer extends Container` (`shapes/Layer.ts`) is the other organising container, and it is
+**optional** — unlike Konva's, where a layer is a real `<canvas>` and nothing can be drawn
+without one. Here it is not a canvas, not a render target, and **not a draw-order boundary**:
+the whole scene is drawn in one pass and what is on top comes from each shape's `zIndex`,
+scene-wide. Two shapes in different layers order by their own `zIndex`, never by which layer
+they are in, so reorganising a scene into layers cannot change how it looks.
+
+What it adds is the pair a group cannot give you: a name for a slice of the scene, and one
+`enabled` that takes that whole slice out of the picture — out of the render order, and so out
+of picking and out of a marquee too. Toggling it costs one check, not one per shape, because
+the walk turns back at a disabled layer. `enabled` is the layer's property and never written
+onto its children: every shape keeps its own `visible`, and switching the layer back on brings
+back exactly the shapes that were visible before.
+
+**Why it extends `Container` and not `Group`** is the whole design. A group is a *unit* — a
+press on a shape inside a draggable group takes hold of the group, and an application asking
+`outermostGroup()` gets the group. That is exactly wrong for a layer: putting fifty shapes on a
+"background" layer must not make them one draggable object. Because a `Layer` is not a `Group`,
+`closestGroup()` / `outermostGroup()` / `draggableGroup()` walk straight past it and every shape
+inside stays independently pickable, draggable, selectable and transformable — as if the layer
+were not there. It still carries a transform, because every `Node` does, so moving a layer moves
+its contents without any of the selection semantics a group would bring.
+
 ### The camera is not in the graph
 
 `Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*
@@ -743,7 +768,7 @@ every generated shader's agreement with the record layout it was generated from.
 
 | Concern | Files |
 | --- | --- |
-| Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `shapes/Group.ts`, `events/` |
+| Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `shapes/Group.ts`, `shapes/Layer.ts`, `events/` |
 | The view: pan, zoom, rotate | `camera/Camera2D.ts`, `input/viewport.ts`, `input/cameraControls.ts` |
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
 | Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |

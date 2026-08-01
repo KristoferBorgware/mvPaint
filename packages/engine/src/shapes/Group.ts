@@ -37,6 +37,7 @@
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Container } from './Container'
+import { Layer } from './Layer'
 import { Node, type NodeOptions } from './Node'
 import { Shape } from './Shape'
 
@@ -109,18 +110,40 @@ export class Group extends Container {
   // whatever space the box is being accumulated in, so the world variant differs from the
   // local one only in what it starts with.
   private encapsulateInto(box: AABB, into: Matrix4x4, boundsOf: LocalBoundsResolver): void {
-    for (const child of this.children) {
-      const toBox = into.mul(child.localMatrix())
-      if (child instanceof Group) {
-        if (!child.visible) continue
-        child.encapsulateInto(box, toBox, boundsOf)
-        continue
-      }
-      if (child instanceof Shape && !child.visible) continue
-      const local = boundsOf(child)
-      if (!local || !local.valid()) continue
-      box.encapsulate(local.transformed(toBox))
+    encapsulateChildren(this, box, into, boundsOf)
+  }
+}
+
+/**
+ * Accumulate a container's contents into `box`, recursing through the containers that merely
+ * hold things - a nested Group, and a Layer, which is the same in this respect - and skipping
+ * a hidden group or a disabled layer whole rather than shape by shape.
+ *
+ * A free function rather than a method because it has to run over a Layer as readily as a
+ * Group, and a Layer is deliberately not one.
+ */
+function encapsulateChildren(
+  container: Container,
+  box: AABB,
+  into: Matrix4x4,
+  boundsOf: LocalBoundsResolver,
+): void {
+  for (const child of container.children) {
+    const toBox = into.mul(child.localMatrix())
+    if (child instanceof Group) {
+      if (!child.visible) continue
+      encapsulateChildren(child, box, toBox, boundsOf)
+      continue
     }
+    if (child instanceof Layer) {
+      if (!child.enabled) continue
+      encapsulateChildren(child, box, toBox, boundsOf)
+      continue
+    }
+    if (child instanceof Shape && !child.visible) continue
+    const local = boundsOf(child)
+    if (!local || !local.valid()) continue
+    box.encapsulate(local.transformed(toBox))
   }
 }
 

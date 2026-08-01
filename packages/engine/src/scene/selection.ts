@@ -10,7 +10,7 @@ import type { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
 import type { FontProvider } from '../text/layout'
-import { textLocalBounds } from './picking'
+import { collectZOrder, textLocalBounds } from './picking'
 
 export interface MarqueeOptions {
   /**
@@ -50,6 +50,12 @@ function contains2D(outer: AABB, inner: AABB): boolean {
  * (`from`/`to` are opposite corners in any order - a drag can go in any direction).
  * Returned in the scene's z-order, back to front, so the result lines up with
  * collectZOrder()/pickNode() rather than raw traversal order.
+ *
+ * The candidate set IS collectZOrder's, not a traversal of its own, so a marquee cannot
+ * disagree with what is on screen: a hidden group's contents and a disabled layer's are
+ * pruned at the container, exactly as they are for drawing and for picking. Selecting
+ * something that is not being drawn is never the answer to "what did I just drag a box
+ * around".
  */
 export function nodesInBox(
   scene: Scene,
@@ -63,14 +69,16 @@ export function nodesInBox(
     new Vector3(Math.max(from.x, to.x), Math.max(from.y, to.y), Infinity),
   )
 
+  // Already sorted and already pruned - collectZOrder does both, and re-sorting its output
+  // would be doing the same work twice.
   const hits: Shape[] = []
-  scene.root.traversePreOrder((node) => {
-    if (!(node instanceof Shape) || !node.visible || !node.pickable) return
+  for (const node of collectZOrder(scene)) {
+    if (!node.pickable) continue
     const bounds = worldBounds(node, options.fontBook)
-    if (!bounds) return
+    if (!bounds) continue
     if (mode === 'contain' ? contains2D(box, bounds) : box.intersects(bounds)) {
       hits.push(node)
     }
-  })
-  return hits.sort((a, b) => a.zIndex - b.zIndex)
+  }
+  return hits
 }

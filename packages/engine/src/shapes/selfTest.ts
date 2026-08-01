@@ -16,6 +16,7 @@ import { meshGeometryEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
+import { Layer } from './Layer'
 import { Text } from './Text'
 import { Transformer } from './Transformer'
 import {
@@ -1038,6 +1039,54 @@ function TWO_PI_PLUS(a: number): number {
   inner.draggable = true
   outer.draggable = false
   assert(draggableGroup(leaf) === inner, 'stopping at the outer one that opted out, but keeping the inner')
+}
+
+// --- a layer is NOT a group, which is the entire point of it being its own class ---
+{
+  const layer = new Layer({ name: 'background' })
+  const leaf = layer.addChild(new Rect({ width: 1, height: 1 }))
+
+  // Every one of these would answer differently if Layer extended Group, and each is a
+  // behaviour an application would get wrong: fifty shapes on a "background" layer must not
+  // become one draggable, selectable object.
+  assert(closestGroup(leaf) === null, 'a shape in a layer is in no group')
+  assert(outermostGroup(leaf) === null, 'so an application selecting the assembly selects nothing')
+  assert(draggableGroup(leaf) === null, 'and a drag on it takes hold of the shape, not the layer')
+  assert(hiddenByGroup(leaf) === false, 'a layer is not something that can hide it as a group')
+  layer.enabled = false
+  assert(hiddenByGroup(leaf) === false, 'not even switched off - that is the render walk\'s job, not this one\'s')
+
+  // The one thing it shares with a group: a group ABOVE a layer still governs it, because
+  // the ancestor walks stop at Groups wherever they are and a Layer is simply not one.
+  layer.enabled = true
+  const group = new Group()
+  group.addChild(layer)
+  assert(closestGroup(leaf) === group, 'a group above a layer is still the shape\'s group')
+}
+
+// --- a layer is measured through, so a group holding one sizes itself to the contents ---
+{
+  const group = new Group()
+  const layer = group.addChild(new Layer({ x: 100 }))
+  layer.addChild(new Rect({ width: 10, height: 10 }))
+
+  assert(near(group.bounds().max.x, 110), "a layer's contents count towards the group's extent, through its transform")
+  layer.enabled = false
+  assert(!group.bounds().valid(), 'and a disabled layer takes them out whole, like a hidden group')
+  layer.enabled = true
+  assert(near(group.bounds().max.x, 110), 're-enabling brings back exactly what was there')
+}
+
+// --- a layer's transform composes like any node's; it is a Container, nothing more ---
+{
+  const layer = new Layer({ x: 50, y: -20 })
+  const leaf = layer.addChild(new Rect({ x: 5, width: 1, height: 1 }))
+  const at = leaf.worldMatrix().transformPoint(new Vector3(0, 0, 0))
+  assert(near(at.x, 55) && near(at.y, -20), 'moving a layer moves what is inside it')
+
+  assert(layer.nodeName === 'Layer' && layer.nodeType === 'Layer', 'and it names itself')
+  assert(new Layer().enabled === true, 'a layer is on unless it is asked not to be')
+  assert(new Layer({ enabled: false }).enabled === false, 'which the option sets')
 }
 
 // --- a group carries the same transform vocabulary a shape does ---

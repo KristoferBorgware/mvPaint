@@ -3,6 +3,7 @@
 
 import { Container } from '../shapes/Container'
 import { Group } from '../shapes/Group'
+import { Layer } from '../shapes/Layer'
 import { Node } from '../shapes/Node'
 import { Scene } from './Scene'
 import { AABB } from '../math/AABB'
@@ -375,6 +376,81 @@ class TransformGroup extends Container {
   outer.visible = true
   inner.visible = false
   assert(!collectZOrder(scene).includes(leaf), 'and so is hiding one in the middle')
+}
+
+// --- a layer in a real scene: invisible to everything except its own `enabled` switch ---
+{
+  const scene = new Scene()
+  const layer = scene.root.addChild(new Layer({ name: 'background', x: 200 }))
+  const inLayer = layer.addChild(new Rect({ width: 40, height: 40 }))
+  const loose = scene.root.addChild(new Rect({ x: -500, y: 0, width: 40, height: 40 }))
+
+  // A layer draws nothing itself, and what it holds behaves as if it sat at the root -
+  // through the layer's transform, like any container's.
+  assert(collectZOrder(scene).includes(inLayer), 'a shape inside a layer still renders')
+  assert(!(collectZOrder(scene) as unknown[]).includes(layer), 'the layer itself never does')
+  assert(hitTestShape(inLayer, 220, -20), "the shape is hit where the layer put it")
+  assert(pickNode(scene, 220, -20) === inLayer, 'a pick returns the shape - the layer is not in the way')
+
+  // Switching the layer off takes the whole subtree out of everything derived from the
+  // render order, in one move, and puts it back untouched.
+  layer.enabled = false
+  assert(!collectZOrder(scene).includes(inLayer), 'a disabled layer takes its contents out of the render order')
+  assert(pickNode(scene, 220, -20) === null, 'and out of picking')
+  assert(
+    !nodesInBox(scene, { x: 100, y: -200 }, { x: 400, y: 200 }).includes(inLayer),
+    'and out of a marquee, which reads the same order',
+  )
+  assert(collectZOrder(scene).includes(loose), 'while leaving everything outside it alone')
+  assert(pickNode(scene, -480, -20) === loose, 'which is still pickable')
+
+  // `enabled` is the layer's own property, not something written onto its children: a shape
+  // that was hidden before is still hidden after, and one that was not is not.
+  inLayer.visible = false
+  layer.enabled = true
+  assert(!collectZOrder(scene).includes(inLayer), 're-enabling brings back what was visible, not what was not')
+  inLayer.visible = true
+  assert(collectZOrder(scene).includes(inLayer), 'and the shape is back once it is visible again')
+}
+
+// --- a layer contributes NO ordering: zIndex still decides, scene-wide ---
+{
+  const scene = new Scene()
+  const back = scene.root.addChild(new Layer({ name: 'back' }))
+  const front = scene.root.addChild(new Layer({ name: 'front' }))
+
+  // Two overlapping shapes, one per layer, with the LATER layer holding the LOWER zIndex.
+  // A Konva-style layer would stack by layer and put `high` behind `low`; here zIndex wins,
+  // so a scene reorganised into layers renders exactly as it did without them.
+  const low = back.addChild(centredRect({ width: 40, height: 40, zIndex: 10 }))
+  const high = front.addChild(centredRect({ width: 40, height: 40, zIndex: -10 }))
+
+  const order = collectZOrder(scene)
+  assert(order[0] === high && order[1] === low, 'the layers contribute nothing - the shapes order by zIndex alone')
+  assert(pickNode(scene, 0, 0) === low, 'and the topmost zIndex is what a pick finds, regardless of layer')
+}
+
+// --- layers nest, and nest with groups, without any of them learning about the others ---
+{
+  const scene = new Scene()
+  const layer = scene.root.addChild(new Layer())
+  const group = layer.addChild(new Group({ x: 100 }))
+  const inner = group.addChild(new Layer({ x: 10 }))
+  const leaf = inner.addChild(new Rect({ width: 10, height: 10 }))
+
+  assert(hitTestShape(leaf, 115, -5), 'both containers compose their transforms on the way down')
+  assert(collectZOrder(scene).includes(leaf), 'and the shape draws')
+
+  // Either switch prunes the leaf, at whatever depth it sits: the walk turns back at the
+  // first one that says no.
+  inner.enabled = false
+  assert(!collectZOrder(scene).includes(leaf), 'the inner layer prunes it')
+  inner.enabled = true
+  group.visible = false
+  assert(!collectZOrder(scene).includes(leaf), 'a group above a layer prunes it')
+  group.visible = true
+  layer.enabled = false
+  assert(!collectZOrder(scene).includes(leaf), 'and so does a layer above a group')
 }
 
 console.log(`[scene] self-test passed (${count} assertions)`)

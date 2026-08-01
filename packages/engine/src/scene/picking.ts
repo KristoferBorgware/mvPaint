@@ -21,6 +21,7 @@ import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
+import { Layer } from '../shapes/Layer'
 import { Text } from '../shapes/Text'
 import type { FontProvider } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
@@ -88,13 +89,18 @@ export function hitTestText(text: Text, fonts: FontProvider, worldX: number, wor
  * The renderer and pickNode() both build on this so "what's on top" and "what's under
  * the depth test" can never disagree.
  *
- * A hidden Group takes its whole subtree out with it, and the walk turns back at one
- * rather than testing each shape's ancestors: hiding a group of ten thousand shapes should
- * cost one check, and asking every shape whether it is under a hidden group would instead
- * cost more the deeper the scene nests.
+ * A hidden Group takes its whole subtree out with it, and a disabled Layer does the same;
+ * the walk turns back at one rather than testing each shape's ancestors. Hiding a group -
+ * or switching off a layer - of ten thousand shapes should cost one check, where asking
+ * every shape about its ancestors would cost more the deeper the scene nests.
+ *
+ * That is also the ONLY thing a layer does here. It contributes no ordering: its contents
+ * are collected in place and sorted by their own zIndex alongside everything else, so a
+ * scene that uses layers stacks exactly as the same scene without them would.
  */
 function collectShapes(node: Node, predicate: (shape: Shape) => boolean, out: Shape[]): void {
   if (node instanceof Group && !node.visible) return
+  if (node instanceof Layer && !node.enabled) return
   if (node instanceof Shape && predicate(node)) out.push(node)
   if (node instanceof Container) {
     for (const child of node.children) collectShapes(child, predicate, out)
