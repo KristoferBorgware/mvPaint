@@ -7,10 +7,12 @@
 
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
-import type { CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
+import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { createAtlasBindGroupLayout } from './layouts'
 import { DEPTH_FORMAT } from './depthFormat'
+import { GpuCaptureTarget } from './CaptureTarget'
+import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
 import { FontBook } from './FontBook'
 import { createGpuContext } from './GpuContext'
 import { webGpuImageFactory } from './ImageTexture'
@@ -88,6 +90,42 @@ export async function createWebGpuSceneRenderer(
   // caller can attach, replace or clear it at any point after construction.
   let onFrame: ((dt: number) => void) | null = null
 
+  // Allocated on the first capture - most sessions never take one - and torn down with the
+  // renderer.
+  let captureTarget: GpuCaptureTarget | null = null
+
+  // A free function rather than a method, so toDataURL/toBlob can call it without reaching
+  // through `this` - the handle is a plain object literal and has no useful one.
+  const captureToCanvas = async (captureOptions?: CaptureOptions): Promise<HTMLCanvasElement> => {
+    const plan = resolveCapture(captureOptions ?? {}, scene.camera, {
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+    })
+    captureTarget ??= new GpuCaptureTarget(gpu.device, gpu.format, DEPTH_FORMAT, SAMPLE_COUNT)
+
+    const encoder = gpu.device.createCommandEncoder()
+    // Baking needs render passes of its own and has to finish before the capture pass opens -
+    // the same ordering the live frame gets from FrameRenderer's onPrePass hook.
+    scene.prepareShadows(encoder)
+
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [captureTarget.colorAttachment(plan)],
+      depthStencilAttachment: captureTarget.depthAttachment(),
+    })
+    scene.draw(pass, plan.pixelWidth, plan.pixelHeight, {
+      camera: plan.camera,
+      viewWidth: plan.viewWidth,
+      viewHeight: plan.viewHeight,
+      background: plan.background,
+    })
+    pass.end()
+    captureTarget.copyOut(encoder)
+    gpu.device.queue.submit([encoder.finish()])
+
+    const pixels = await captureTarget.read()
+    return pixelsToCanvas(pixels, plan.pixelWidth, plan.pixelHeight)
+  }
+
   return {
     path: 'webgpu',
     get onFrame() {
@@ -148,6 +186,22 @@ export async function createWebGpuSceneRenderer(
     nodesInBox(from, to, options) {
       return scene.nodesInBox(from, to, options)
     },
+    toCanvas: captureToCanvas,
+    async toDataURL(captureOptions) {
+      const blob = await encodeCanvas(
+        await captureToCanvas(captureOptions),
+        captureOptions?.mimeType,
+        captureOptions?.quality,
+      )
+      return await blobToDataURL(blob)
+    },
+    async toBlob(captureOptions) {
+      return await encodeCanvas(
+        await captureToCanvas(captureOptions),
+        captureOptions?.mimeType,
+        captureOptions?.quality,
+      )
+    },
     markGeometryDirty() {
       scene.markGeometryDirty()
     },
@@ -158,6 +212,7 @@ export async function createWebGpuSceneRenderer(
       scene.markImageGeometryDirty()
     },
     destroy() {
+      captureTarget?.destroy()
       frameRenderer.stop()
       scene.destroy()
       resizer.dispose()

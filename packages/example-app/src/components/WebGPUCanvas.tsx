@@ -86,6 +86,14 @@ interface WebGPUCanvasProps {
 export interface WebGPUCanvasHandle {
   /** Clears the current selection (and its transformer) the same way Escape does. */
   clearSelection: () => void
+  /**
+   * Captures the current view offscreen and saves it as a PNG.
+   *
+   * The selection frame is taken off first and put back afterwards, because editor furniture is
+   * not part of the picture - a screenshot with resize handles baked into it is a screenshot of
+   * the editor rather than of the drawing.
+   */
+  downloadSnapshot: (pixelRatio?: number) => Promise<void>
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
@@ -211,6 +219,34 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     ref,
     () => ({
       clearSelection: () => transformerRef.current?.clear(),
+      downloadSnapshot: async (pixelRatio = 2) => {
+        const handle = handleRef.current
+        if (!handle) return
+
+        // The transformer is scene content like anything else and would be captured with the
+        // rest of it. Detached for the shot and restored straight after, so the user's
+        // selection survives taking a picture of it.
+        const framed = transformerRef.current?.nodes.slice() ?? []
+        transformerRef.current?.clear()
+        let blob: Blob
+        try {
+          // An opaque white background: this one is going to be looked at on its own, where a
+          // transparent PNG would show whatever is behind it. Omit it for one meant to be
+          // composited.
+          blob = await handle.toBlob({ pixelRatio, background: [1, 1, 1, 1] })
+        } finally {
+          if (framed.length > 0) transformerRef.current?.attach(framed)
+        }
+
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `mvpaint-${Date.now()}.png`
+        link.click()
+        // Revoked on the next turn of the loop: the click is synchronous but the fetch the
+        // browser does for the download is not.
+        setTimeout(() => URL.revokeObjectURL(url), 0)
+      },
     }),
     [],
   )

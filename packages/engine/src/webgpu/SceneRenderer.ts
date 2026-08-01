@@ -41,6 +41,7 @@ import { Shape } from '../shapes/Shape'
 import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
 import { Text } from '../shapes/Text'
 import { Camera2D } from '../camera/Camera2D'
+import type { CaptureView } from '../render/capture'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
 import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
@@ -324,9 +325,19 @@ export class SceneRenderer {
     this.shadowAtlas.update(encoder, meshShapes)
   }
 
-  /** Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both lanes. */
-  draw(pass: GPURenderPassEncoder, width: number, height: number): void {
-    const camera = this.activeCamera
+  /**
+   * Update frame uniforms, (re)build geometry if dirty, refresh transforms/depth, draw both
+   * lanes.
+   *
+   * `view` overrides the camera and the view size it covers, and is absent for a live frame,
+   * which takes both from the canvas. It is how a capture draws a different rectangle of world
+   * without the live view knowing - and the reason a capture goes through THIS method rather
+   * than one of its own: a screenshot assembled by separate drawing code would drift from the
+   * picture it is supposed to be a copy of. (The clear colour is not here, because on this path
+   * it belongs to the render pass's colour attachment, which the caller builds.)
+   */
+  draw(pass: GPURenderPassEncoder, width: number, height: number, view?: CaptureView): void {
+    const camera = view?.camera ?? this.activeCamera
 
     // The camera is sized in CSS pixels, so it is given the canvas's logical size, not the
     // device-pixel backing store passed in `width`/`height`. That is what makes 1 world
@@ -334,8 +345,8 @@ export class SceneRenderer {
     // device pixel ratio decides how many physical pixels render each logical one and
     // nothing more. The uniform buffer still carries the backing-store size, which is what
     // the shaders want.
-    const viewWidth = this.canvas.clientWidth
-    const viewHeight = this.canvas.clientHeight
+    const viewWidth = view?.viewWidth ?? this.canvas.clientWidth
+    const viewHeight = view?.viewHeight ?? this.canvas.clientHeight
 
     this.frameUniforms.write(camera.viewProjection(viewWidth, viewHeight).toGPU(), width, height)
 

@@ -18,6 +18,8 @@
 // All four lanes are here. What is missing relative to WebGPU is MSAA, and nothing else.
 
 import { Camera2D } from '../camera/Camera2D'
+import { flipRows, type CapturePlan, type CaptureView } from '../render/capture'
+import { GlCaptureTarget } from './CaptureTarget'
 import type { AABB } from '../math/AABB'
 import { Scene } from '../scene/Scene'
 import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
@@ -51,6 +53,8 @@ export class GlSceneRenderer {
   readonly scene = new Scene()
 
   private activeCamera: Camera2D
+  // Allocated on the first capture - most sessions never take one.
+  private captureTarget: GlCaptureTarget | null = null
   private readonly gl: WebGL2RenderingContext
   private readonly canvas: HTMLCanvasElement
   private readonly stateCache: GlStateCache
@@ -248,13 +252,23 @@ export class GlSceneRenderer {
   }
 
   /** One frame, into the default framebuffer. `width`/`height` are backing-store pixels. */
-  draw(width: number, height: number): void {
+  /**
+   * Draws the scene into whatever framebuffer is currently bound, at `width` x `height`
+   * device pixels.
+   *
+   * `view` overrides the three things a capture needs to differ in - which camera, what view
+   * size that camera is asked to cover, and what to clear to - and is absent for a live frame,
+   * which takes all three from the canvas. Everything else about the two is identical, which is
+   * the point: a screenshot that went through its own drawing code would drift from the picture
+   * it is supposed to be a copy of.
+   */
+  draw(width: number, height: number, view?: CaptureView): void {
     const gl = this.gl
-    const camera = this.activeCamera
+    const camera = view?.camera ?? this.activeCamera
     // The camera is sized in CSS pixels; the device pixel ratio decides how many physical
     // pixels render each logical one and nothing more.
-    const viewWidth = this.canvas.clientWidth
-    const viewHeight = this.canvas.clientHeight
+    const viewWidth = view?.viewWidth ?? this.canvas.clientWidth
+    const viewHeight = view?.viewHeight ?? this.canvas.clientHeight
 
     const canReuseGather =
       !this.cullingEnabled &&
@@ -353,7 +367,8 @@ export class GlSceneRenderer {
     // Clearing depth needs the depth write ON, whatever the last program left behind.
     gl.depthMask(true)
     this.stateCache.invalidate()
-    gl.clearColor(1, 1, 1, 1)
+    const bg = view?.background
+    gl.clearColor(bg ? bg[0] : 1, bg ? bg[1] : 1, bg ? bg[2] : 1, bg ? bg[3] : 1)
     gl.clearDepth(1)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
@@ -416,7 +431,42 @@ export class GlSceneRenderer {
     this.gl.uniformMatrix4fv(program.uniform('u_viewProjection'), false, viewProjection)
   }
 
+  /**
+   * Draws one frame into an offscreen target and reads it back as straight RGBA8, top row
+   * first.
+   *
+   * The live view is untouched: the capture goes through its own camera into its own
+   * framebuffer, and the canvas still holds whatever the last frame put there. What it does
+   * cost is the gather - a capture culls against a different rectangle, so the next live frame
+   * re-gathers rather than reusing the cache. That is a screenshot's fair price.
+   *
+   * The framebuffer is unbound in a finally, so a throw mid-draw cannot leave the renderer
+   * pointing at the offscreen target and every subsequent frame invisible.
+   */
+  capture(plan: CapturePlan): Uint8ClampedArray {
+    if (!this.captureTarget) this.captureTarget = new GlCaptureTarget(this.gl)
+    const target = this.captureTarget
+    try {
+      target.bind(plan.pixelWidth, plan.pixelHeight)
+      this.draw(plan.pixelWidth, plan.pixelHeight, {
+        camera: plan.camera,
+        viewWidth: plan.viewWidth,
+        viewHeight: plan.viewHeight,
+        background: plan.background,
+      })
+      const pixels = new Uint8ClampedArray(target.read().buffer)
+      // GL reads bottom row first; an ImageData's first row is its top.
+      return flipRows(pixels, plan.pixelWidth, plan.pixelHeight)
+    } finally {
+      target.unbind()
+      // The next live frame draws to the canvas at the canvas's size, and the state cache has
+      // no idea the viewport moved under it.
+      this.stateCache.invalidate()
+    }
+  }
+
   destroy(): void {
+    this.captureTarget?.destroy()
     this.meshBatcher.destroy()
     this.textBatcher.destroy()
     this.textProgram.destroy()

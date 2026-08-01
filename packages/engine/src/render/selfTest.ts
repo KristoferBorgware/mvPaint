@@ -25,6 +25,7 @@ import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayout
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
+import { MAX_CAPTURE_PIXELS, flipRows, paddedBytesPerRow, resolveCapture, unpadRows } from './capture'
 import { IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE } from './imageFormat'
 import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
 import { depthForRank } from '../scene/picking'
@@ -1120,6 +1121,98 @@ assert(
   for (const offset of [OBJECT_OPACITY_OFFSET, TEXT_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_OPACITY_OFFSET]) {
     assert(offset % 4 === 0, 'every opacity offset is 4-byte aligned')
   }
+}
+
+// --- resolveCapture: the region-to-camera math a screenshot rests on ----------------------
+{
+  const live = new Camera2D({ x: 100, y: 50, zoom: 2 })
+  const viewport = { width: 800, height: 600 }
+
+  // No options at all means "what I am looking at, at the size I am looking at it". The live
+  // camera is zoomed to 2, so its 800x600 viewport covers 400x300 of world.
+  const asIs = resolveCapture({}, live, viewport)
+  assert(asIs.camera.x === 100 && asIs.camera.y === 50, 'it defaults to the live camera position')
+  assert(asIs.viewWidth === 400 && asIs.viewHeight === 300, "and to the world rectangle that camera shows")
+  assert(asIs.pixelWidth === 400 && asIs.pixelHeight === 300, 'at one pixel per world unit')
+
+  // The built camera is always at zoom 1: the region's world size IS the view size, and the
+  // pixel ratio lives in the target's resolution instead. Zoom here would apply it twice.
+  assert(asIs.camera.zoom === 1, 'the capture camera is always at zoom 1')
+
+  // An explicit region ignores the live camera entirely.
+  const region = resolveCapture({ x: -200, y: 300, width: 640, height: 480 }, live, viewport)
+  assert(region.camera.x === -200 && region.camera.y === 300, 'an explicit origin is taken as given')
+  assert(region.viewWidth === 640 && region.viewHeight === 480, 'and an explicit size')
+  assert(region.pixelWidth === 640 && region.pixelHeight === 480, 'one pixel per world unit by default')
+
+  // pixelRatio scales the OUTPUT only - the same rectangle of world, more pixels of it.
+  const retina = resolveCapture({ x: 0, y: 0, width: 640, height: 480, pixelRatio: 2 }, live, viewport)
+  assert(retina.pixelWidth === 1280 && retina.pixelHeight === 960, 'pixelRatio scales the pixel size')
+  assert(retina.viewWidth === 640 && retina.viewHeight === 480, 'and leaves the world region alone')
+  assert(retina.camera.zoom === 1, 'without touching the zoom - that is what would double-apply it')
+
+  // Defaults are only used for what was left out, and nonsense is treated as left out.
+  const partial = resolveCapture({ width: 1000 }, live, viewport)
+  assert(partial.viewWidth === 1000 && partial.viewHeight === 300, 'a width alone keeps the default height')
+  const nonsense = resolveCapture({ width: 0, height: -5, pixelRatio: Number.NaN }, live, viewport)
+  assert(nonsense.viewWidth === 400 && nonsense.viewHeight === 300, 'zero, negative and NaN fall back')
+  assert(nonsense.pixelWidth === 400, 'including the pixel ratio')
+
+  // Transparent unless asked, which is what a screenshot meant for compositing wants.
+  assert(nonsense.background[3] === 0, 'the background is transparent by default')
+  assert(resolveCapture({ background: [1, 0, 0, 1] }, live, viewport).background[0] === 1, 'and honoured when given')
+
+  // Clamped rather than left to fail inside the backend, and clamped proportionally so the
+  // answer is still the picture that was asked for.
+  const huge = resolveCapture({ width: 4000, height: 2000, pixelRatio: 8 }, live, viewport)
+  assert(Math.max(huge.pixelWidth, huge.pixelHeight) === MAX_CAPTURE_PIXELS, 'an oversized capture is clamped')
+  assert(
+    near(huge.pixelWidth / huge.pixelHeight, 4000 / 2000, 1e-3),
+    'and keeps its aspect ratio, so it is the same picture at a smaller size',
+  )
+
+  // Never zero, whatever it was asked for - a zero-sized texture is a backend error.
+  const tiny = resolveCapture({ width: 10, height: 10, pixelRatio: 0.001 }, live, viewport)
+  assert(tiny.pixelWidth >= 1 && tiny.pixelHeight >= 1, 'a capture is never zero pixels across')
+}
+
+// --- the readback arithmetic: row padding and the flip ------------------------------------
+{
+  // WebGPU requires each row of a texture-to-buffer copy to start on a 256-byte boundary.
+  assert(paddedBytesPerRow(64) === 256, '64 RGBA pixels is exactly one 256-byte row')
+  assert(paddedBytesPerRow(65) === 512, 'one more pixel needs a second')
+  assert(paddedBytesPerRow(1) === 256, 'and a single pixel still pays for a whole row')
+  for (const width of [1, 7, 63, 64, 100, 333, 1024]) {
+    const stride = paddedBytesPerRow(width)
+    assert(stride % 256 === 0, 'every stride is a multiple of 256')
+    assert(stride >= width * 4, 'and big enough for the row it carries')
+  }
+
+  // Unpadding has to take exactly the real bytes of each row and none of the padding. Rows are
+  // filled with their own index so a shift shows up as the wrong row rather than as noise.
+  const width = 3
+  const height = 4
+  const stride = paddedBytesPerRow(width)
+  const padded = new Uint8Array(stride * height)
+  for (let row = 0; row < height; row++) {
+    for (let i = 0; i < width * 4; i++) padded[row * stride + i] = row + 1
+    // Padding filled with a value no row uses, so any of it that leaks through is obvious.
+    for (let i = width * 4; i < stride; i++) padded[row * stride + i] = 0xff
+  }
+  const packed = unpadRows(padded, width, height, stride)
+  assert(packed.length === width * height * 4, 'the unpadded buffer is exactly the pixels')
+  assert(!packed.includes(0xff), 'and contains none of the padding')
+  for (let row = 0; row < height; row++) {
+    assert(packed[row * width * 4] === row + 1, 'each row lands where it belongs')
+  }
+
+  // The flip is the WebGL path's, since GL reads from the bottom-left corner up.
+  const flipped = flipRows(packed, width, height)
+  assert(flipped[0] === height, 'the flip puts the last row first')
+  assert(flipped[(height - 1) * width * 4] === 1, 'and the first row last')
+  assert(flipped.length === packed.length, 'without changing the size')
+  const twice = flipRows(flipped, width, height)
+  for (let i = 0; i < packed.length; i++) assert(twice[i] === packed[i], 'flipping twice is the identity')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

@@ -98,6 +98,12 @@ Events bubble, so one listener on the root covers a whole subtree. Hit-testing i
 tessellated triangles, not bounding boxes. Included: node dragging, marquee selection, and a
 `Transformer` for resize/rotate with angle snapping.
 
+**Screenshots**
+`handle.toCanvas()` / `toDataURL()` / `toBlob()` render the scene again offscreen and hand back
+the pixels. A second render, not a copy of the canvas, so the image can be any region of world at
+any resolution — and the engine builds the camera from the rectangle you ask for, leaving the
+live view untouched.
+
 **Camera**
 `Camera2D` is a plain object the application owns and mutates — pan, zoom, rotate. Supplying
 none is a valid choice, not a missing one: the scene then renders with world (0, 0) at the
@@ -220,7 +226,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,671 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,763 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 

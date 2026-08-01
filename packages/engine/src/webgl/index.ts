@@ -20,7 +20,8 @@
 // WebGPU is MSAA, and nothing else.
 
 import { CanvasResizer } from '../systems/CanvasResizer'
-import type { CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
+import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
+import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
@@ -164,6 +165,20 @@ export async function createWebGl2SceneRenderer(
   }
   rafId = requestAnimationFrame(tick)
 
+  // A free function rather than a method, so toDataURL/toBlob can call it without reaching
+  // through `this` - the handle is a plain object literal and has no useful one.
+  const captureToCanvas = async (captureOptions?: CaptureOptions): Promise<HTMLCanvasElement> => {
+    const plan = resolveCapture(captureOptions ?? {}, scene.camera, {
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+    })
+    // Baked before the capture for the same reason the frame loop does it: baking binds its own
+    // framebuffer, so it cannot happen inside one that is being drawn into.
+    scene.prepareShadows()
+    const pixels = scene.capture(plan)
+    return pixelsToCanvas(pixels, plan.pixelWidth, plan.pixelHeight)
+  }
+
   return {
     path: 'webgl2',
     get onFrame() {
@@ -223,6 +238,22 @@ export async function createWebGl2SceneRenderer(
     },
     nodesInBox(from, to, marqueeOptions) {
       return scene.nodesInBox(from, to, marqueeOptions)
+    },
+    toCanvas: captureToCanvas,
+    async toDataURL(captureOptions) {
+      const blob = await encodeCanvas(
+        await captureToCanvas(captureOptions),
+        captureOptions?.mimeType,
+        captureOptions?.quality,
+      )
+      return await blobToDataURL(blob)
+    },
+    async toBlob(captureOptions) {
+      return await encodeCanvas(
+        await captureToCanvas(captureOptions),
+        captureOptions?.mimeType,
+        captureOptions?.quality,
+      )
     },
     markGeometryDirty() {
       scene.markGeometryDirty()

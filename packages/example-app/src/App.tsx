@@ -26,6 +26,7 @@ import TuneIcon from '@mui/icons-material/Tune'
 import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
 import { Shape, type TransformableNode } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
@@ -146,6 +147,21 @@ export default function App() {
                   Rebuilds the current scene from scratch and re-centres the view, undoing
                   anything dragged, scaled or restyled. The camera zoom is left alone - it's
                   yours, not the scene's.
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<PhotoCameraIcon />}
+                  onClick={() => void canvasRef.current?.downloadSnapshot(2)}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Save a PNG
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  Renders the current view again offscreen, at twice the resolution, and
+                  downloads it. It's a second render rather than a copy of the canvas, so the
+                  image can be any size and any region - and the selection frame is left out of
+                  it, since handles aren't part of the drawing.
                 </Typography>
               </Stack>
 

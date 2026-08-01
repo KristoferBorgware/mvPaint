@@ -175,6 +175,43 @@ decomposes it back into the five stored fields (`math/decompose2D.ts`) — the s
 transformer gesture goes through. `moveTo` throws rather than making a cycle out of a move into
 the node's own descendant, and refuses to re-home a destroyed node.
 
+### Screenshots
+
+`handle.toCanvas()` / `toDataURL()` / `toBlob()` draw the scene **again**, offscreen, and hand
+back the pixels — Konva's `toImage`/`toDataURL` in this engine's vocabulary.
+
+A second render rather than a copy of the canvas, which is what buys the two things a copy
+cannot give you: the image can be **any region of world at any resolution** (a 4000px export of
+a diagram that is 300px on screen), and it does not matter what was on the canvas or whether it
+had been cleared. `pixelRatio` scales the output only — the same rectangle of world, more
+pixels of it.
+
+**The engine builds the camera.** A caller describes a rectangle (`x`, `y`, `width`, `height` in
+world units, plus an optional `rotation`) and never constructs or attaches one, because a
+screenshot is a question about the scene rather than an instruction to move the view — and the
+live camera must not so much as twitch. Every field defaults from what is on screen, so
+`toCanvas()` with no arguments means "this, at this size". The background defaults to
+transparent, which is what an image meant for compositing wants.
+
+Both paths render through the *same* `draw()` the live frame uses, given a `CaptureView`
+(camera, view size, clear colour) instead of the canvas's. A screenshot assembled by separate
+drawing code would drift from the picture it is supposed to be a copy of.
+
+The parts that genuinely differ are each backend's own, and the shared arithmetic lives in
+`render/capture.ts`:
+
+| | WebGL2 | WebGPU |
+| --- | --- | --- |
+| target | FBO: RGBA8 texture + `DEPTH_COMPONENT24` renderbuffer | MSAA texture → resolve texture (`COPY_SRC`) + depth, all at the pipelines' format and sample count |
+| readback | `readPixels` | `copyTextureToBuffer` → `mapAsync`, rows padded to 256 bytes and unpadded again |
+| orientation | rows come back **bottom first** and are flipped | NDC +Y is already the first texel row — no flip |
+| channels | RGBA as read | `bgra8unorm` is the usual preferred canvas format, so red and blue are swapped back |
+
+**What it costs.** One gather, one repack, one draw — and because the capture culls against a
+different rectangle than the live view, the frame *after* it re-gathers. That is a screenshot's
+fair price and not something to do every frame. Oversized requests are clamped proportionally
+rather than left to fail inside the backend with a message about attachments.
+
 ### The camera is not in the graph
 
 `Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*

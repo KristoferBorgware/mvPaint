@@ -82,10 +82,71 @@ export interface SceneRendererHandle extends SceneResources {
    * stop. It is called with the seconds elapsed since the previous frame.
    */
   onFrame: ((dt: number) => void) | null
+  /**
+   * Draws the scene once into an offscreen target and hands back a canvas of it - the
+   * primitive the other two are built on, and the one to reach for when the pixels are going
+   * somewhere other than a file.
+   *
+   * Nothing about the live view changes. The capture runs through a camera the engine builds
+   * from the requested region, on its own render target, and the on-screen camera, size and
+   * contents are exactly as they were afterwards.
+   *
+   * It costs a full frame's work - one gather, one repack, one draw - and, because the capture
+   * culls against a different rectangle than the live view, the frame after it re-gathers.
+   * That is a screenshot's fair price; it is not something to call every frame.
+   */
+  toCanvas: (options?: CaptureOptions) => Promise<HTMLCanvasElement>
+  /** The same capture as an encoded data URL - `toDataURL()` in Konva's vocabulary. */
+  toDataURL: (options?: EncodedCaptureOptions) => Promise<string>
+  /** The same capture as a Blob, which is what a download wants (see URL.createObjectURL). */
+  toBlob: (options?: EncodedCaptureOptions) => Promise<Blob>
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
   markImageGeometryDirty: () => void
   destroy: () => void
+}
+
+/**
+ * What region of the scene to capture, and at what size. Every field is optional: the default
+ * is "exactly what is on screen now, at screen resolution".
+ *
+ * The region is in WORLD units and the engine builds the camera for it, so a caller never
+ * constructs or attaches one. That is the whole point of the shape of this: a screenshot is a
+ * question about the scene ("this rectangle of world, at this size"), not an instruction to
+ * rearrange the renderer's view - and a capture must not disturb what the user is looking at.
+ */
+export interface CaptureOptions {
+  /**
+   * World point at the capture's top-left corner. The scene is y-up, so the region extends
+   * right and DOWNWARD from here - the same convention Rect, Camera2D and the rest follow.
+   * Defaults to the live camera's, so omitting x/y/width/height captures the current view.
+   */
+  x?: number
+  y?: number
+  /** Size of the region in world units. Defaults to what the camera currently shows. */
+  width?: number
+  height?: number
+  /**
+   * Output pixels per world unit. Default 1, so a 800x600 region is an 800x600 image; 2 gives
+   * 1600x1200 of the same region, which is how a print-resolution export is asked for.
+   */
+  pixelRatio?: number
+  /** Radians, about the region's centre. Default 0 - a capture is normally axis-aligned. */
+  rotation?: number
+  /**
+   * What to fill the image with before the scene is drawn, as straight-alpha RGBA in 0..1.
+   * Default fully transparent, which is what a screenshot meant for compositing wants; pass
+   * an opaque colour for one meant to be looked at on its own.
+   */
+  background?: readonly [number, number, number, number]
+}
+
+/** Capture options plus the two things only an encoded image needs. See toDataURL/toBlob. */
+export interface EncodedCaptureOptions extends CaptureOptions {
+  /** Default 'image/png'. 'image/jpeg' and 'image/webp' are the other usual ones. */
+  mimeType?: string
+  /** 0..1, for the lossy types. Ignored by PNG. */
+  quality?: number
 }
 
 export interface CreateSceneRendererOptions {
