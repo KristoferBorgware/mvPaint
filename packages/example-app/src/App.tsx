@@ -77,8 +77,8 @@ export default function App() {
    *
    * Every outcome is visible: the button says so while it is working, a failure lands in the
    * error banner, and a success appears as a thumbnail with a link. Nothing about this button
-   * can now do nothing - which is what it did before, on a path where the capture rejected and
-   * the promise was thrown away.
+   * can now happen silently, which is the whole point - the version that saved the file without
+   * showing anything was doing its job and was still reported as broken.
    */
   const takeSnapshot = async () => {
     setSnapshotBusy(true)
@@ -195,12 +195,19 @@ export default function App() {
                   aren't part of the drawing.
                 </Typography>
                 {/*
-                  The result is SHOWN rather than only downloaded. A synthetic anchor click is
-                  the usual trick, but it depends on the browser still counting the original tap
-                  as user activation - and the capture is asynchronous, so on a phone that can
-                  quietly expire and the download is dropped with no error anywhere. A real link
-                  the user taps is a fresh gesture and cannot be refused; the thumbnail is also
-                  proof the capture happened at all, which a silent download is not.
+                  The result is SHOWN rather than only downloaded, and the reason is worth
+                  recording accurately because the first guess was wrong.
+                  
+                  The button used to fire a synthetic anchor click and nothing else. That WORKED
+                  - the files were landing in the download folder the whole time - but it worked
+                  invisibly, and on a phone, where the browser's own download notice is easy to
+                  miss, an operation that gives no sign of having run is indistinguishable from a
+                  broken one. It was reported as a broken button, and the only evidence it had
+                  ever worked was several copies of the same PNG found later.
+                  
+                  So the fix is feedback, not mechanism: a thumbnail proves the capture happened,
+                  and a real link makes saving a thing the user does rather than a thing that
+                  happens to them.
                 */}
                 {snapshotUrl && (
                   <Stack spacing={0.5} sx={{ alignSelf: 'stretch' }}>
