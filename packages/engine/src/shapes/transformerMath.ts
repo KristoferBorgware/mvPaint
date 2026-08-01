@@ -347,56 +347,10 @@ export function rotateAbout(center: Point2, angle: number): Matrix4x4 {
     .mul(Matrix4x4.translation(new Vector3(-center.x, -center.y, 0)))
 }
 
-/** What a 2x2 linear part decomposes into, in Shape's own transform vocabulary. */
-export interface DecomposedTransform {
-  rotation: number
-  scaleX: number
-  scaleY: number
-  skewX: number
-  skewY: number
-}
-
-/**
- * Splits a 2x2 linear transform into rotation, skew and scale, matching the order
- * localMatrix() composes them in (R · skew · S). This is a QR-style decomposition: the
- * rotation and scaleX come from the x axis' direction and length, the determinant fixes
- * scaleY, and whatever obliqueness is left over lands in skewX.
- *
- * Five stored fields describe a four-degree-of-freedom matrix, so one has to be pinned to
- * make the answer unique - skewY is pinned to 0. Every invertible 2x2 is still reachable,
- * which is the point: it makes the decomposition EXACT, so non-uniformly scaling a
- * rotated shape is represented faithfully instead of approximated.
- *
- * `a`/`b` are the x axis (column 0), `c`/`d` the y axis (column 1).
- */
-export function decompose2D(a: number, b: number, c: number, d: number): DecomposedTransform {
-  const determinant = a * d - b * c
-  const xAxisLength = Math.hypot(a, b)
-
-  if (xAxisLength > 1e-12) {
-    return {
-      rotation: Math.atan2(b, a),
-      scaleX: xAxisLength,
-      scaleY: determinant / xAxisLength,
-      skewX: (a * c + b * d) / determinant,
-      skewY: 0,
-    }
-  }
-
-  // The x axis collapsed (a fully squashed transform), so measure from the y axis instead.
-  const yAxisLength = Math.hypot(c, d)
-  if (yAxisLength > 1e-12) {
-    return {
-      rotation: Math.PI / 2 - Math.atan2(d, c),
-      scaleX: determinant / yAxisLength,
-      scaleY: yAxisLength,
-      skewX: 0,
-      skewY: (a * c + b * d) / determinant,
-    }
-  }
-
-  return { rotation: 0, scaleX: 0, scaleY: 0, skewX: 0, skewY: 0 }
-}
+// decompose2D moved to math/, where Node can reach it without closing an import cycle
+// through Container. Re-exported here because it is half of this module's story and callers
+// have always found it at this address.
+export { decompose2D, type DecomposedTransform } from '../math/decompose2D'
 
 /**
  * Pushes a WORLD-space delta onto a node, by rewriting its own transform fields.
@@ -410,19 +364,5 @@ export function decompose2D(a: number, b: number, c: number, d: number): Decompo
  */
 export function applyWorldTransform(node: TransformableNode, delta: Matrix4x4): void {
   const parentWorld = node.parent ? node.parent.worldMatrix() : Matrix4x4.identity()
-  const newLocal = parentWorld.inverse().mul(delta).mul(parentWorld).mul(node.localMatrix())
-  const m = newLocal.m
-
-  // Column-major: column 0 is the x axis, column 1 the y axis, column 3 the translation.
-  const parts = decompose2D(m[0], m[1], m[4], m[5])
-  node.rotation = parts.rotation
-  node.scaleX = parts.scaleX
-  node.scaleY = parts.scaleY
-  node.skewX = parts.skewX
-  node.skewY = parts.skewY
-
-  // localMatrix() is T(x,y)·R·skew·S·T(-offset), so its translation column reads
-  // (x,y) - A·offset for the combined linear part A - hence the pivot is added back here.
-  node.x = m[12] + m[0] * node.offsetX + m[4] * node.offsetY
-  node.y = m[13] + m[1] * node.offsetX + m[5] * node.offsetY
+  node.applyLocalMatrix(parentWorld.inverse().mul(delta).mul(parentWorld).mul(node.localMatrix()))
 }

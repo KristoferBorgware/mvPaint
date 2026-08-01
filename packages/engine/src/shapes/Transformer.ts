@@ -4,7 +4,7 @@
 // no special-case rendering.
 //
 // The ATTACHED SET is what this frame wraps and what a gesture moves, and it belongs to
-// whoever is driving the editor - attach() replaces it wholesale, add()/remove()/toggle()
+// whoever is driving the editor - attach() replaces it wholesale, add()/detach()/toggle()
 // edit it one node at a time. The engine never decides what goes in it. That is worth being
 // precise about: an application's idea of "the selection" may be broader than this (rows in
 // a panel, a locked layer, a group whose members are edited together), so the two are
@@ -206,8 +206,14 @@ export class Transformer extends Container {
     this.setAttached([...this.attached, node])
   }
 
-  /** Removes one node, if it is attached. */
-  remove(node: TransformableNode): void {
+  /**
+   * Drops one node from the attached set, if it is in it.
+   *
+   * Named for its pair, attach(), and deliberately NOT `remove` - a Transformer is a Node,
+   * and Node.remove() means "take me out of my parent". Two methods with one name doing
+   * unrelated things to different objects is a trap on a class that inherits one of them.
+   */
+  detach(node: TransformableNode): void {
     const index = this.attached.indexOf(node)
     if (index < 0) return
     const next = [...this.attached]
@@ -215,9 +221,9 @@ export class Transformer extends Container {
     this.setAttached(next)
   }
 
-  /** Adds the node if it is absent, removes it if present - a shift-click, in one call. */
+  /** Adds the node if it is absent, drops it if present - a shift-click, in one call. */
   toggle(node: TransformableNode): void {
-    if (this.attached.includes(node)) this.remove(node)
+    if (this.attached.includes(node)) this.detach(node)
     else this.add(node)
   }
 
@@ -252,6 +258,27 @@ export class Transformer extends Container {
    * them, so they stay where they were drawn until the next frame refits them, exactly as
    * before - this only stops them being *acted on* while the box is known to be stale.
    */
+  /**
+   * Lets go of nodes that have been destroyed.
+   *
+   * The attached set is the one place a node is held by something that is NOT its parent, so
+   * it is the one place a teardown does not clean itself up: everything else the renderer
+   * keeps is rebuilt from the scene each frame, but this list would hold a destroyed node
+   * alive forever and go on asking to measure it. There is no event to lean on either - a
+   * transformer is a SIBLING of the nodes it wraps, not an ancestor, so a bubbling 'destroy'
+   * never reaches it.
+   *
+   * DESTROYED, and not merely removed. A removed node is explicitly still usable and may be
+   * on its way back (a cut waiting for its paste, an undo), so a frame that kept wrapping it
+   * is doing the right thing - clear() is there for an application that disagrees. Only
+   * destroy() says the node is finished, and that is the only claim this can act on.
+   */
+  private dropDepartedNodes(): void {
+    if (this.attached.length === 0) return
+    const kept = this.attached.filter((node) => !node.isDestroyed)
+    if (kept.length !== this.attached.length) this.setAttached(kept)
+  }
+
   private setAttached(next: TransformableNode[]): void {
     this.attached = next
     this.box = null
@@ -265,6 +292,7 @@ export class Transformer extends Container {
    * handles a constant size on screen. Call once per frame: the nodes may be moving.
    */
   update(box: OrientedBox | null, zoom: number): void {
+    this.dropDepartedNodes()
     this.box = box
     this.zoom = zoom > 0 ? zoom : 1
     if (!box || this.attached.length === 0) {

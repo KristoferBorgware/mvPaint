@@ -40,6 +40,7 @@
 //
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
+import { decompose2D } from '../math/decompose2D'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -53,8 +54,21 @@ import {
 } from '../events/NodeEvent'
 import { countListenersAdded, countListenersRemoved, hasListener } from '../events/listenerCensus'
 import { attrChangeEventName } from '../events/sceneEvents'
+// Type-only, and it has to stay that way: Container extends Node, so a value import here
+// would be a runtime cycle. Nothing below ever references the binding at runtime.
+import type { Container } from './Container'
 
 export type NodeVisitor = (node: Node) => void
+
+/** See Node.moveTo. */
+export interface MoveOptions {
+  /**
+   * Keep the node exactly where it is on screen, rewriting its local transform to absorb the
+   * difference between the old parent and the new one. Default false, which keeps the node's
+   * own x/y/rotation/scale and lets it land wherever those mean inside the new parent.
+   */
+  keepWorldTransform?: boolean
+}
 
 /** One registered listener: its handler plus the dot-namespace it was registered under. */
 interface ListenerEntry {
@@ -150,6 +164,9 @@ export class Node {
    */
   skewX = 0
   skewY = 0
+
+  // Set by destroy(), and never unset - see isDestroyed.
+  private destroyed = false
 
   // Allocated on the first on() call rather than in the constructor: most nodes in a large
   // scene never take a listener, and an empty Map each would be pure overhead per node.
@@ -297,6 +314,36 @@ export class Node {
   }
 
   /**
+   * The inverse of localMatrix(): takes an arbitrary local matrix apart and stores it in the
+   * fields this node actually keeps.
+   *
+   * The transform is held as rotation/scale/skew rather than as a matrix, so anything that
+   * COMPUTES a matrix has to come back through here - a transformer gesture pushing a
+   * world-space delta (see transformerMath.applyWorldTransform), or a reparent that has to
+   * keep a node where it was on screen (see moveTo).
+   *
+   * `offsetX`/`offsetY` are held fixed and folded into the position instead, because the
+   * pivot belongs to the node rather than to whatever is moving it. Anything the five stored
+   * fields cannot express is lost - see decompose2D for what that is, which for an invertible
+   * 2D transform is nothing.
+   */
+  applyLocalMatrix(matrix: Matrix4x4): void {
+    const m = matrix.m
+    // Column-major: column 0 is the x axis, column 1 the y axis, column 3 the translation.
+    const parts = decompose2D(m[0], m[1], m[4], m[5])
+    this.rotation = parts.rotation
+    this.scaleX = parts.scaleX
+    this.scaleY = parts.scaleY
+    this.skewX = parts.skewX
+    this.skewY = parts.skewY
+
+    // localMatrix() is T(x,y)·R·skew·S·T(-offset), so its translation column reads
+    // (x,y) - A·offset for the combined linear part A - hence the pivot is added back here.
+    this.x = m[12] + m[0] * this.offsetX + m[4] * this.offsetY
+    this.y = m[13] + m[1] * this.offsetX + m[5] * this.offsetY
+  }
+
+  /**
    * Every field localMatrix() reads, captured together so a gesture can restore the node
    * exactly as it was. Enumerating them by hand at each call site is what makes adding a
    * new transform field silently break gestures: a partial restore leaves the previous
@@ -434,6 +481,128 @@ export class Node {
       if (p === this) return true
     }
     return false
+  }
+
+  /**
+   * The top of this node's tree - the scene root for anything in a scene, and the node
+   * itself for anything detached.
+   *
+   * The cheapest honest answer to "is this still in the scene?", which is a question anything
+   * holding a node across time has to be able to ask: compare two nodes' roots (see
+   * Transformer, which lets go of nodes that have left).
+   */
+  root(): Node {
+    let node: Node = this
+    while (node.parent) node = node.parent
+    return node
+  }
+
+  // --- lifecycle ---
+
+  /**
+   * Takes this node out of its parent. Safe on a node that has none.
+   *
+   * The node stays FULLY USABLE: its transform, styling, listeners and children are all
+   * intact, and adding it somewhere else picks up exactly where it left off. That is the
+   * difference from destroy(), and the reason both exist - taking something out of the scene
+   * for a moment (a cut, a drag between containers, a pooled node waiting to be reused) is a
+   * different act from finishing with it.
+   *
+   * Nothing needs telling. The renderer rebuilds its visible set every frame and the lanes
+   * repack when their membership changes, so the node stops drawing on the next frame; the
+   * shadow atlas frees its slot the next time it bakes, because it prunes against the set of
+   * shapes actually present.
+   */
+  remove(): this {
+    // A parent is always a Container - only Container.addChild ever sets the field - but the
+    // field is typed Node to keep this module free of an import that would close a cycle
+    // (Container extends Node).
+    if (this.parent) (this.parent as Container).removeChild(this)
+    return this
+  }
+
+  /**
+   * Finishes with this node and everything under it. The node is not reusable afterwards.
+   *
+   * remove() first, then teardown: every listener dropped (which is the one thing that does
+   * NOT clean itself up - see events/listenerCensus, where a dropped node holding listeners
+   * leaves its tally behind), every child destroyed with it, and whatever each subclass holds
+   * released (a Shape's tessellation and picking caches - see Shape.releaseResources).
+   *
+   * A 'destroy' event fires on every node in the subtree BEFORE any of it is detached, so it
+   * still has somewhere to bubble and a watcher hears about the whole subtree rather than
+   * only its head.
+   *
+   * WHAT IT DOES NOT FREE is anything the node did not own. An Image's texture belongs to the
+   * application, which may well be drawing it in ten other places, so destroying the node
+   * leaves it alone; call ImageTexture.destroy() when the picture itself is finished with.
+   */
+  destroy(): void {
+    if (this.destroyed) return
+    // Announced while the subtree is still attached, so each event has a parent chain to
+    // travel up. Gated, like every other membership event: destroying ten thousand nodes
+    // should not walk to the root ten thousand times for listeners nobody registered.
+    if (hasListener('destroy')) this.traversePreOrder((node) => node.fire('destroy', {}, true))
+    this.remove()
+    this.finalize()
+  }
+
+  /** True once destroy() has run. A destroyed node is finished; do not put it back. */
+  get isDestroyed(): boolean {
+    return this.destroyed
+  }
+
+  /**
+   * The teardown half of destroy(), recursing without re-announcing or re-detaching - the
+   * subtree is already unreachable from the scene by the time this runs, so a child needs
+   * neither an event nor a splice out of a list that is about to be dropped whole.
+   */
+  protected finalize(): void {
+    this.destroyed = true
+    this.eachChild((child) => {
+      child.parent = null
+      child.finalize()
+    })
+    this.off()
+    this.releaseResources()
+  }
+
+  /**
+   * Drop whatever this class holds that is worth dropping promptly. Overridden by Container
+   * (its children) and Shape (its geometry caches).
+   *
+   * Only for things that would otherwise be kept alive by something OUTSIDE the node, or that
+   * are large enough to be worth releasing before the collector gets to them. Plain fields
+   * need nothing: once the scene has let go, the node and everything hanging off it is
+   * garbage like any other object.
+   */
+  protected releaseResources(): void {}
+
+  /**
+   * Moves this node to a different parent in one step - remove() and addChild(), with the
+   * two things a caller would otherwise have to remember.
+   *
+   * The first is the cycle check. Moving a node into its own descendant makes a loop that
+   * worldMatrix() and every traversal would follow forever, so it throws instead.
+   *
+   * The second is `keepWorldTransform`. By default the node keeps its own x/y/rotation/scale,
+   * so it lands wherever those mean inside the new parent - which is what you want when the
+   * parents are peers, and jarring when they are not. Pass true and the node stays exactly
+   * where it is on screen, its local transform rewritten to absorb the difference between the
+   * two parents (see applyLocalMatrix). That is the one to use for a drag that drops a shape
+   * into a group: the shape should not jump because its bookkeeping changed.
+   */
+  moveTo(parent: Container, options: MoveOptions = {}): this {
+    if (parent === (this as unknown as Container)) throw new Error('Node.moveTo: a node cannot be its own parent.')
+    if (this.isAncestorOf(parent)) throw new Error('Node.moveTo: cannot move a node into its own descendant.')
+    if (this.destroyed) throw new Error('Node.moveTo: this node has been destroyed.')
+
+    // Read before the move - afterwards it would compose the NEW parent's chain.
+    const world = options.keepWorldTransform ? this.worldMatrix() : null
+    this.remove()
+    parent.addChild(this)
+    if (world) this.applyLocalMatrix(parent.worldMatrix().inverse().mul(world))
+    return this
   }
 
   // --- events ---

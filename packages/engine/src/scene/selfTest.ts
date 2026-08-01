@@ -478,4 +478,56 @@ class TransformGroup extends Container {
   assert(!collectZOrder(scene).includes(leaf), 'and so does a layer above a group')
 }
 
+// --- removing and destroying take a node out of everything derived from the scene --------
+{
+  const scene = new Scene()
+  const group = scene.root.addChild(new Group({ name: 'assembly' }))
+  const inside = group.addChild(centredRect({ name: 'inside', width: 40, height: 40 }))
+  const outside = scene.root.addChild(centredRect({ name: 'outside', x: 300, width: 40, height: 40 }))
+
+  const marquee = () => nodesInBox(scene, { x: -400, y: -200 }, { x: 400, y: 200 })
+  assert(collectZOrder(scene).includes(inside) && marquee().includes(inside), 'sanity: it starts in the scene')
+
+  // remove() is enough on its own - nothing has to be told, because the render order is
+  // recomputed from the tree every frame rather than maintained alongside it.
+  inside.remove()
+  assert(!collectZOrder(scene).includes(inside), 'a removed shape leaves the render order')
+  assert(pickNode(scene, 0, 0) === null, 'and picking')
+  assert(!marquee().includes(inside), 'and a marquee')
+  assert(marquee().includes(outside), 'while everything else carries on')
+
+  // ...and putting it back needs no ceremony either.
+  group.addChild(inside)
+  assert(collectZOrder(scene).includes(inside), 'and it comes back by being added again')
+  assert(pickNode(scene, 0, 0) === inside, 'pickable as before')
+
+  // Destroying the GROUP takes the shape with it, without the shape being mentioned.
+  group.destroy()
+  assert(!collectZOrder(scene).includes(inside), 'destroying a container takes its contents out too')
+  assert(pickNode(scene, 0, 0) === null, 'out of picking')
+  assert(!marquee().includes(inside), 'and out of a marquee')
+  assert(scene.root.children.length === 1 && scene.root.children[0] === outside, 'the root is left with the rest')
+}
+
+// --- a moved node draws and picks where its new parent puts it ---------------------------
+{
+  const scene = new Scene()
+  const left = scene.root.addChild(new Group({ name: 'left', x: -200 }))
+  const right = scene.root.addChild(new Group({ name: 'right', x: 200 }))
+  const shape = left.addChild(centredRect({ name: 'travelling', width: 40, height: 40 }))
+
+  assert(pickNode(scene, -200, 0) === shape, 'sanity: it picks where the left group holds it')
+
+  shape.moveTo(right)
+  assert(pickNode(scene, -200, 0) === null, 'after the move it is no longer where it was')
+  assert(pickNode(scene, 200, 0) === shape, 'and is where the new parent puts it')
+  assert(collectZOrder(scene).includes(shape), 'still drawing, throughout')
+
+  // Keeping the world transform means the pick point does not move either - which is the
+  // real test of it, since picking and rendering read the same matrices.
+  shape.moveTo(left, { keepWorldTransform: true })
+  assert(pickNode(scene, 200, 0) === shape, 'moved with keepWorldTransform, it is picked at the SAME point')
+  assert(shape.parent === left, 'even though it now belongs to the other group')
+}
+
 console.log(`[scene] self-test passed (${count} assertions)`)

@@ -410,6 +410,24 @@ export abstract class Shape extends Node {
     return this.ensurePickCache().bounds
   }
 
+  /**
+   * A shape's caches are its tessellated triangles and the flattened picking layout derived
+   * from them - the two things it holds that are proportional to its complexity rather than
+   * constant, and the only reason destroying a path with ten thousand points is worth more
+   * than destroying a rect.
+   *
+   * Nothing GPU-side is freed here, because nothing GPU-side is keyed on a shape's identity
+   * in a way that outlives it. The lanes rebuild from the visible set every frame and repack
+   * when their membership changes, and the shadow atlas prunes its per-shape entries against
+   * the shapes actually present each time it bakes - so a destroyed shape's vertex range and
+   * atlas slot come back on their own, on the next frame, whether it was destroyed or merely
+   * removed.
+   */
+  protected override releaseResources(): void {
+    this.geometryCache = null
+    this.pickCache = null
+  }
+
   private ensureGeometryCache(): CachedGeometry {
     if (!this.geometryCache) {
       const vertices: CachedVertex[] = []

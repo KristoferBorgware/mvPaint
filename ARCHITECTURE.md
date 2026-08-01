@@ -115,6 +115,59 @@ inside stays independently pickable, draggable, selectable and transformable —
 were not there. It still carries a transform, because every `Node` does, so moving a layer moves
 its contents without any of the selection semantics a group would bring.
 
+### Taking things out again
+
+Four operations on `Node`, and the distinction between the first two is the whole design:
+
+| | what it does | is the node reusable? |
+| --- | --- | --- |
+| `remove()` | unhooks it from its parent | **yes** — transform, styling, listeners and children all intact |
+| `destroy()` | `remove()`, then tears the subtree down | no. `isDestroyed` is true and stays true |
+| `moveTo(parent, opts)` | re-homes it in one step | — |
+| `removeChildren()` | `Container`: takes every child out | yes, all of them |
+
+**Nothing has to be told.** The renderer rebuilds its visible set from the tree every frame and
+each lane repacks when its membership changes, so a removed node stops drawing on the next
+frame; the shadow atlas frees its slot the next time it bakes, because it prunes its
+per-shape entries against the shapes actually present. Removal is not a message sent to the
+renderer, it is a fact about the tree that the next frame discovers. (The one exception is a
+scene that has turned *both* culling and the zIndex sort off, which reuses the previous
+frame's visible set wholesale and needs `markGeometryDirty()` — see `render/gather.ts`.)
+
+**So what does `destroy()` actually free?** Only the things that would *not* come back on
+their own:
+
+- **Listeners.** The census in `events/listenerCensus.ts` is global and counts up, so a node
+  dropped while still holding a listener would leave its tally behind forever, making the
+  input layer run hit-tests nothing needs. `destroy()` calls `off()` on every node in the
+  subtree.
+- **A `Shape`'s caches** — its tessellated triangles and the flattened picking layout derived
+  from them. The only per-node memory that scales with complexity rather than being constant.
+- **The `Transformer`'s attached set**, which is the one place a node is held by something
+  that is *not* its parent. A transformer is a sibling of what it wraps, so no bubbling event
+  reaches it; it checks `isDestroyed` on each update instead. Note it drops **destroyed**
+  nodes only — a merely removed node may be on its way back (a cut waiting for a paste, an
+  undo), so continuing to wrap it is correct.
+
+What `destroy()` does **not** free is anything the node did not own. An `ImageTexture` belongs
+to the application and may be drawn in ten other places, so destroying an `Image` node leaves
+it alone; call `ImageTexture.destroy()` when the picture itself is finished with.
+
+A `'destroy'` event fires on every node in the subtree *before* any of it is detached, so it
+still has a parent chain to bubble up and a watcher hears about the whole subtree rather than
+only its head. Like `'add'` and `'remove'`, it is gated on a listener existing at all.
+
+**`moveTo` and the world transform.** By default the node keeps its own
+`x`/`y`/`rotation`/`scale` and lands wherever those mean inside the new parent — right when
+the two parents are peers, jarring when they are not. `moveTo(parent, { keepWorldTransform:
+true })` instead keeps the node exactly where it is on screen, rewriting its local transform to
+absorb the difference between the two parents. That is the one for a drag that drops a shape
+into a group: the shape should not jump because its bookkeeping changed. It works by composing
+`newParentWorld⁻¹ · oldWorld` and handing the result to `Node.applyLocalMatrix()`, which
+decomposes it back into the five stored fields (`math/decompose2D.ts`) — the same machinery a
+transformer gesture goes through. `moveTo` throws rather than making a cycle out of a move into
+the node's own descendant, and refuses to re-home a destroyed node.
+
 ### The camera is not in the graph
 
 `Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*

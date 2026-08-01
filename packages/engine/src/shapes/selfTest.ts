@@ -4,7 +4,7 @@
 // thin layer of scene bookkeeping over these and isn't covered here. Run with:
 //   npx tsx src/shapes/selfTest.ts
 
-import { resetListenerCensus } from '../events/listenerCensus'
+import { listenerCount, resetListenerCensus } from '../events/listenerCensus'
 import type { NodeEvent } from '../events/NodeEvent'
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -738,7 +738,7 @@ function TWO_PI_PLUS(a: number): number {
   fit()
   const both = t.currentBox!
   assert(both.halfW > 200, 'a refit spans both nodes')
-  t.remove(first)
+  t.detach(first)
   assert(t.currentBox === null, 'and so does removing one')
 
   // A no-op call changes nothing, so it must not invalidate a perfectly good box either.
@@ -746,7 +746,7 @@ function TWO_PI_PLUS(a: number): number {
   const settled = t.currentBox
   t.attach([second])
   assert(t.currentBox === settled, 'attaching the set already attached leaves the box alone')
-  t.remove(first)
+  t.detach(first)
   assert(t.currentBox === settled, 'and so does removing a node that is not attached')
 }
 
@@ -770,9 +770,9 @@ function TWO_PI_PLUS(a: number): number {
   assert(t.nodes.length === 2, 'adding one already attached changes nothing')
   assert(changes.length === 2, 'and announces nothing either')
 
-  t.remove(b)
+  t.detach(b)
   assert(t.nodes.length === 1 && !t.has(b), 'remove() detaches just that node')
-  t.remove(b)
+  t.detach(b)
   assert(changes.length === 3, 'removing one that is not attached announces nothing')
 
   t.toggle(c)
@@ -1200,6 +1200,189 @@ function TWO_PI_PLUS(a: number): number {
   // Put it back, so a later test that happens to care about absolute values is not reading
   // whatever this block left behind.
   resetAutoZIndex(0)
+}
+
+// --- remove(): out of the tree, and still entirely itself ------------------------------
+{
+  const parent = new Container('holder')
+  const kept = parent.addChild(new Rect({ name: 'kept', width: 10, height: 10 }))
+  const going = parent.addChild(new Rect({ name: 'going', x: 40, width: 10, height: 10 }))
+
+  assert(going.remove() === going, 'remove() hands the node back, so it can be re-homed in one line')
+  assert(going.parent === null, 'and unhooks it from its parent')
+  assert(parent.children.length === 1 && parent.children[0] === kept, 'leaving its siblings alone')
+  assert(going.remove() === going, 'removing an unparented node is a no-op, not an error')
+
+  // The whole point of remove() rather than destroy(): the node is untouched.
+  assert(going.x === 40 && going.width === 10, 'the node keeps its transform and size')
+  assert(!going.isDestroyed, 'and is not destroyed')
+  assert(going.localBounds().valid(), 'its geometry still measures')
+
+  // Straight back in, as if nothing happened.
+  parent.addChild(going)
+  assert(going.parent === parent && parent.children.length === 2, 'and it goes back in')
+}
+
+// --- removeChildren(): the same thing for a whole container ----------------------------
+{
+  const parent = new Container('holder')
+  const a = parent.addChild(new Rect({ width: 1, height: 1 }))
+  const b = parent.addChild(new Rect({ width: 1, height: 1 }))
+
+  parent.removeChildren()
+  assert(parent.children.length === 0, 'the container is emptied')
+  assert(a.parent === null && b.parent === null, 'and every child knows it left')
+  assert(!a.isDestroyed && !b.isDestroyed, 'but none of them is destroyed - this is remove, not teardown')
+}
+
+// --- destroy(): the subtree is finished with --------------------------------------------
+{
+  resetListenerCensus()
+
+  const root = new Container('root')
+  const group = root.addChild(new Group({ name: 'doomed' }))
+  const child = group.addChild(new Rect({ name: 'child', width: 20, height: 20 }))
+  const nested = group.addChild(new Group({ name: 'nested' }))
+  const deep = nested.addChild(new Circle({ name: 'deep', radius: 5 }))
+
+  // Listeners are the one thing that does NOT clean itself up: the census is global, so a
+  // node dropped while still holding one would leave its tally behind forever.
+  group.on('click', () => {})
+  child.on('click', () => {})
+  child.on('pointermove', () => {})
+  assert(listenerCount('click') === 2 && listenerCount('pointermove') === 1, 'sanity: the census counted them')
+
+  group.destroy()
+
+  assert(listenerCount('click') === 0, "destroy() takes the whole subtree's listeners with it")
+  assert(listenerCount('pointermove') === 0, 'every type of them')
+  assert(root.children.length === 0, 'the head of the subtree is out of its parent')
+  assert(group.isDestroyed && child.isDestroyed, 'and everything under it is marked destroyed')
+  assert(nested.isDestroyed && deep.isDestroyed, 'however many levels down it sits')
+  assert(child.parent === null && group.children.length === 0, 'the tree is taken apart rather than left dangling')
+
+  group.destroy()
+  assert(group.isDestroyed, 'destroying twice is a no-op, not a second teardown')
+}
+
+// --- destroy() announces itself before anything is detached ------------------------------
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const group = root.addChild(new Group())
+  const child = group.addChild(new Rect({ width: 1, height: 1 }))
+
+  // Registered on the ROOT, which is above the subtree being destroyed - so it only hears
+  // anything at all if the events fire while the subtree is still attached.
+  const heard: string[] = []
+  root.on('destroy', (event) => heard.push(event.target.nodeName))
+
+  group.destroy()
+  assert(heard.length === 2, 'one event per node in the subtree, not one for its head')
+  assert(heard[0] === 'Group' && heard[1] === 'Rect', 'in pre-order, and they reached an ancestor by bubbling')
+  assert(child.isDestroyed, 'and the teardown still happened')
+  resetListenerCensus()
+}
+
+// --- moveTo(): re-homing, with and without keeping the node where it looks ---------------
+{
+  const root = new Container('root')
+  const from = root.addChild(new Group({ name: 'from', x: 100 }))
+  const to = root.addChild(new Group({ name: 'to', x: 400, scaleX: 2 }))
+  const shape = from.addChild(new Rect({ name: 'travelling', x: 10, width: 20, height: 20 }))
+
+  assert(shape.worldMatrix().transformPoint(new Vector3(0, 0, 0)).x === 110, 'sanity: it starts at 100 + 10')
+
+  // The default keeps the node's OWN transform, so it lands where x = 10 means in the new
+  // parent - through that parent's scale as well as its position.
+  assert(shape.moveTo(to) === shape, 'moveTo hands the node back')
+  assert(shape.parent === to, 'it is in the new parent')
+  assert(from.children.length === 0, 'and out of the old one')
+  assert(shape.x === 10, 'its own x is untouched')
+  assert(near(shape.worldMatrix().transformPoint(new Vector3(0, 0, 0)).x, 400 + 10 * 2), 'so it moved on screen')
+
+  // The other half: keep it exactly where it is, and let the local transform absorb the
+  // difference between the two parents.
+  const before = shape.worldMatrix()
+  shape.moveTo(from, { keepWorldTransform: true })
+  assert(shape.parent === from, 'moved back')
+  const after = shape.worldMatrix()
+  for (let i = 0; i < 16; i++) assert(near(after.m[i], before.m[i]), 'and its world matrix is unchanged')
+  assert(!near(shape.x, 10), 'which it paid for by rewriting its own x')
+}
+
+// --- moveTo() refuses the two moves that would corrupt the tree --------------------------
+{
+  const outer = new Group({ name: 'outer' })
+  const inner = outer.addChild(new Group({ name: 'inner' }))
+  const leaf = inner.addChild(new Rect({ width: 1, height: 1 }))
+
+  let threw = false
+  try {
+    outer.moveTo(inner)
+  } catch {
+    threw = true
+  }
+  assert(threw, 'a node cannot be moved into its own descendant - that is a cycle')
+  assert(outer.children.includes(inner) && inner.parent === outer, 'and the tree is left as it was')
+
+  threw = false
+  try {
+    outer.moveTo(outer)
+  } catch {
+    threw = true
+  }
+  assert(threw, 'nor into itself')
+
+  // A destroyed node is finished, and putting one back would be a silent bug.
+  const dead = new Rect({ width: 1, height: 1 })
+  dead.destroy()
+  threw = false
+  try {
+    dead.moveTo(outer)
+  } catch {
+    threw = true
+  }
+  assert(threw, 'and a destroyed node cannot be re-homed')
+  assert(leaf.parent === inner, 'sanity: none of that disturbed the tree')
+}
+
+// --- keepWorldTransform survives rotation and skew, not just position ---------------------
+{
+  const root = new Container('root')
+  const from = root.addChild(new Group({ x: 30, rotation: 0.4, scaleX: 1.5 }))
+  const to = root.addChild(new Group({ x: -80, y: 12, rotation: -0.9, scaleY: 2, skewX: 0.3 }))
+  const shape = from.addChild(new Rect({ x: 7, y: -3, rotation: 0.2, scaleX: 1.2, width: 10, height: 10 }))
+
+  const before = shape.worldMatrix()
+  shape.moveTo(to, { keepWorldTransform: true })
+  const after = shape.worldMatrix()
+  for (let i = 0; i < 16; i++) {
+    assert(near(after.m[i], before.m[i]), 'an arbitrary parent-to-parent change is absorbed exactly')
+  }
+}
+
+// --- a Transformer lets go of a node that has been destroyed ------------------------------
+{
+  const root = new Container('root')
+  const a = root.addChild(centredRect({ name: 'a', width: 40, height: 40 }))
+  const b = root.addChild(centredRect({ name: 'b', x: 100, width: 40, height: 40 }))
+  const t = root.addChild(new Transformer())
+
+  t.attach([a, b])
+  assert(t.nodes.length === 2, 'sanity: both attached')
+
+  // A removed node may be on its way back, so the frame keeps it.
+  b.remove()
+  t.update(boxForNodes([a, b], localBoundsOf), 1)
+  assert(t.nodes.length === 2, 'a merely removed node is still held - remove() means reusable')
+
+  // A destroyed one is finished, and nothing else would ever drop it: a transformer is a
+  // sibling of what it wraps, so no bubbling event reaches it.
+  b.destroy()
+  t.update(boxForNodes([a], localBoundsOf), 1)
+  assert(t.nodes.length === 1 && t.nodes[0] === a, 'a destroyed node is dropped on the next update')
+  assert(!t.has(b), 'and the frame no longer holds it')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

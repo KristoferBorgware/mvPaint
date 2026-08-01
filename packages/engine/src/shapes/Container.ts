@@ -40,6 +40,31 @@ export class Container extends Node {
     return true
   }
 
+  /**
+   * Takes every child out, leaving the container itself intact and usable. Each child is
+   * fully usable too - this is removeChild() for all of them, not destroy().
+   *
+   * The 'remove' events fire before anything is spliced, so a handler that inspects
+   * `children` sees the list it was told about rather than an empty one.
+   */
+  removeChildren(): this {
+    const leaving = [...this.childNodes]
+    if (hasListener('remove')) {
+      for (const child of leaving) this.fire('remove', { child }, true)
+    }
+    for (const child of leaving) child.parent = null
+    this.childNodes.length = 0
+    return this
+  }
+
+  /**
+   * A container's resource is its children: destroy() has already walked into them by the
+   * time this runs (see Node.finalize), so all that is left is to let go of the list.
+   */
+  protected override releaseResources(): void {
+    this.childNodes.length = 0
+  }
+
   protected override eachChild(visit: (child: Node) => void): void {
     for (const child of this.childNodes) visit(child)
   }

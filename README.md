@@ -60,6 +60,13 @@ within one. Override it when you mean to: `front.zIndex = back.zIndex + 1` to pu
 another, `shape.zIndex = nextZIndex()` to bring an existing one to the front, and any negative
 value to send one behind everything.
 
+**Lifecycle**
+`node.remove()` takes something out of the scene and leaves it entirely reusable;
+`node.destroy()` finishes with it and its subtree, dropping listeners and caches;
+`node.moveTo(parent)` re-homes it, optionally keeping it exactly where it is on screen. Nothing
+needs telling either way — the renderer rebuilds its visible set from the tree every frame, so
+a removed node stops drawing on the next one and its shadow-atlas slot comes back on its own.
+
 **Grouping and layers**
 A `Group` is a *unit*: it places its contents, sizes itself to them, hides them together, and a
 drag inside one takes hold of the whole thing. A `Layer` is the opposite trade — optional (not a
@@ -207,7 +214,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,560 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,648 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
