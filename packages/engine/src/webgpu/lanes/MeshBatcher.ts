@@ -18,6 +18,7 @@ import {
   MESH_VERTEX_STRIDE,
   OBJECT_DEPTH_OFFSET,
   OBJECT_FILL_COLOR_OFFSET,
+  OBJECT_OPACITY_OFFSET,
   OBJECT_FILL_TYPE_OFFSET,
   OBJECT_GRADIENT_END_OFFSET,
   OBJECT_GRADIENT_END_RADIUS_OFFSET,
@@ -53,6 +54,7 @@ const STOP_FIELDS = 5
 export class ObjectCache {
   model: Float32Array | null = null
   depth = NaN
+  opacity = NaN
   fillType = -1
   fillR = NaN
   fillG = NaN
@@ -71,10 +73,11 @@ export class ObjectCache {
   stopCount = -1
   readonly stops = new Float64Array(MAX_GRADIENT_STOPS * STOP_FIELDS)
 
-  matches(model: Float32Array, depth: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): boolean {
+  matches(model: Float32Array, depth: number, opacity: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): boolean {
     if (
       this.model !== model ||
       this.depth !== depth ||
+      this.opacity !== opacity ||
       this.fillType !== fillType ||
       this.fillR !== material.fill[0] ||
       this.fillG !== material.fill[1] ||
@@ -125,9 +128,10 @@ export class ObjectCache {
     return true
   }
 
-  remember(model: Float32Array, depth: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): void {
+  remember(model: Float32Array, depth: number, opacity: number, fillType: number, material: MeshMaterial, stopCount: number, stops: readonly GradientStop[]): void {
     this.model = model
     this.depth = depth
+    this.opacity = opacity
     this.fillType = fillType
     this.fillR = material.fill[0]
     this.fillG = material.fill[1]
@@ -342,6 +346,9 @@ export class MeshBatcher {
       // cache below skip a static shape's re-pack instead of just its worldMatrix compute.
       const model = shape.worldMatrix().toGPU()
       const depth = depths[i] ?? 0.5
+      // One opacity for the whole shape, written into every record it produces - it is a
+      // property of the OBJECT, not of one of its materials.
+      const opacity = shape.opacity
       const materials = shape.materials()
 
       for (let m = 0; m < this.objectCounts[i]; m++, object++) {
@@ -358,7 +365,7 @@ export class MeshBatcher {
         const stopCount = Math.min(stops.length, MAX_GRADIENT_STOPS)
 
         const cache = this.objectCache[object]
-        if (cache.matches(model, depth, fillType, material, stopCount, stops)) {
+        if (cache.matches(model, depth, opacity, fillType, material, stopCount, stops)) {
           continue // Buffer already holds these exact bytes from a previous frame.
         }
         anyChanged = true
@@ -372,6 +379,7 @@ export class MeshBatcher {
         const floatBase = (object * OBJECT_STRIDE) / 4
         f32.set(model, floatBase)
         f32[floatBase + OBJECT_DEPTH_OFFSET / 4] = depth
+        f32[floatBase + OBJECT_OPACITY_OFFSET / 4] = opacity
         u32[floatBase + OBJECT_FILL_TYPE_OFFSET / 4] = fillType
         u32[floatBase + OBJECT_STOP_COUNT_OFFSET / 4] = stopCount
 
@@ -402,7 +410,7 @@ export class MeshBatcher {
         f32.set(material.fill, floatBase + OBJECT_FILL_COLOR_OFFSET / 4)
         f32.set(material.stroke, floatBase + OBJECT_STROKE_COLOR_OFFSET / 4)
 
-        cache.remember(model, depth, fillType, material, stopCount, stops)
+        cache.remember(model, depth, opacity, fillType, material, stopCount, stops)
       }
     }
 

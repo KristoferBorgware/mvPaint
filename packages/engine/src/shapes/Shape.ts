@@ -104,6 +104,16 @@ export interface ShapeOptions extends NodeOptions {
    */
   zIndex?: number
   /**
+   * How transparent the whole object is, 0 (invisible) to 1 (solid). Default 1.
+   *
+   * Separate from the alpha in `fill`/`stroke`, and multiplied with them - which is the
+   * point. A colour's alpha is part of how the shape is PAINTED and belongs to the design;
+   * this is a property of the object, the thing an editor's opacity slider drives and an
+   * animation fades. Baking one into the other means a fade has to know and restore every
+   * colour it touched.
+   */
+  opacity?: number
+  /**
    * Draw in the always-on-top overlay pass (see webgpu/SceneRenderer). Default false.
    */
   overlay?: boolean
@@ -139,6 +149,22 @@ export abstract class Shape extends Node {
 
   /** Skipped by the renderer when false. */
   visible = true
+  /**
+   * The object's own transparency, 0 to 1, multiplied into every fragment it paints - fill,
+   * stroke, gradient, glyph, texture and its shadow alike.
+   *
+   * It does NOT cascade. A group's opacity is a different feature and a much harder one:
+   * doing it correctly means drawing the group to an offscreen target and compositing that
+   * once, because multiplying the value down onto each child instead makes the children show
+   * through EACH OTHER wherever they overlap. Rather than ship the cheap version under the
+   * right name, this stays what it says it is: one object's transparency.
+   *
+   * A shape whose parts are styled independently (VectorText's runs) has the same caveat in
+   * miniature - each run is its own object record, so overlapping runs at opacity 0.5 blend
+   * against one another. Runs rarely overlap, which is why this is a note and not a blocker.
+   */
+  opacity = 1
+
   /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
   pickable = true
   /**
@@ -258,6 +284,7 @@ export abstract class Shape extends Node {
     // thought about stacking almost always wants. An explicit one is taken as given and does
     // NOT advance the counter - see ShapeOptions.zIndex for what that costs.
     this.zIndex = options.zIndex ?? nextZIndex()
+    this.opacity = options.opacity ?? 1
     this.overlay = options.overlay ?? false
     this.draggable = options.draggable ?? true
     this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]
@@ -283,6 +310,7 @@ export abstract class Shape extends Node {
       'pickable',
       'draggable',
       'zIndex',
+      'opacity',
       'overlay',
       'shadowColor',
       'shadowBlur',

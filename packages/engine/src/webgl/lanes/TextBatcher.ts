@@ -20,6 +20,7 @@ import {
   TEXT_GLYPH_BIT,
   TEXT_OBJECT_ATLAS_LAYER_OFFSET,
   TEXT_OBJECT_DEPTH_OFFSET,
+  TEXT_OBJECT_OPACITY_OFFSET,
   TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
   TEXT_OBJECT_FILL_TYPE_OFFSET,
@@ -153,6 +154,7 @@ export class GlTextBatcher {
 
       f32.set(node.worldMatrix().toGPU(), base)
       f32[base + TEXT_OBJECT_DEPTH_OFFSET / 4] = depths.get(node) ?? 0.5
+      f32[base + TEXT_OBJECT_OPACITY_OFFSET / 4] = node.opacity
       // Floats, not reinterpreted integer bits - see ObjectTexture.ts's header.
       f32[base + TEXT_OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[material.fillPriority]
 

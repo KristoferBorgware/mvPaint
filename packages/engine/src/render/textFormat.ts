@@ -27,7 +27,8 @@ export const TEXT_OBJECT_ID_MASK = 0x7fffffff
 //   88  gradientEnd: vec2<f32>                             (8)
 //   96  gradientEndRadius: f32
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>      (32)
-//   132 (padding, vec4 alignment)
+//   132 opacity: f32 (the object's own transparency - see Shape.opacity)
+//   136 (8 bytes padding, vec4 alignment)
 //   144 stopColors: array<vec4<f32>, MAX_GRADIENT_STOPS>   (128)
 //   272 strokeColor: vec4<f32>                             (16)
 //   288 strokeWidth: f32 (world px; 0 = no outline)
@@ -57,4 +58,5 @@ export const TEXT_OBJECT_HAS_STROKE_OFFSET = 292
 export const TEXT_OBJECT_DISTANCE_RANGE_OFFSET = 296
 export const TEXT_OBJECT_DILATE_OFFSET = 300
 export const TEXT_OBJECT_ATLAS_LAYER_OFFSET = 304
+export const TEXT_OBJECT_OPACITY_OFFSET = 132
 export const TEXT_OBJECT_STRIDE = 320 // bytes

@@ -26,6 +26,7 @@ import {
   TEXT_GLYPH_BIT,
   TEXT_OBJECT_ATLAS_LAYER_OFFSET,
   TEXT_OBJECT_DEPTH_OFFSET,
+  TEXT_OBJECT_OPACITY_OFFSET,
   TEXT_OBJECT_DILATE_OFFSET,
   TEXT_OBJECT_DISTANCE_RANGE_OFFSET,
   TEXT_OBJECT_FILL_TYPE_OFFSET,
@@ -224,6 +225,10 @@ void main() {
       color = vec4(rgb, a);
     }
   }
+
+  // The object's own transparency, applied last and to the alpha only - these lanes blend
+  // straight (non-premultiplied) alpha, so scaling rgb would darken rather than fade.
+  color.a *= ${field(TEXT_OBJECT_OPACITY_OFFSET)};
 
   // Most commonly a glyph quad's margin outside the actual ink, where coverage alpha is 0.
   if (color.a <= 0.0) discard;

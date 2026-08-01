@@ -12,7 +12,11 @@ import { Polyline } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
 import {
   FILL_TYPE_CODE,
+  MAX_GRADIENT_STOPS,
   MESH_VERTEX_STRIDE,
+  OBJECT_OPACITY_OFFSET,
+  OBJECT_STOP_COLORS_OFFSET,
+  OBJECT_STOP_POSITIONS_OFFSET,
   OBJECT_STRIDE,
   type MeshSink,
   type RGBA,
@@ -21,6 +25,8 @@ import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayout
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
+import { IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE } from './imageFormat'
+import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
 import { depthForRank } from '../scene/picking'
 import { SceneGather, type GatherInput } from './gather'
 import { Scene } from '../scene/Scene'
@@ -1051,6 +1057,68 @@ assert(
     assert(gather.getCullBounds() !== null, 'culling on leaves a rectangle behind')
     gather.run(input(scene, { cullingEnabled: false }), false)
     assert(gather.getCullBounds() === null, 'culling off clears it, so the debug overlay disappears with it')
+  }
+}
+
+// --- object opacity keeps a shape out of the opaque pass ---------------------------------
+//
+// The one thing that MUST be true of Shape.opacity. It scales the alpha of every fragment
+// the object paints, so a shape at 0.5 with entirely opaque colours still cannot write depth
+// ahead of what is behind it - and the classifier is the only thing standing between that and
+// a hole in the picture.
+{
+  const solid = new Rect({ width: 1, height: 1 })
+  assert(isOpaqueShape(solid), 'sanity: opaque colours, default opacity')
+
+  solid.opacity = 0.5
+  assert(!isOpaqueShape(solid), 'a faded shape is translucent however solid its colours are')
+  solid.opacity = 0
+  assert(!isOpaqueShape(solid), 'and an invisible one certainly is')
+  solid.opacity = 1
+  assert(isOpaqueShape(solid), 'back to opaque at 1, which is the default')
+
+  // It can only ever move a shape OUT of the opaque pass. Full opacity does not rescue a
+  // shape whose colours are translucent.
+  const faded = new Rect({ width: 1, height: 1, fill: [1, 0, 0, 0.4], opacity: 1 })
+  assert(!isOpaqueShape(faded), 'opacity 1 does not make a translucent fill opaque')
+
+  // And it reaches the partition, which is what actually orders the draw.
+  const a = new Rect({ width: 1, height: 1 })
+  const b = new Rect({ width: 1, height: 1, opacity: 0.5 })
+  const c = new Rect({ width: 1, height: 1 })
+  const split = partitionByOpacity([a, b, c], [0.1, 0.2, 0.3])
+  assert(split.translucentStart === 2, 'the faded shape is counted as translucent')
+  assert(split.shapes[2] === b, 'and moved into the translucent tail')
+  assert(split.shapes[0] === a && split.shapes[1] === c, 'leaving the opaque head in order')
+}
+
+// --- the opacity fields sit in real padding, and collide with nothing --------------------
+//
+// Each was placed in a hole the record already had, so none of the strides moved and the
+// WebGL texel counts are untouched. That is only true while these offsets stay clear of their
+// neighbours, which is exactly the sort of thing a later edit breaks silently.
+{
+  // Mesh: stopPositions runs 100..132, stopColors starts at 144 on its vec4 alignment.
+  assert(OBJECT_OPACITY_OFFSET === 132, 'the mesh opacity sits at 132')
+  assert(
+    OBJECT_OPACITY_OFFSET >= OBJECT_STOP_POSITIONS_OFFSET + MAX_GRADIENT_STOPS * 4,
+    'clear of the end of the stop positions',
+  )
+  assert(OBJECT_OPACITY_OFFSET + 4 <= OBJECT_STOP_COLORS_OFFSET, 'and clear of the stop colours')
+  assert(OBJECT_STRIDE === 304, 'the mesh record did not grow')
+
+  // Text mirrors the mesh layout exactly, which is why they share an offset.
+  assert(TEXT_OBJECT_OPACITY_OFFSET === 132, 'the text opacity sits at 132 too')
+  assert(TEXT_OBJECT_STRIDE === 320, 'and the text record did not grow')
+
+  // Image: depth ends at 84, and the record is padded out to 96.
+  assert(IMAGE_OBJECT_OPACITY_OFFSET === 84, 'the image opacity sits at 84')
+  assert(IMAGE_OBJECT_OPACITY_OFFSET + 4 <= IMAGE_OBJECT_STRIDE, 'inside the record')
+  assert(IMAGE_OBJECT_STRIDE === 96, 'and the image record did not grow')
+
+  // Every offset is 4-byte aligned, which a float read needs on both backends.
+  for (const offset of [OBJECT_OPACITY_OFFSET, TEXT_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_OPACITY_OFFSET]) {
+    assert(offset % 4 === 0, 'every opacity offset is 4-byte aligned')
   }
 }
 

@@ -25,6 +25,7 @@ import {
   MESH_VERTEX_FLOATS,
   MESH_VERTEX_STRIDE,
   OBJECT_DEPTH_OFFSET,
+  OBJECT_OPACITY_OFFSET,
   OBJECT_FILL_COLOR_OFFSET,
   OBJECT_FILL_TYPE_OFFSET,
   OBJECT_GRADIENT_END_OFFSET,
@@ -166,6 +167,8 @@ export class GlMeshBatcher {
       // shape's whole re-pack rather than just its matrix compute.
       const model = shape.worldMatrix().toGPU()
       const depth = depths[i] ?? 0.5
+      // One opacity for the whole shape, written into every record it produces.
+      const opacity = shape.opacity
       const materials = shape.materials()
 
       for (let m = 0; m < this.objectCounts[i]; m++, object++) {
@@ -182,7 +185,7 @@ export class GlMeshBatcher {
         const stopCount = Math.min(stops.length, MAX_GRADIENT_STOPS)
 
         const cache = this.objectCache[object]
-        if (cache.matches(model, depth, fillType, material, stopCount, stops)) continue
+        if (cache.matches(model, depth, opacity, fillType, material, stopCount, stops)) continue
 
         anyChanged = true
         const lastRange = dirtyRanges[dirtyRanges.length - 1]
@@ -192,6 +195,7 @@ export class GlMeshBatcher {
         const base = (object * OBJECT_STRIDE) / 4
         f32.set(model, base)
         f32[base + OBJECT_DEPTH_OFFSET / 4] = depth
+        f32[base + OBJECT_OPACITY_OFFSET / 4] = opacity
         // Floats, not reinterpreted integer bits - see ObjectTexture.ts's header.
         f32[base + OBJECT_FILL_TYPE_OFFSET / 4] = fillType
         f32[base + OBJECT_STOP_COUNT_OFFSET / 4] = stopCount
@@ -223,7 +227,7 @@ export class GlMeshBatcher {
         f32.set(material.fill, base + OBJECT_FILL_COLOR_OFFSET / 4)
         f32.set(material.stroke, base + OBJECT_STROKE_COLOR_OFFSET / 4)
 
-        cache.remember(model, depth, fillType, material, stopCount, stops)
+        cache.remember(model, depth, opacity, fillType, material, stopCount, stops)
       }
     }
 

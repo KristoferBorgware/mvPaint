@@ -53,6 +53,12 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+**Object opacity**
+`shape.opacity` fades a whole object — fill, stroke, gradient, glyph, texture and its shadow
+alike — and is kept out of its colours, so a fade never has to know or restore what it touched.
+It multiplies with a colour's own alpha rather than replacing it, rides in padding the per-object
+records already had (so nothing grew), and keeps the shape out of the opaque pass automatically.
+
 **Stacking that just works**
 Things stack in the order you make them — every shape takes the next number from a running
 counter as its `zIndex`, so a new one lands on top with nothing to set, across lanes as much as
@@ -214,13 +220,13 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,651 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,671 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
 ### Demo scenes
 
-Shapes and gradients · Groups · Layers · MSDF text · Outline text · Text on a path · Images ·
+Shapes and gradients · Groups · Layers · Object opacity · MSDF text · Outline text · Text on a path · Images ·
 Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
 (100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
 

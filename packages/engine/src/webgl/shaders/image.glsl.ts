@@ -12,6 +12,7 @@
 
 import {
   IMAGE_OBJECT_DEPTH_OFFSET,
+  IMAGE_OBJECT_OPACITY_OFFSET,
   IMAGE_OBJECT_STRIDE,
   IMAGE_OBJECT_TINT_OFFSET,
 } from '../../render/imageFormat'
@@ -75,6 +76,10 @@ void main() {
   vec4 color = texture(u_image, v_uv) * obj(id, ${IMAGE_OBJECT_TINT_OFFSET / 16});
 
   // A hole in the source texture, or a tint that has faded the image out entirely: blending
+  // The object's own transparency, applied last and to the alpha only - these lanes blend
+  // straight (non-premultiplied) alpha, so scaling rgb would darken rather than fade.
+  color.a *= ${field(IMAGE_OBJECT_OPACITY_OFFSET)};
+
   // at alpha 0 leaves the destination exactly as it was, so discarding skips the blend.
   if (color.a <= 0.0) discard;
   fragColor = color;

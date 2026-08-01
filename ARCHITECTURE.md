@@ -537,6 +537,39 @@ flat fill at alpha 1 or a gradient whose every stop is. The stroke is checked wh
 shape strokes anything, since a material carries no stroke *width*; that costs nothing in
 practice, because an unstroked shape keeps the default opaque black.
 
+And before any of that, `Shape.opacity` below 1 disqualifies a shape outright, in every lane —
+see below.
+
+### Object opacity
+
+`Shape.opacity` (0…1, default 1) fades a whole object, and is deliberately **not** the alpha in
+its `fill`/`stroke`. A colour's alpha is part of how the shape is painted and belongs to its
+design; this is a property of the object — what an editor's opacity slider drives and what an
+animation fades. Baking one into the other means a fade has to know, and afterwards restore,
+every colour it touched. The two multiply.
+
+It rides in the per-object record, in padding each format already had: byte 132 for mesh and
+text, byte 84 for images. **No record grew and no stride changed**, so the WebGL data-texture
+texel counts (19 / 20 / 6) are exactly what they were. Each lane's shader multiplies it into the
+fragment's **alpha only** — these lanes blend straight, non-premultiplied alpha, so scaling rgb
+would darken the shape instead of fading it. The shadow lane needs no record change at all: its
+colour alpha is already `shadowColor.a × shadowOpacity` on the CPU, so object opacity is one
+more factor there, and a faded shape's shadow fades with it rather than reading as a second
+object.
+
+The load-bearing part is the classifier. `isOpaqueShape()` checks `opacity < 1` **first**, ahead
+of any material, because an opacity it could not see is precisely the "wrong opaque" the section
+above warns about — a faded shape would write depth ahead of everything behind it and punch a
+hole. Opacity can only ever move a shape *out* of the opaque pass, never into it.
+
+**It does not cascade.** A group's opacity is a different and much harder feature: doing it
+correctly means drawing the group to an offscreen target and compositing that once, because
+multiplying the value down onto each child instead makes the children show through *each other*
+wherever they overlap. Rather than ship the cheap version under the right name, this stays what
+it says it is — one object's transparency. The same caveat applies in miniature to a shape whose
+parts are styled independently (`VectorText`'s runs are separate object records), which is why
+it is a note rather than a blocker: runs rarely overlap.
+
 ### What it was before
 
 The lanes used to draw one at a time — all the mesh, then all the text, then all the images —

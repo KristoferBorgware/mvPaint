@@ -27,6 +27,8 @@ struct ObjectData {
   gradientEnd : vec2<f32>,
   gradientEndRadius : f32,
   stopPositions : array<f32, MAX_STOPS>,
+  // Byte 132, in what WGSL would otherwise pad before stopColors' 16-byte alignment.
+  opacity : f32,
   stopColors : array<vec4<f32>, MAX_STOPS>,
   strokeColor : vec4<f32>,
   strokeWidth : f32,
@@ -207,6 +209,10 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
       color = vec4<f32>(rgb, a);
     }
   }
+
+  // The object's own transparency, applied last and to the alpha only - these lanes blend
+  // straight (non-premultiplied) alpha, so scaling rgb would darken rather than fade.
+  color.a = color.a * obj.opacity;
 
   // A fully transparent fragment - most commonly a glyph quad's margin outside the actual
   // glyph ink, where MSDF coverage alpha is 0 - contributes nothing: blending at alpha 0

@@ -19,6 +19,8 @@ struct ObjectData {
   model : mat4x4<f32>,
   tint : vec4<f32>,
   depth : f32,
+  // Byte 84, in what would otherwise be padding out to the record's 16-byte multiple.
+  opacity : f32,
   _pad0 : f32,
   _pad1 : f32,
   _pad2 : f32,
@@ -58,7 +60,12 @@ fn vs_main(input : VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   let texel = textureSample(imageTex, imageSampler, input.uv);
-  let color = texel * objects[input.objectId].tint;
+  let obj = objects[input.objectId];
+  var color = texel * obj.tint;
+
+  // The object's own transparency, applied last and to the alpha only - these lanes blend
+  // straight (non-premultiplied) alpha, so scaling rgb would darken rather than fade.
+  color.a = color.a * obj.opacity;
 
   // A fully transparent fragment - a hole in the source texture, or a tint that has faded
   // the image out entirely - contributes nothing: blending at alpha 0 leaves the

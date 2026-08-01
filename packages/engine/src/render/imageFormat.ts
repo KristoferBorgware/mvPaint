@@ -20,8 +20,10 @@ export const IMAGE_VERTEX_FLOATS = 5 // 32-bit slots per vertex (2 + 2 + 1)
 //   0   model: mat4x4<f32>   (64)
 //   64  tint: vec4<f32>      (16)
 //   80  depth: f32 (NDC z in (0,1) - the same zIndex-derived value the other lanes use)
-//   84  (padding to a 16-byte multiple)
+//   84  opacity: f32 (the object's own transparency - see Shape.opacity)
+//   88  (8 bytes padding, to a 16-byte multiple)
 //   96  end
 export const IMAGE_OBJECT_TINT_OFFSET = 64
 export const IMAGE_OBJECT_DEPTH_OFFSET = 80
+export const IMAGE_OBJECT_OPACITY_OFFSET = 84
 export const IMAGE_OBJECT_STRIDE = 96 // bytes

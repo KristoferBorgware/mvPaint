@@ -27,6 +27,9 @@ struct ObjectData {
   gradientEnd : vec2<f32>,
   gradientEndRadius : f32,
   stopPositions : array<f32, MAX_STOPS>,
+  // Lands at byte 132, in what WGSL would otherwise pad out before stopColors' 16-byte
+  // alignment - so carrying it costs the record nothing. See render/meshFormat.ts.
+  opacity : f32,
   stopColors : array<vec4<f32>, MAX_STOPS>,
   fillColor : vec4<f32>,
   strokeColor : vec4<f32>,
@@ -155,6 +158,12 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     t = clamp(t, 0.0, 1.0);
     color = sampleGradient(obj, t);
   }
+
+  // The object's own transparency, applied last and to the alpha only - the pipeline blends
+  // straight (non-premultiplied) alpha, so scaling rgb here would darken the shape instead of
+  // fading it. See Shape.opacity, and render/opacity.ts for why anything below 1 keeps the
+  // shape out of the opaque pass.
+  color.a = color.a * obj.opacity;
 
   // A fully transparent fragment (e.g. a selection-highlight's invisible fill) contributes
   // nothing at all: straight-alpha blending at alpha 0 leaves the destination byte for byte

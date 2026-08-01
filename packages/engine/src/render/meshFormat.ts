@@ -79,7 +79,8 @@ export const MESH_OBJECT_ID_MASK = 0x7fffffff
 //   88  gradientEnd: vec2<f32>                 (8)
 //   96  gradientEndRadius: f32
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>       (32)
-//   132 (12 bytes padding, vec4 alignment)
+//   132 opacity: f32 (the object's own transparency - see Shape.opacity)
+//   136 (8 bytes padding, vec4 alignment)
 //   144 stopColors: array<vec4<f32>, MAX_GRADIENT_STOPS>    (128)
 //   272 fillColor: vec4<f32>                   (16) - used when fillType == color
 //   288 strokeColor: vec4<f32>                 (16)
@@ -100,6 +101,7 @@ export const OBJECT_DEPTH_OFFSET = 84
 export const OBJECT_GRADIENT_END_OFFSET = 88
 export const OBJECT_GRADIENT_END_RADIUS_OFFSET = 96
 export const OBJECT_STOP_POSITIONS_OFFSET = 100
+export const OBJECT_OPACITY_OFFSET = 132
 export const OBJECT_STOP_COLORS_OFFSET = 144
 export const OBJECT_FILL_COLOR_OFFSET = 272
 export const OBJECT_STROKE_COLOR_OFFSET = 288

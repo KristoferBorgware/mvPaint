@@ -30,6 +30,7 @@ import {
   OBJECT_GRADIENT_END_RADIUS_OFFSET,
   OBJECT_GRADIENT_START_OFFSET,
   OBJECT_GRADIENT_START_RADIUS_OFFSET,
+  OBJECT_OPACITY_OFFSET,
   OBJECT_STOP_COLORS_OFFSET,
   OBJECT_STOP_COUNT_OFFSET,
   OBJECT_STOP_POSITIONS_OFFSET,
@@ -190,6 +191,10 @@ void main() {
       color = sampleGradient(id, int(${field(OBJECT_STOP_COUNT_OFFSET)}), clamp(t, 0.0, 1.0));
     }
   }
+
+  // The object's own transparency, applied last and to the alpha only - the blend is straight
+  // (non-premultiplied) alpha, so scaling rgb would darken the shape rather than fade it.
+  color.a *= ${field(OBJECT_OPACITY_OFFSET)};
 
   // A fully transparent fragment contributes nothing - straight-alpha blending at alpha 0
   // leaves the destination byte for byte as it was - so discarding skips the blend rather

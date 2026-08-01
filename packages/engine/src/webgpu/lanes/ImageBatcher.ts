@@ -20,6 +20,7 @@ import type { ImageSampling } from '../../image/ImageTexture'
 import { WebGpuImageTexture } from '../ImageTexture'
 import {
   IMAGE_OBJECT_DEPTH_OFFSET,
+  IMAGE_OBJECT_OPACITY_OFFSET,
   IMAGE_OBJECT_STRIDE,
   IMAGE_OBJECT_TINT_OFFSET,
   IMAGE_VERTEX_FLOATS,
@@ -195,6 +196,7 @@ export class ImageBatcher {
       f32[tintBase + 2] = t[2]
       f32[tintBase + 3] = t[3]
       f32[base + IMAGE_OBJECT_DEPTH_OFFSET / 4] = depths.get(image) ?? 0.5
+      f32[base + IMAGE_OBJECT_OPACITY_OFFSET / 4] = image.opacity
     })
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)

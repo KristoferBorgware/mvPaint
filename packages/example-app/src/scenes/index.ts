@@ -5,6 +5,7 @@ import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildLayerScene } from './layerScene'
 import { buildMsdfStressScene } from './msdfStressScene'
+import { buildOpacityScene } from './opacityScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
 import { buildShapeStressScene } from './shapeStressScene'
@@ -79,6 +80,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Translucent objects stacked within one lane and across two. The top row is the control - overlapping translucent mesh shapes, text and images, each blending against its own kind. The middle row puts the same pair in two lanes and stacks it both ways round, so any difference between the two halves is the lanes\' doing - and there should be none. The bottom row is shadows, including one under an image with real holes in it. In every cell the back object is opaque and the front one is translucent, so the back object should show through.',
     build: buildTransparencyScene,
+  },
+  {
+    id: 'opacity',
+    title: 'Object opacity',
+    description:
+      "One number that fades a whole object, kept out of its colours - what an editor's opacity slider drives and what an animation fades, rather than something baked into every fill and stroke. The ramp, how it multiplies with a colour that is already translucent, mesh/text/shadow all obeying the same property, and a row animating it. Everything sits over bars, because transparency you cannot see through is just a paler colour.",
+    build: buildOpacityScene,
   },
   {
     id: 'shadows',
