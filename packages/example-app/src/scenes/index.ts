@@ -3,6 +3,7 @@
 
 import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
+import { buildLayerScene } from './layerScene'
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
@@ -33,6 +34,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Containers that place themselves and are sized by what they hold: one assembly under three different group transforms, a group of groups, a group whose extent follows its orbiting contents, visibility governing a whole subtree, and a group whose parts are deliberately still grabbed on their own. Click any part to select the whole assembly.',
     build: buildGroupScene,
+  },
+  {
+    id: 'layers',
+    title: 'Layers',
+    description:
+      "Optional containers with one enabled switch - and none of a group's other opinions. Three layers of one picture, each switching its slice off in one assignment; two layers whose cards interleave by zIndex, because a layer is not a canvas and contributes no ordering; the same four blocks in a group and in a layer, so a click shows the difference; and a layer sliding its contents while a shape inside keeps its own visible through the switch.",
+    build: buildLayerScene,
   },
   {
     id: 'text',
