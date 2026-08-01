@@ -68,6 +68,36 @@ export default function App() {
   const [backend, setBackend] = useState<'auto' | 'webgpu' | 'webgl2'>('auto')
   const [activePath, setActivePath] = useState<'webgpu' | 'webgl2' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [snapshotBusy, setSnapshotBusy] = useState(false)
+  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null)
+  const [snapshotName, setSnapshotName] = useState('mvpaint.png')
+
+  /**
+   * Capture, then hand the result to the UI rather than to a synthetic download.
+   *
+   * Every outcome is visible: the button says so while it is working, a failure lands in the
+   * error banner, and a success appears as a thumbnail with a link. Nothing about this button
+   * can now do nothing - which is what it did before, on a path where the capture rejected and
+   * the promise was thrown away.
+   */
+  const takeSnapshot = async () => {
+    setSnapshotBusy(true)
+    setError(null)
+    try {
+      const blob = await canvasRef.current!.captureSnapshot(2)
+      setSnapshotUrl((previous) => {
+        // The old object URL pins its blob in memory until it is revoked, and these are several
+        // megabytes each.
+        if (previous) URL.revokeObjectURL(previous)
+        return URL.createObjectURL(blob)
+      })
+      setSnapshotName(`mvpaint-${Date.now()}.png`)
+    } catch (cause) {
+      setError(`Snapshot failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    } finally {
+      setSnapshotBusy(false)
+    }
+  }
   const [selected, setSelected] = useState<readonly TransformableNode[]>([])
   // Both panels start collapsed - on mobile they otherwise eat most of the screen; the
   // user opts in via the toggle row instead of having them always on.
@@ -151,18 +181,59 @@ export default function App() {
                 <Button
                   size="small"
                   variant="outlined"
+                  disabled={snapshotBusy}
                   startIcon={<PhotoCameraIcon />}
-                  onClick={() => void canvasRef.current?.downloadSnapshot(2)}
+                  onClick={() => void takeSnapshot()}
                   sx={{ alignSelf: 'flex-start' }}
                 >
-                  Save a PNG
+                  {snapshotBusy ? 'Capturing...' : 'Take a PNG'}
                 </Button>
                 <Typography variant="caption" color="text.secondary">
-                  Renders the current view again offscreen, at twice the resolution, and
-                  downloads it. It's a second render rather than a copy of the canvas, so the
-                  image can be any size and any region - and the selection frame is left out of
-                  it, since handles aren't part of the drawing.
+                  Renders the current view again offscreen, at twice the resolution. It's a
+                  second render rather than a copy of the canvas, so the image can be any size
+                  and any region - and the selection frame is left out of it, since handles
+                  aren't part of the drawing.
                 </Typography>
+                {/*
+                  The result is SHOWN rather than only downloaded. A synthetic anchor click is
+                  the usual trick, but it depends on the browser still counting the original tap
+                  as user activation - and the capture is asynchronous, so on a phone that can
+                  quietly expire and the download is dropped with no error anywhere. A real link
+                  the user taps is a fresh gesture and cannot be refused; the thumbnail is also
+                  proof the capture happened at all, which a silent download is not.
+                */}
+                {snapshotUrl && (
+                  <Stack spacing={0.5} sx={{ alignSelf: 'stretch' }}>
+                    <Box
+                      component="img"
+                      src={snapshotUrl}
+                      alt="The captured PNG"
+                      sx={{
+                        width: '100%',
+                        borderRadius: 1,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        backgroundColor: '#fff',
+                      }}
+                    />
+                    <Button
+                      size="small"
+                      variant="contained"
+                      component="a"
+                      href={snapshotUrl}
+                      download={snapshotName}
+                      target="_blank"
+                      rel="noopener"
+                      sx={{ alignSelf: 'flex-start' }}
+                    >
+                      Save it
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      Tap to save, or press and hold the picture. On a phone, saving straight
+                      from the capture can be dropped silently - a tap on this cannot.
+                    </Typography>
+                  </Stack>
+                )}
               </Stack>
 
               <Stack spacing={0.5}>

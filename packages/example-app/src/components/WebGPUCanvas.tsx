@@ -87,13 +87,20 @@ export interface WebGPUCanvasHandle {
   /** Clears the current selection (and its transformer) the same way Escape does. */
   clearSelection: () => void
   /**
-   * Captures the current view offscreen and saves it as a PNG.
+   * Captures the current view offscreen and hands back the encoded PNG.
+   *
+   * It does NOT save the file. Delivering the bytes is the app's business, and on a phone that
+   * is a decision with consequences - see App.tsx, which shows the result and lets it be tapped
+   * rather than relying on a synthetic click surviving the capture.
    *
    * The selection frame is taken off first and put back afterwards, because editor furniture is
    * not part of the picture - a screenshot with resize handles baked into it is a screenshot of
    * the editor rather than of the drawing.
+   *
+   * Throws with a readable message rather than reporting through onError, so the caller can put
+   * the failure wherever it is showing the rest of the operation's state.
    */
-  downloadSnapshot: (pixelRatio?: number) => Promise<void>
+  captureSnapshot: (pixelRatio?: number) => Promise<Blob>
 }
 
 export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(function WebGPUCanvas(
@@ -221,50 +228,26 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       clearSelection: () => transformerRef.current?.clear(),
       // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the body reports its
       // own failures through onError; nothing is left for a caller to catch.
-      downloadSnapshot: async (pixelRatio = 2) => {
+      captureSnapshot: async (pixelRatio = 2) => {
         const handle = handleRef.current
-        if (!handle) {
-          // Also a silent no-op worth breaking: if the renderer failed to build, or is being
-          // rebuilt because the backend was just switched, the button would otherwise look
-          // broken rather than early.
-          onError?.('Snapshot skipped: the renderer is not ready yet.')
-          return
-        }
+        if (!handle) throw new Error('The renderer is not ready yet.')
 
         // The transformer is scene content like anything else and would be captured with the
         // rest of it. Detached for the shot and restored straight after, so the user's
         // selection survives taking a picture of it.
         const framed = transformerRef.current?.nodes.slice() ?? []
         transformerRef.current?.clear()
-        let blob: Blob
         try {
           // An opaque white background: this one is going to be looked at on its own, where a
           // transparent PNG would show whatever is behind it. Omit it for one meant to be
           // composited.
-          blob = await handle.toBlob({ pixelRatio, background: [1, 1, 1, 1] })
-        } catch (cause) {
-          // A capture that fails has to SAY so. Without this the promise rejects into the void
-          // and the button reads as doing nothing at all, which is indistinguishable from the
-          // click not registering - and leaves whoever pressed it with nothing to report.
-          const message = cause instanceof Error ? cause.message : String(cause)
-          console.error('Snapshot failed:', cause)
-          onError?.(`Snapshot failed on the ${handle.path} path: ${message}`)
-          return
+          return await handle.toBlob({ pixelRatio, background: [1, 1, 1, 1] })
         } finally {
           if (framed.length > 0) transformerRef.current?.attach(framed)
         }
-
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `mvpaint-${Date.now()}.png`
-        link.click()
-        // Revoked on the next turn of the loop: the click is synchronous but the fetch the
-        // browser does for the download is not.
-        setTimeout(() => URL.revokeObjectURL(url), 0)
       },
     }),
-    [onError],
+    [],
   )
 
   // Initialize the renderer once, on mount.
