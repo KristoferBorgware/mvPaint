@@ -9,7 +9,8 @@
 // quads. Coordinates are the node's local space: +x right, +y up, the block's top-left at the
 // origin (horizontal lines descend to negative y; vertical columns extend to negative x).
 
-import type { FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
+import { parseColor, parseStops } from '../render/color'
+import type { ColorInput, ColorStopInput, FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
 import type { FontStyle } from '../webgpu/FontBook'
@@ -22,7 +23,8 @@ export interface TextGradient {
   /** Radial only; ignored for linear. */
   startRadius?: number
   endRadius?: number
-  stops: GradientStop[]
+  /** Each stop's `color` accepts a string as well as the tuple. */
+  stops: ColorStopInput[]
 }
 
 /**
@@ -50,16 +52,16 @@ export interface TextGlow {
 export interface TextRunStyle {
   fontStyle?: FontStyle // default 'regular'
   fontSize?: number // px, default 32
-  /** Solid fill color; ignored when `gradient` is set. */
-  color?: RGBA
+  /** Solid fill colour; ignored when `gradient` is set. Accepts a string as well as the tuple. */
+  color?: ColorInput
   gradient?: TextGradient
-  strokeColor?: RGBA
+  strokeColor?: ColorInput
   /** Per-letter outline width in world px; 0 = no outline. */
   strokeWidth?: number
   underline?: boolean
   strikethrough?: boolean
-  /** Background highlight color drawn behind the run. */
-  highlight?: RGBA
+  /** Background highlight colour drawn behind the run. Accepts a string as well as the tuple. */
+  highlight?: ColorInput
   /** Extra tracking in world px between glyphs. */
   letterSpacing?: number
   /** Vertical shift from the baseline in world px (+up = superscript, -down = subscript). */
@@ -232,8 +234,8 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       gradientStartRadius: g?.startRadius ?? 0,
       gradientEnd: g ? g.end : ORIGIN,
       gradientEndRadius: g?.endRadius ?? 0,
-      stops: g ? g.stops : [],
-      strokeColor: style.strokeColor ?? BLACK,
+      stops: g ? parseStops(g.stops) : [],
+      strokeColor: style.strokeColor ? parseColor(style.strokeColor) : BLACK,
       strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
       dilate: boldDilate,
       distanceRange: metrics.distanceRange,
@@ -258,10 +260,12 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       fontSize,
       letterSpacing: style.letterSpacing ?? 0,
       baselineShift: style.baselineShift ?? 0,
-      color: style.color ?? g?.stops[0]?.color ?? BLACK,
+      // Parsed here rather than where the style was written: this runs once per run when the
+      // text is shaped, which is cached, so a string costs nothing per glyph or per frame.
+      color: style.color ? parseColor(style.color) : g?.stops[0] ? parseColor(g.stops[0].color) : BLACK,
       underline: style.underline ?? false,
       strikethrough: style.strikethrough ?? false,
-      highlight: style.highlight,
+      highlight: style.highlight ? parseColor(style.highlight) : undefined,
       skew: fauxItalic ? FAUX_ITALIC_SKEW : 0,
       mainMaterial,
       shadowMaterial,

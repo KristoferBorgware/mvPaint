@@ -90,11 +90,32 @@ one is the only place grouping is mechanism rather than policy. Which node a cli
 an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
 that wants to ask.
 
+### Writing a colour
+
+Everything below the scene graph works in straight-alpha `RGBA` — a 4-tuple, each channel
+0..1 — because that is what a shader wants, and converting per frame would be absurd.
+
+So a string is an **input** format, never a stored one. Every colour property (`fill`, `stroke`,
+`shadowColor`, gradient stops, an `Image`'s `tint`, the text run styles, a capture's background)
+accepts either form and converts on assignment; reading one back always gives the tuple. The
+batchers pull these per object per frame and have no business parsing anything.
+
+Accepted: `#f00` / `#f00c` / `#ff0000` / `#ff0000cc` (the short forms double each digit, so
+`#abc` is `#aabbcc`), `rgb()` and `rgba()` in comma or space syntax with numbers or percentages
+and an optional `/ alpha`, `hsl()` and `hsla()` with the hue in `deg`/`grad`/`rad`/`turn` or
+bare, the colour keywords, and `transparent`. Case and surrounding whitespace are ignored.
+
+Anything unreadable **throws**. A mistyped colour that silently renders black looks like a
+design decision rather than a typo, and the message costs nothing at the one place it can be
+raised usefully. The exception is SVG paint (`svg/color.ts`), which returns null instead: a
+colour in a document did not come from the person running the code, and one bad attribute
+should not stop a drawing from loading. That module now handles only the `none` keyword and
+that fallback, and reads colours through the same parser as everything else.
+
 ### Layers, which are not canvases
 
 `Layer extends Container` (`shapes/Layer.ts`) is the other organising container, and it is
-**optional** — unlike Konva's, where a layer is a real `<canvas>` and nothing can be drawn
-without one. Here it is not a canvas, not a render target, and **not a draw-order boundary**:
+**optional**, and not a canvas. It is not a render target and **not a draw-order boundary**:
 the whole scene is drawn in one pass and what is on top comes from each shape's `zIndex`,
 scene-wide. Two shapes in different layers order by their own `zIndex`, never by which layer
 they are in, so reorganising a scene into layers cannot change how it looks.
@@ -178,7 +199,7 @@ the node's own descendant, and refuses to re-home a destroyed node.
 ### Screenshots
 
 `handle.toCanvas()` / `toDataURL()` / `toBlob()` draw the scene **again**, offscreen, and hand
-back the pixels — Konva's `toImage`/`toDataURL` in this engine's vocabulary.
+back the pixels.
 
 A second render rather than a copy of the canvas, which is what buys the two things a copy
 cannot give you: the image can be **any region of world at any resolution** (a 4000px export of

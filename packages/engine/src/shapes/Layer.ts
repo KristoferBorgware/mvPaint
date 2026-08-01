@@ -1,8 +1,8 @@
 // Layer - a container for organising a scene, and one switch that turns everything in it
 // off.
 //
-// Optional, unlike Konva's, where a layer is a real canvas and nothing can be drawn without
-// one. Here it is not a canvas, not a render target, and not a draw-order boundary: this
+// Optional, and not a canvas. A layer here is not a render target and not a draw-order
+// boundary: this
 // engine draws the whole scene in one pass and decides what is on top from each shape's
 // zIndex, scene-wide (see scene/picking.ts's collectZOrder). A layer changes none of that. A
 // scene with no layers behaves exactly as it always did, and two shapes in different layers

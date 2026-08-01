@@ -78,7 +78,8 @@
 import { AABB } from '../math/AABB'
 import { bumpMeshGeometryEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
-import type { FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
+import { parseColor, parseStops } from '../render/color'
+import type { ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
@@ -120,7 +121,7 @@ export interface ShapeOptions extends NodeOptions {
   /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
   draggable?: boolean
   /** Shadow tint. Default opaque black. */
-  shadowColor?: RGBA
+  shadowColor?: ColorInput
   /** Canvas-style blur radius in local units (Gaussian sigma = blur/2). Default 0. */
   shadowBlur?: number
   /** CSS box-shadow-style spread in local units: grows (or, if negative, shrinks) the silhouette. Default 0. */
@@ -134,8 +135,8 @@ export interface ShapeOptions extends NodeOptions {
   shadowEnabled?: boolean
   /** Cast the shadow from fill+stroke (true, default) or from the fill alone. */
   shadowForStrokeEnabled?: boolean
-  fill?: RGBA
-  stroke?: RGBA
+  fill?: ColorInput
+  stroke?: ColorInput
   /** Stroke width in world units; 0 = no stroke. */
   strokeWidth?: number
   lineJoin?: LineJoin
@@ -192,8 +193,14 @@ export abstract class Shape extends Node {
   overlay = false
 
   // --- shadow (the canvas 2D model; see the file header) ------------------------------
-  /** Shadow tint; its alpha is multiplied by shadowOpacity. */
-  shadowColor: RGBA = [0, 0, 0, 1]
+  private shadowColorValue: RGBA = [0, 0, 0, 1]
+  /** Shadow tint; its alpha is multiplied by shadowOpacity. Accepts a string - see fill. */
+  get shadowColor(): RGBA {
+    return this.shadowColorValue
+  }
+  set shadowColor(value: ColorInput) {
+    this.shadowColorValue = parseColor(value)
+  }
   /**
    * Canvas-style blur radius in LOCAL units: the silhouette is blurred by a Gaussian of
    * sigma = shadowBlur/2. Changing it re-bakes the shape's atlas texture, so it is the one
@@ -243,23 +250,60 @@ export abstract class Shape extends Node {
     this._height = value
   }
 
-  /** Flat fill color, used when fillPriority is 'color'. */
-  fill: RGBA = [0, 0, 0, 1]
+  private fillValue: RGBA = [0, 0, 0, 1]
+  /**
+   * Flat fill colour, used when fillPriority is 'color'.
+   *
+   * Assign either form: the `[r, g, b, a]` tuple in 0..1, or a colour string - '#f80',
+   * 'rgb(255 136 0)', 'hsl(32 100% 50%)', 'tomato', 'transparent' (see render/color.ts for the
+   * full list). A string is converted here, once, and READING this always gives the tuple: the
+   * batchers pull these per object per frame and have no business parsing anything.
+   *
+   * An unreadable string throws rather than falling back, since a colour that silently comes out
+   * black looks like a design decision rather than a typo.
+   */
+  get fill(): RGBA {
+    return this.fillValue
+  }
+  set fill(value: ColorInput) {
+    this.fillValue = parseColor(value)
+  }
 
   /** Which fill mechanism this shape's fill triangles use. */
   fillPriority: FillPriority = 'color'
 
   fillLinearGradientStartPoint: Point2 = { x: 0, y: 0 }
   fillLinearGradientEndPoint: Point2 = { x: 0, y: 0 }
-  fillLinearGradientColorStops: GradientStop[] = []
+  private linearStops: GradientStop[] = []
+  /** Linear gradient stops. Each stop's `color` accepts a string as well as the tuple. */
+  get fillLinearGradientColorStops(): GradientStop[] {
+    return this.linearStops
+  }
+  set fillLinearGradientColorStops(value: readonly ColorStopInput[]) {
+    this.linearStops = parseStops(value)
+  }
 
   fillRadialGradientStartPoint: Point2 = { x: 0, y: 0 }
   fillRadialGradientStartRadius = 0
   fillRadialGradientEndPoint: Point2 = { x: 0, y: 0 }
   fillRadialGradientEndRadius = 0
-  fillRadialGradientColorStops: GradientStop[] = []
+  private radialStops: GradientStop[] = []
+  /** Radial gradient stops. Each stop's `color` accepts a string as well as the tuple. */
+  get fillRadialGradientColorStops(): GradientStop[] {
+    return this.radialStops
+  }
+  set fillRadialGradientColorStops(value: readonly ColorStopInput[]) {
+    this.radialStops = parseStops(value)
+  }
 
-  stroke: RGBA = [0, 0, 0, 1]
+  private strokeValue: RGBA = [0, 0, 0, 1]
+  /** Stroke colour. Accepts a string as well as the tuple - see fill. */
+  get stroke(): RGBA {
+    return this.strokeValue
+  }
+  set stroke(value: ColorInput) {
+    this.strokeValue = parseColor(value)
+  }
   strokeWidth = 0
   lineJoin: LineJoin = 'miter'
   lineCap: LineCap = 'butt'

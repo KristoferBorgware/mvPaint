@@ -4,7 +4,10 @@
 // (rects, polygons, future paths) flows through this one layout so it can share a
 // single pipeline and buffer set.
 
-export type RGBA = readonly [number, number, number, number]
+// Defined next to the parser that produces it, and re-exported here because this is where the
+// rest of the engine has always imported it from.
+import type { RGBA } from './color'
+export { isRGBA, parseColor, parseStops, type ColorInput, type ColorStopInput, type RGBA } from './color'
 export type Point2 = { x: number; y: number }
 
 /** Which fill mechanism a shape's fill triangles use. */

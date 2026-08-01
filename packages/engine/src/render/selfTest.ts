@@ -25,6 +25,7 @@ import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayout
 import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
+import { parseColor } from './color'
 import { MAX_CAPTURE_PIXELS, flipRows, paddedBytesPerRow, resolveCapture, unpadRows } from './capture'
 import { IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE } from './imageFormat'
 import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
@@ -1213,6 +1214,113 @@ assert(
   assert(flipped.length === packed.length, 'without changing the size')
   const twice = flipRows(flipped, width, height)
   for (let i = 0; i < packed.length; i++) assert(twice[i] === packed[i], 'flipping twice is the identity')
+}
+
+// --- parsing a colour ---------------------------------------------------------------------
+{
+  const eq = (input: string, want: readonly number[], what: string) => {
+    const got = parseColor(input)
+    assert(
+      got.length === 4 && got.every((c, i) => near(c, want[i], 1e-3)),
+      `${what}: ${input} -> [${got.map((c) => c.toFixed(3)).join(', ')}]`,
+    )
+  }
+
+  // The tuple is the engine's own form and comes back untouched - not copied, since these are
+  // treated as immutable everywhere and copying every assignment would allocate for nothing.
+  const tuple: RGBA = [0.1, 0.2, 0.3, 0.4]
+  assert(parseColor(tuple) === tuple, 'a tuple is passed straight through')
+
+  // Hex, in all four lengths. The short forms double each digit, so #abc is #aabbcc rather
+  // than #0a0b0c - a real difference, and the usual off-by-a-nibble.
+  eq('#ff0000', [1, 0, 0, 1], 'six digits')
+  eq('#f00', [1, 0, 0, 1], 'three digits')
+  eq('#abc', [0xaa / 255, 0xbb / 255, 0xcc / 255, 1], 'three digits double rather than pad')
+  eq('#ff000080', [1, 0, 0, 0x80 / 255], 'eight digits carry alpha')
+  eq('#f008', [1, 0, 0, 0x88 / 255], 'four digits carry alpha, doubled')
+  eq('#FF0000', [1, 0, 0, 1], 'case does not matter')
+  eq('  #f00  ', [1, 0, 0, 1], 'nor does surrounding space')
+
+  // Functional forms, in both syntaxes, with numbers or percentages.
+  eq('rgb(255, 0, 0)', [1, 0, 0, 1], 'comma-separated rgb')
+  eq('rgb(255 0 0)', [1, 0, 0, 1], 'space-separated rgb')
+  eq('rgba(255, 0, 0, 0.5)', [1, 0, 0, 0.5], 'rgba with a fourth component')
+  eq('rgb(255 0 0 / 50%)', [1, 0, 0, 0.5], 'alpha after a slash, as a percentage')
+  eq('rgb(100% 0% 0%)', [1, 0, 0, 1], 'percentage components')
+  eq('rgba(0,0,0,0)', [0, 0, 0, 0], 'fully transparent through rgba')
+
+  // hsl, including the sector boundaries where the piecewise conversion changes branch.
+  eq('hsl(0 100% 50%)', [1, 0, 0, 1], 'hue 0 is red')
+  eq('hsl(120 100% 50%)', [0, 1, 0, 1], 'hue 120 is green')
+  eq('hsl(240 100% 50%)', [0, 0, 1, 1], 'hue 240 is blue')
+  eq('hsl(0 0% 100%)', [1, 1, 1, 1], 'no saturation at full lightness is white')
+  eq('hsl(0 0% 0%)', [0, 0, 0, 1], 'and none at zero lightness is black')
+  eq('hsl(0, 100%, 50%, 0.25)', [1, 0, 0, 0.25], 'hsl takes an alpha too')
+  eq('hsl(360 100% 50%)', [1, 0, 0, 1], 'hue wraps at 360')
+  eq('hsl(-120 100% 50%)', [0, 0, 1, 1], 'and wraps the other way')
+  eq('hsl(0.5turn 100% 50%)', [0, 1, 1, 1], 'a hue in turns')
+  eq('hsl(3.14159rad 100% 50%)', [0, 1, 1, 1], 'and in radians')
+
+  // Keywords, and the one that is not a colour so much as an absence.
+  eq('red', [1, 0, 0, 1], 'a keyword')
+  eq('REBECCAPURPLE', [0x66 / 255, 0x33 / 255, 0x99 / 255, 1], 'keywords are case-insensitive')
+  eq('transparent', [0, 0, 0, 0], 'transparent is a fully transparent black')
+  eq('gray', parseColor('grey'), 'both spellings of grey agree')
+
+  // Out-of-range components are clamped rather than allowed through to a shader.
+  eq('rgb(300 -20 0)', [1, 0, 0, 1], 'components are clamped')
+  eq('rgba(0 0 0 / 5)', [0, 0, 0, 1], 'and so is alpha')
+
+  // A colour that cannot be read throws. Falling back to a default would render the typo as a
+  // deliberate-looking black, which is a far worse thing to debug.
+  const rejects = (input: string) => {
+    let threw = false
+    try {
+      parseColor(input)
+    } catch {
+      threw = true
+    }
+    assert(threw, `rejects ${JSON.stringify(input)}`)
+  }
+  rejects('')
+  rejects('notacolour')
+  rejects('#12345')
+  rejects('#gg0000')
+  rejects('rgb(1, 2)')
+  rejects('hsl(1)')
+  rejects('rgb(a, b, c)')
+}
+
+// --- the colour properties take either form ------------------------------------------------
+{
+  // Every one of these stores the tuple, whatever it was given: the batchers read them per
+  // object per frame and never see a string.
+  const shape = new Rect({ width: 1, height: 1, fill: 'tomato', stroke: '#0f08', shadowColor: 'rgb(0 0 255)' })
+  assert(near(shape.fill[0], 0xff / 255) && near(shape.fill[1], 0x63 / 255), 'a fill given as a keyword')
+  assert(near(shape.stroke[3], 0x88 / 255), 'a stroke given as short hex with alpha')
+  assert(near(shape.shadowColor[2], 1), 'a shadow colour given as rgb()')
+  assert(Array.isArray(shape.fill), 'and every one of them reads back as the tuple')
+
+  // Assignment after construction goes through the same conversion.
+  shape.fill = 'transparent'
+  assert(shape.fill[3] === 0, 'assigning a string converts it too')
+  shape.fill = [0.25, 0.5, 0.75, 1]
+  assert(near(shape.fill[1], 0.5), 'and the tuple still works')
+
+  // Gradient stops convert per stop.
+  shape.fillLinearGradientColorStops = [
+    { offset: 0, color: 'red' },
+    { offset: 1, color: [0, 0, 1, 1] },
+  ]
+  const stops = shape.fillLinearGradientColorStops
+  assert(stops.length === 2 && near(stops[0].color[0], 1), 'a stop given as a keyword')
+  assert(near(stops[1].color[2], 1), 'beside one given as a tuple')
+
+  // And the classifier still reads through them, which is what makes this a safe substitution
+  // rather than one that only looks right.
+  assert(isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'red', stroke: 'black' })), 'opaque strings are opaque')
+  assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'rgba(255,0,0,0.5)' })), 'and translucent ones are not')
+  assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'transparent' })), 'transparent included')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

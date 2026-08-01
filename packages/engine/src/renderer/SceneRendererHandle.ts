@@ -19,6 +19,7 @@ import type { TransformableNode } from '../shapes/Group'
 import type { PickableNode } from '../scene/picking'
 import type { MarqueeOptions } from '../scene/selection'
 import type { ImageTextureFactory } from '../image/ImageTexture'
+import type { ColorInput } from '../render/color'
 
 /** Which render path drew this frame. `'auto'` is only an input; a renderer is always one. */
 export type RenderPathKind = 'webgpu' | 'webgl2'
@@ -96,7 +97,7 @@ export interface SceneRendererHandle extends SceneResources {
    * That is a screenshot's fair price; it is not something to call every frame.
    */
   toCanvas: (options?: CaptureOptions) => Promise<HTMLCanvasElement>
-  /** The same capture as an encoded data URL - `toDataURL()` in Konva's vocabulary. */
+  /** The same capture as an encoded data URL. */
   toDataURL: (options?: EncodedCaptureOptions) => Promise<string>
   /** The same capture as a Blob, which is what a download wants (see URL.createObjectURL). */
   toBlob: (options?: EncodedCaptureOptions) => Promise<Blob>
@@ -134,11 +135,13 @@ export interface CaptureOptions {
   /** Radians, about the region's centre. Default 0 - a capture is normally axis-aligned. */
   rotation?: number
   /**
-   * What to fill the image with before the scene is drawn, as straight-alpha RGBA in 0..1.
-   * Default fully transparent, which is what a screenshot meant for compositing wants; pass
-   * an opaque colour for one meant to be looked at on its own.
+   * What to fill the image with before the scene is drawn. Takes either form a colour can be
+   * written in - the tuple, or a string like '#fff' or 'white'.
+   *
+   * Default fully transparent, which is what a screenshot meant for compositing wants; pass an
+   * opaque colour for one meant to be looked at on its own.
    */
-  background?: readonly [number, number, number, number]
+  background?: ColorInput
 }
 
 /** Capture options plus the two things only an encoded image needs. See toDataURL/toBlob. */

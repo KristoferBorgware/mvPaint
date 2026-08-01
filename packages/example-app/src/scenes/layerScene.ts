@@ -1,6 +1,6 @@
 // Layers: an optional container with one switch, and none of a group's other opinions.
 //
-// A layer here is NOT Konva's. It is not a canvas, not a render target, and not a draw-order
+// A layer here is not a canvas, not a render target, and not a draw-order
 // boundary - the whole scene is drawn in one pass and zIndex decides what is on top, scene-
 // wide. So the four sections below are each about what a layer does and does NOT do:
 //

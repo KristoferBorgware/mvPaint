@@ -52,6 +52,11 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+Every colour takes either form — the `[r, g, b, a]` tuple in 0..1, or a string: `'#f80'`,
+`'#ff8800cc'`, `'rgb(255 136 0)'`, `'rgba(255,136,0,0.5)'`, `'hsl(32 100% 50%)'`, `'tomato'`,
+`'transparent'`. Strings are converted on assignment and read back as the tuple, so nothing
+below the scene graph ever sees one.
+
 **Object opacity**
 `shape.opacity` fades a whole object — fill, stroke, gradient, glyph, texture and its shadow
 alike — and is kept out of its colours, so a fade never has to know or restore what it touched.
@@ -226,7 +231,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,763 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,811 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 

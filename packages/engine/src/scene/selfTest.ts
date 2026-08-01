@@ -445,7 +445,8 @@ class TransformGroup extends Container {
   const front = scene.root.addChild(new Layer({ name: 'front' }))
 
   // Two overlapping shapes, one per layer, with the LATER layer holding the LOWER zIndex.
-  // A Konva-style layer would stack by layer and put `high` behind `low`; here zIndex wins,
+  // A layer that stacked its own contents as a unit would put `high` behind `low`; here
+  // zIndex wins,
   // so a scene reorganised into layers renders exactly as it did without them.
   const low = back.addChild(centredRect({ width: 40, height: 40, zIndex: 10 }))
   const high = front.addChild(centredRect({ width: 40, height: 40, zIndex: -10 }))

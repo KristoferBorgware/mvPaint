@@ -6,6 +6,7 @@
 // getting a frame into an offscreen target and reading it back.
 
 import { Camera2D } from '../camera/Camera2D'
+import { parseColor, type RGBA } from './color'
 import type { CaptureOptions } from '../renderer/SceneRendererHandle'
 
 /** Everything a render path needs to take one capture, with every default already resolved. */
@@ -38,6 +39,8 @@ export interface CaptureView {
   viewHeight: number
   background: readonly [number, number, number, number]
 }
+
+const TRANSPARENT: RGBA = [0, 0, 0, 0]
 
 /** The largest capture either backend will attempt, per side. See resolveCapture. */
 export const MAX_CAPTURE_PIXELS = 8192
@@ -80,7 +83,7 @@ export function resolveCapture(
     pixelHeight: Math.max(1, Math.round(height * pixelRatio * fit)),
     viewWidth: width,
     viewHeight: height,
-    background: options.background ?? [0, 0, 0, 0],
+    background: options.background ? parseColor(options.background) : TRANSPARENT,
   }
 }
 

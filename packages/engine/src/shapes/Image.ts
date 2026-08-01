@@ -24,7 +24,8 @@
 // through ImageTexture.load() rather than `new Image()` and it will not come up.
 
 import { Shape, type ShapeOptions } from './Shape'
-import type { MeshSink, RGBA } from '../render/meshFormat'
+import { parseColor } from '../render/color'
+import type { ColorInput, MeshSink, RGBA } from '../render/meshFormat'
 import type { ImageTexture, ImageFilter, ImageWrap } from '../image/ImageTexture'
 import { imageUvRect, type ImageCrop, type ImageFit, type ImageUvRect } from '../image/imageUv'
 
@@ -45,7 +46,7 @@ export interface ImageOptions extends ShapeOptions {
   /** 'nearest' keeps pixel art crisp. Default 'linear'. */
   filter?: ImageFilter
   /** Multiplied into every sampled texel; its alpha is the opacity. Default opaque white. */
-  tint?: RGBA
+  tint?: ColorInput
 }
 
 export class Image extends Shape {
@@ -61,7 +62,15 @@ export class Image extends Shape {
   wrapX: ImageWrap
   wrapY: ImageWrap
   filter: ImageFilter
-  tint: RGBA
+
+  private tintValue: RGBA = [1, 1, 1, 1]
+  /** Multiplied into every sampled texel. Accepts a string as well as the tuple - see Shape.fill. */
+  get tint(): RGBA {
+    return this.tintValue
+  }
+  set tint(value: ColorInput) {
+    this.tintValue = parseColor(value)
+  }
 
   constructor(options: ImageOptions) {
     super({
