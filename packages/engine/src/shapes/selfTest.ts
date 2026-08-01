@@ -1367,22 +1367,49 @@ function TWO_PI_PLUS(a: number): number {
   const root = new Container('root')
   const a = root.addChild(centredRect({ name: 'a', width: 40, height: 40 }))
   const b = root.addChild(centredRect({ name: 'b', x: 100, width: 40, height: 40 }))
+  const c = root.addChild(centredRect({ name: 'c', x: 200, width: 40, height: 40 }))
   const t = root.addChild(new Transformer())
 
   t.attach([a, b])
   assert(t.nodes.length === 2, 'sanity: both attached')
 
-  // A removed node may be on its way back, so the frame keeps it.
+  // Merely removing it is enough. A detached node's worldMatrix collapses to its LOCAL
+  // matrix, so a frame that kept hold would fit itself to a position the node never had.
   b.remove()
-  t.update(boxForNodes([a, b], localBoundsOf), 1)
-  assert(t.nodes.length === 2, 'a merely removed node is still held - remove() means reusable')
-
-  // A destroyed one is finished, and nothing else would ever drop it: a transformer is a
-  // sibling of what it wraps, so no bubbling event reaches it.
-  b.destroy()
   t.update(boxForNodes([a], localBoundsOf), 1)
-  assert(t.nodes.length === 1 && t.nodes[0] === a, 'a destroyed node is dropped on the next update')
+  assert(t.nodes.length === 1 && t.nodes[0] === a, 'a removed node is dropped on the next update')
   assert(!t.has(b), 'and the frame no longer holds it')
+
+  // Destroying one that is still in the scene does the same, by the other half of the test.
+  t.attach([a, c])
+  c.destroy()
+  t.update(boxForNodes([a], localBoundsOf), 1)
+  assert(t.nodes.length === 1 && t.nodes[0] === a, 'so is a destroyed one')
+}
+
+// --- ...but not of a node that merely moved, nor of one attached before it had a home ------
+{
+  const root = new Container('root')
+  const left = root.addChild(new Group({ name: 'left', x: -100 }))
+  const right = root.addChild(new Group({ name: 'right', x: 100 }))
+  const shape = left.addChild(centredRect({ name: 'travelling', width: 40, height: 40 }))
+  const t = root.addChild(new Transformer())
+
+  // moveTo changes WHERE a node is, not whether it is there.
+  t.attach([shape])
+  shape.moveTo(right)
+  t.update(boxForNodes([shape], localBoundsOf), 1)
+  assert(t.nodes.length === 1, 'a node moved to another parent in the same tree stays attached')
+
+  // Built, selected, and only then added - the node's tree top changes, but in the direction
+  // of joining rather than leaving, so a bare parent check would get this backwards.
+  const fresh = centredRect({ name: 'fresh', width: 10, height: 10 })
+  t.attach([fresh])
+  t.update(boxForNodes([fresh], localBoundsOf), 1)
+  assert(t.nodes.length === 1, 'a node attached before it is in the scene is not mistaken for one that left')
+  root.addChild(fresh)
+  t.update(boxForNodes([fresh], localBoundsOf), 1)
+  assert(t.nodes.length === 1, 'and adding it afterwards does not drop it either')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

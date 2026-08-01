@@ -40,6 +40,7 @@
 
 import { Container } from './Container'
 import { Rect } from './Rect'
+import type { Node } from './Node'
 import type { TransformableNode } from './Group'
 import { hasListener } from '../events/listenerCensus'
 import type { RGBA } from '../render/meshFormat'
@@ -107,6 +108,9 @@ export class Transformer extends Container {
   keepRatio: boolean
 
   private attached: TransformableNode[] = []
+  // Each attached node's tree top, as it was when the node was attached. Compared against the
+  // live one to notice a node that has since left the scene - see dropDepartedNodes.
+  private attachedRoots: Node[] = []
   private box: OrientedBox | null = null
   private zoom = 1
 
@@ -259,28 +263,41 @@ export class Transformer extends Container {
    * before - this only stops them being *acted on* while the box is known to be stale.
    */
   /**
-   * Lets go of nodes that have been destroyed.
+   * Lets go of nodes that have left the scene - destroyed, or merely removed.
    *
    * The attached set is the one place a node is held by something that is NOT its parent, so
-   * it is the one place a teardown does not clean itself up: everything else the renderer
-   * keeps is rebuilt from the scene each frame, but this list would hold a destroyed node
-   * alive forever and go on asking to measure it. There is no event to lean on either - a
-   * transformer is a SIBLING of the nodes it wraps, not an ancestor, so a bubbling 'destroy'
-   * never reaches it.
+   * it is the one place a removal does not clean itself up: everything else the renderer keeps
+   * is rebuilt from the scene each frame, but this list would hold a node forever. There is no
+   * event to lean on either - a transformer is a SIBLING of the nodes it wraps, not an
+   * ancestor, so a bubbling 'remove' never reaches it.
    *
-   * DESTROYED, and not merely removed. A removed node is explicitly still usable and may be
-   * on its way back (a cut waiting for its paste, an undo), so a frame that kept wrapping it
-   * is doing the right thing - clear() is there for an application that disagrees. Only
-   * destroy() says the node is finished, and that is the only claim this can act on.
+   * A REMOVED node counts, not only a destroyed one, and the reason is worth stating because
+   * remove() otherwise promises the node is still perfectly usable. A detached node's
+   * worldMatrix() has no parent chain left to compose, so it collapses to its LOCAL matrix - a
+   * shape sitting at (10, 0) inside a group at (500, 300) reports (10, 0) the instant it is
+   * removed. A frame that kept hold of it would not merely outline something invisible, it
+   * would jump 500 units to outline where the node is not. Losing the selection is the milder
+   * failure, and the honest one: what the frame wrapped is no longer in the scene.
+   *
+   * "Left" is measured against the tree top recorded when the node was attached, rather than
+   * against a bare parent check, so that attaching a node that is not in a scene yet (built,
+   * selected, then added) is not mistaken for one that has just been taken out of it. A node
+   * moved to a different parent within the same tree stays attached, which is right - moveTo()
+   * changes where a node is, not whether it is there.
    */
   private dropDepartedNodes(): void {
     if (this.attached.length === 0) return
-    const kept = this.attached.filter((node) => !node.isDestroyed)
+    const kept = this.attached.filter((node, i) => {
+      if (node.isDestroyed) return false
+      const wasInATree = this.attachedRoots[i] !== node
+      return !(wasInATree && node.root() === node)
+    })
     if (kept.length !== this.attached.length) this.setAttached(kept)
   }
 
   private setAttached(next: TransformableNode[]): void {
     this.attached = next
+    this.attachedRoots = next.map((node) => node.root())
     this.box = null
     if (next.length === 0) this.hideAll()
     if (hasListener('attachchange')) this.fire('attachchange', { nodes: next }, true)

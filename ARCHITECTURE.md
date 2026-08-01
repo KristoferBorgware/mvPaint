@@ -145,9 +145,16 @@ their own:
   from them. The only per-node memory that scales with complexity rather than being constant.
 - **The `Transformer`'s attached set**, which is the one place a node is held by something
   that is *not* its parent. A transformer is a sibling of what it wraps, so no bubbling event
-  reaches it; it checks `isDestroyed` on each update instead. Note it drops **destroyed**
-  nodes only — a merely removed node may be on its way back (a cut waiting for a paste, an
-  undo), so continuing to wrap it is correct.
+  reaches it; it checks each update instead, and lets go of anything destroyed *or* removed.
+
+  Removed counts too, even though `remove()` otherwise promises the node is still perfectly
+  usable, because a detached node's `worldMatrix()` has no parent chain left to compose and
+  collapses to its **local** matrix — a shape at (10, 0) inside a group at (500, 300) reports
+  (10, 0) the instant it is removed. A frame that kept hold would not merely outline something
+  invisible, it would jump 500 units to outline where the node is not. "Left" is measured
+  against the tree top recorded when the node was attached, so attaching a node that is not in
+  a scene yet (built, selected, then added) is not mistaken for one that has just been taken
+  out of one, and a `moveTo` within the same tree keeps the selection.
 
 What `destroy()` does **not** free is anything the node did not own. An `ImageTexture` belongs
 to the application and may be drawn in ten other places, so destroying an `Image` node leaves
