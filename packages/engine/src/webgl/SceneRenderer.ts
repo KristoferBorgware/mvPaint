@@ -440,6 +440,9 @@ export class GlSceneRenderer {
    * cost is the gather - a capture culls against a different rectangle, so the next live frame
    * re-gathers rather than reusing the cache. That is a screenshot's fair price.
    *
+   * Drawn with 4x MSAA, which the live frame on this path does not get - see CaptureTarget for
+   * why those two are consistent rather than contradictory.
+   *
    * The framebuffer is unbound in a finally, so a throw mid-draw cannot leave the renderer
    * pointing at the offscreen target and every subsequent frame invisible.
    */
@@ -454,7 +457,7 @@ export class GlSceneRenderer {
         viewHeight: plan.viewHeight,
         background: plan.background,
       })
-      const pixels = new Uint8ClampedArray(target.read().buffer)
+      const pixels = new Uint8ClampedArray(target.resolveAndRead().buffer)
       // GL reads bottom row first; an ImageData's first row is its top.
       return flipRows(pixels, plan.pixelWidth, plan.pixelHeight)
     } finally {

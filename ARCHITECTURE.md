@@ -202,10 +202,20 @@ The parts that genuinely differ are each backend's own, and the shared arithmeti
 
 | | WebGL2 | WebGPU |
 | --- | --- | --- |
-| target | FBO: RGBA8 texture + `DEPTH_COMPONENT24` renderbuffer | MSAA texture → resolve texture (`COPY_SRC`) + depth, all at the pipelines' format and sample count |
-| readback | `readPixels` | `copyTextureToBuffer` → `mapAsync`, rows padded to 256 bytes and unpadded again |
+| target | multisampled RGBA8 + `DEPTH_COMPONENT24` renderbuffers, blitted into a single-sample RGBA8 one | MSAA texture → resolve texture (`COPY_SRC`) + depth, all at the pipelines' format and sample count |
+| readback | `readPixels` from the resolve buffer | `copyTextureToBuffer` → `mapAsync`, rows padded to 256 bytes and unpadded again |
 | orientation | rows come back **bottom first** and are flipped | NDC +Y is already the first texel row — no flip |
 | channels | RGBA as read | `bgra8unorm` is the usual preferred canvas format, so red and blue are swapped back |
+
+**Both captures are 4× MSAA**, including on WebGL2 — where the *live* frame has none. Those two
+facts fit together rather than contradicting: the fallback skips MSAA because it costs on every
+frame on precisely the devices that ended up on the fallback, and a screenshot is taken once, so
+the per-frame argument does not apply to it. An exported PNG with stair-stepped edges is a poor
+thing to hand someone. WebGL2 needs two framebuffers for it, since a multisampled buffer cannot
+be read directly: `blitFramebuffer` from the multisampled one into a single-sample one *is* the
+resolve, and must be `NEAREST` (a multisample resolve rejects `LINEAR`). The sample count is
+clamped to the driver's `MAX_SAMPLES` rather than assumed — `renderbufferStorageMultisample`
+fails outright rather than rounding down.
 
 **What it costs.** One gather, one repack, one draw — and because the capture culls against a
 different rectangle than the live view, the frame *after* it re-gathers. That is a screenshot's

@@ -102,7 +102,8 @@ tessellated triangles, not bounding boxes. Included: node dragging, marquee sele
 `handle.toCanvas()` / `toDataURL()` / `toBlob()` render the scene again offscreen and hand back
 the pixels. A second render, not a copy of the canvas, so the image can be any region of world at
 any resolution — and the engine builds the camera from the rectangle you ask for, leaving the
-live view untouched.
+live view untouched. Captures are 4× MSAA on **both** paths, including the WebGL2 fallback whose
+live frames have none: that cost is per-frame and a screenshot is taken once.
 
 **Camera**
 `Camera2D` is a plain object the application owns and mutates — pan, zoom, rotate. Supplying
