@@ -10,7 +10,9 @@
 //
 // What differs is underneath. There are no bind groups, so the frame's view-projection is a
 // uniform set once per pass and the object records are a texture bound per lane. There is no
-// command encoder, so passes are just calls in order. And there is no MSAA: this renders
+// command encoder, so passes are just calls in order. MSAA comes from the browser's own
+// multisampled drawing buffer (antialias: true - see Gl2Context) rather than from a
+// multisampled target this file drives, so this renders
 // straight into the default framebuffer, so mesh edges are aliased where WebGPU's resolve
 // would have smoothed them. Text is unaffected when its lane arrives - an MSDF glyph
 // antialiases itself in the fragment shader.

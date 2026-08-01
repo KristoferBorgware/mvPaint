@@ -15,6 +15,12 @@ export interface Gl2Context {
   canvas: HTMLCanvasElement
   /** gl.MAX_TEXTURE_SIZE - the ceiling on the object data texture and any atlas. */
   maxTextureSize: number
+  /**
+   * How many samples the drawing buffer actually got. 1 means the request for MSAA was not
+   * honoured and mesh edges will be aliased - worth reporting rather than guessing at, since
+   * `antialias: true` is a hint and some configurations ignore it.
+   */
+  sampleCount: number
 }
 
 export function createGl2Context(canvas: HTMLCanvasElement): Gl2Context {
@@ -26,9 +32,17 @@ export function createGl2Context(canvas: HTMLCanvasElement): Gl2Context {
     // through mobile compositors, the only sensible choice.
     // premultipliedAlpha: true
     //
-    // MSAA is off on this path (see webgl/index.ts): asking the browser for a multisampled
-    // drawing buffer would cost the memory and the resolve without the renderer driving it.
-    antialias: false,
+    // MSAA, through the browser's own multisampled drawing buffer rather than a multisampled
+    // FBO of our own. Both would give the same picture; this one is free of an extra
+    // full-screen blit and an extra colour buffer every frame, because the resolve happens
+    // where the compositor was going to touch the buffer anyway.
+    //
+    // What it costs is the ability to NAME a sample count - the implementation picks, and
+    // reports it as gl.SAMPLES. In practice that is 4 everywhere this path runs; a device that
+    // offers less gets less rather than nothing, which is the right way round for a fallback.
+    // See sampleCount below, which says what was actually granted rather than what was hoped
+    // for.
+    antialias: true,
     depth: true,
     stencil: false,
     // The frame is redrawn from scratch every tick, so nothing is read back out of the
@@ -48,5 +62,8 @@ export function createGl2Context(canvas: HTMLCanvasElement): Gl2Context {
     gl,
     canvas,
     maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+    // Read once, after the context exists: this is what the browser granted, not what was asked
+    // for. A context created with antialias: true can still come back single-sampled.
+    sampleCount: (gl.getParameter(gl.SAMPLES) as number) || 1,
   }
 }

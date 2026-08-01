@@ -11,13 +11,15 @@
 // anything that touches an API. There is deliberately no device abstraction between them -
 // building one would mean shaping the permanent path around the temporary one.
 //
-// WHERE IT IS VISIBLY DIFFERENT. No MSAA, so mesh edges are aliased (MSDF text will not be -
-// it antialiases in the fragment shader). And it targets tens of thousands of objects rather
-// than hundreds of thousands: without storage buffers the per-object records go through a
-// float texture, which is a slower road to the same architecture.
+// WHERE IT IS DIFFERENT. Not in edge quality: this path antialiases with 4x MSAA as well,
+// taken from the browser's own multisampled drawing buffer (antialias: true - see Gl2Context)
+// rather than from a multisampled target driven here. The difference is SCALE - it targets tens
+// of thousands of objects rather than hundreds of thousands, because without storage buffers
+// the per-object records go through a float texture, which is a slower road to the same
+// architecture.
 //
-// All four lanes - mesh, text, image and shadow - are implemented. What is missing relative to
-// WebGPU is MSAA, and nothing else.
+// All four lanes - mesh, text, image and shadow - are implemented, and nothing is missing
+// relative to WebGPU but headroom.
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
@@ -131,8 +133,9 @@ export async function createWebGl2SceneRenderer(
   }
 
   // The frame loop, which on this path is all there is to a frame: no command encoder to open,
-  // no MSAA target to allocate and resolve, and the depth buffer belongs to the drawing buffer
-  // the browser already made. Resizing the canvas resizes that buffer with it.
+  // no MSAA target to allocate and resolve by hand - the drawing buffer is multisampled and the
+  // browser resolves it at composite time - and the depth buffer belongs to that same buffer.
+  // Resizing the canvas resizes all of it together.
   //
   // The next frame is scheduled BEFORE the work, not after it. Scheduling last means a single
   // throw - on one device, in one lane, on the first frame - ends the loop for good, and a

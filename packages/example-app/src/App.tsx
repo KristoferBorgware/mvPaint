@@ -256,7 +256,7 @@ export default function App() {
                 </ToggleButtonGroup>
                 <Typography variant="caption" color="text.secondary">
                   {activePath === 'webgl2'
-                    ? 'Drawing through the WebGL2 fallback: no MSAA, so shape edges are aliased, and only the lanes ported so far are drawn.'
+                    ? 'Drawing through the WebGL2 fallback. Every lane is drawn and edges are antialiased (4x MSAA, from the browser\'s multisampled drawing buffer); what differs is scale - per-object records go through a float texture rather than a storage buffer, so this path targets tens of thousands of objects rather than hundreds of thousands.'
                     : activePath === 'webgpu'
                       ? 'Drawing through WebGPU. Pick WebGL2 to see what a machine without it sees.'
                       : 'Auto uses WebGPU and falls back to WebGL2 only if it is unavailable.'}

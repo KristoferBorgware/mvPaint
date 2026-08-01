@@ -20,11 +20,10 @@ WebGL2 implementation only when it is unavailable — `handle.path` says which o
 `backend: 'webgl2'` forces the fallback, which is how it gets tested on a machine that has
 WebGPU. The fallback is dynamic-imported, so a browser with WebGPU never downloads it.
 
-Both draw every node type, through the same scene graph, the same picking and the same
-z-ordering. The fallback has **no MSAA**, so shape edges are aliased (text is unaffected —
-MSDF antialiases in the fragment shader), and it targets tens of thousands of objects rather
-than hundreds of thousands: WebGL2 has no storage buffers, so per-object records travel
-through a float texture instead.
+Both draw every node type, through the same scene graph, the same picking, the same
+z-ordering and **4x MSAA**. What differs is scale: WebGL2 has no storage buffers, so per-object
+records travel through a float texture instead, and the fallback targets tens of thousands of
+objects rather than hundreds of thousands.
 
 It is temporary, and built to be deleted: `src/webgl/` plus one branch in
 `renderer/createSceneRenderer.ts`. Nothing in the WebGPU path was reshaped to accommodate it.

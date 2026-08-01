@@ -26,8 +26,10 @@ import { createWebGpuSceneRenderer } from '../webgpu'
  *
  * Everything past this call is identical whichever path was taken: the handle is the same
  * interface, the scene graph is the same objects, and picking, culling and z-order give the
- * same answers. What differs is edge quality (the fallback has no MSAA, so mesh edges are
- * aliased; text is unaffected) and how much it will draw before it slows down.
+ * same answers, and both antialias with 4x MSAA. What differs is how much either will draw
+ * before it slows down: the fallback targets tens of thousands of objects rather than hundreds
+ * of thousands, since its per-object records go through a float texture rather than a storage
+ * buffer.
  */
 export async function createSceneRenderer(
   canvas: HTMLCanvasElement,

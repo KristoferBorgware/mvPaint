@@ -899,9 +899,13 @@ The seam between them is one function with one branch —
 through a dynamic `import()`, so a browser with WebGPU never downloads it. Removing it later
 is deleting `src/webgl/` and a `catch`.
 
-Where the fallback differs, visibly: **no MSAA**, so mesh edges are aliased (text is
-unaffected — MSDF antialiases in the fragment shader), and it targets tens of thousands of
-objects rather than hundreds of thousands. WebGL2 has no storage buffers, so the per-object
+Where the fallback differs is **scale**, not edge quality. It renders with 4x MSAA too, from
+the browser's own multisampled drawing buffer (`antialias: true`) rather than from a
+multisampled target it drives itself — the picture is the same, and it saves a full-screen
+blit and a second colour buffer every frame, at the cost of not being able to *name* a sample
+count (the implementation picks; `Gl2Context.sampleCount` reports what was granted). What it
+does target is tens of thousands of objects rather than hundreds of thousands. WebGL2 has no
+storage buffers, so the per-object
 records that carry every transform and material become a float data texture read with
 `texelFetch` — the same architecture, reached a slower way. `webgl/ObjectTexture.ts` explains
 that substitution, including why integer fields are stored as floats rather than as
