@@ -103,26 +103,54 @@ export async function createWebGpuSceneRenderer(
     })
     captureTarget ??= new GpuCaptureTarget(gpu.device, gpu.format, DEPTH_FORMAT, SAMPLE_COUNT)
 
-    const encoder = gpu.device.createCommandEncoder()
-    // Baking needs render passes of its own and has to finish before the capture pass opens -
-    // the same ordering the live frame gets from FrameRenderer's onPrePass hook.
-    scene.prepareShadows(encoder)
+    // WebGPU reports almost nothing by throwing. An invalid texture, an incompatible
+    // attachment or a bad copy all produce a silently invalid object and an ASYNCHRONOUS error,
+    // and the first sign of it downstream is a mapAsync that rejects or a buffer full of
+    // zeroes. An error scope is the only way to get the sentence the implementation actually
+    // wrote, and a capture is a once-per-click operation that can easily afford one.
+    gpu.device.pushErrorScope('validation')
+    gpu.device.pushErrorScope('out-of-memory')
 
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [captureTarget.colorAttachment(plan)],
-      depthStencilAttachment: captureTarget.depthAttachment(),
-    })
-    scene.draw(pass, plan.pixelWidth, plan.pixelHeight, {
-      camera: plan.camera,
-      viewWidth: plan.viewWidth,
-      viewHeight: plan.viewHeight,
-      background: plan.background,
-    })
-    pass.end()
-    captureTarget.copyOut(encoder)
-    gpu.device.queue.submit([encoder.finish()])
+    let pixels: Uint8ClampedArray | null = null
+    let failure: unknown = null
+    try {
+      const encoder = gpu.device.createCommandEncoder()
+      // Baking needs render passes of its own and has to finish before the capture pass opens -
+      // the same ordering the live frame gets from FrameRenderer's onPrePass hook.
+      scene.prepareShadows(encoder)
 
-    const pixels = await captureTarget.read()
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [captureTarget.colorAttachment(plan)],
+        depthStencilAttachment: captureTarget.depthAttachment(),
+      })
+      scene.draw(pass, plan.pixelWidth, plan.pixelHeight, {
+        camera: plan.camera,
+        viewWidth: plan.viewWidth,
+        viewHeight: plan.viewHeight,
+        background: plan.background,
+      })
+      pass.end()
+      captureTarget.copyOut(encoder)
+      gpu.device.queue.submit([encoder.finish()])
+
+      pixels = await captureTarget.read()
+    } catch (cause) {
+      // Held rather than rethrown here: the error scopes have to be popped in either case, and
+      // what they carry is usually a better explanation than the exception itself.
+      failure = cause
+    }
+
+    // Popped innermost first, and both always, or the stack is left unbalanced for every later
+    // capture.
+    const oom = await gpu.device.popErrorScope()
+    const validation = await gpu.device.popErrorScope()
+    const reported = validation ?? oom
+    if (reported) {
+      throw new Error(`Capture failed: ${reported.message}`)
+    }
+    if (failure) throw failure
+    if (!pixels) throw new Error('Capture failed: the readback produced no pixels.')
+
     return pixelsToCanvas(pixels, plan.pixelWidth, plan.pixelHeight)
   }
 

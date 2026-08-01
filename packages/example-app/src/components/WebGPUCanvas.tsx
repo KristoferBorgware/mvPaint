@@ -219,9 +219,17 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     ref,
     () => ({
       clearSelection: () => transformerRef.current?.clear(),
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the body reports its
+      // own failures through onError; nothing is left for a caller to catch.
       downloadSnapshot: async (pixelRatio = 2) => {
         const handle = handleRef.current
-        if (!handle) return
+        if (!handle) {
+          // Also a silent no-op worth breaking: if the renderer failed to build, or is being
+          // rebuilt because the backend was just switched, the button would otherwise look
+          // broken rather than early.
+          onError?.('Snapshot skipped: the renderer is not ready yet.')
+          return
+        }
 
         // The transformer is scene content like anything else and would be captured with the
         // rest of it. Detached for the shot and restored straight after, so the user's
@@ -234,6 +242,14 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // transparent PNG would show whatever is behind it. Omit it for one meant to be
           // composited.
           blob = await handle.toBlob({ pixelRatio, background: [1, 1, 1, 1] })
+        } catch (cause) {
+          // A capture that fails has to SAY so. Without this the promise rejects into the void
+          // and the button reads as doing nothing at all, which is indistinguishable from the
+          // click not registering - and leaves whoever pressed it with nothing to report.
+          const message = cause instanceof Error ? cause.message : String(cause)
+          console.error('Snapshot failed:', cause)
+          onError?.(`Snapshot failed on the ${handle.path} path: ${message}`)
+          return
         } finally {
           if (framed.length > 0) transformerRef.current?.attach(framed)
         }
@@ -248,7 +264,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         setTimeout(() => URL.revokeObjectURL(url), 0)
       },
     }),
-    [],
+    [onError],
   )
 
   // Initialize the renderer once, on mount.

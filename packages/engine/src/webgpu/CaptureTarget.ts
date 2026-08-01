@@ -19,6 +19,9 @@
 
 import { paddedBytesPerRow, unpadRows, type CapturePlan } from '../render/capture'
 
+/** How long to wait for the readback before calling it a failure. See read(). */
+const READ_TIMEOUT_MS = 10_000
+
 /** Colour + resolve + depth, sized to one capture and reused across captures. */
 export class GpuCaptureTarget {
   private msaaTexture: GPUTexture | null = null
@@ -83,7 +86,20 @@ export class GpuCaptureTarget {
    */
   async read(): Promise<Uint8ClampedArray> {
     const bytesPerRow = paddedBytesPerRow(this.width)
-    await this.buffer!.mapAsync(GPUMapMode.READ)
+    // Bounded, because the failure this guards against is otherwise indistinguishable from a
+    // dead button. mapAsync settles once the submitted work completes - but if the command
+    // buffer was dropped, or the device wedged, it can simply never settle, and an await that
+    // hangs forever surfaces as nothing at all: no image, no error, no clue. A ceiling costs
+    // nothing on a once-per-click operation and turns silence into a sentence.
+    await Promise.race([
+      this.buffer!.mapAsync(GPUMapMode.READ),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Capture timed out waiting for the GPU readback (10s).')),
+          READ_TIMEOUT_MS,
+        ),
+      ),
+    ])
     try {
       // Copied out of the mapped range before unmapping - the view the API hands back is only
       // valid while the mapping is, and this data outlives it.
