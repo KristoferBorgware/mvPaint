@@ -181,6 +181,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         for (const child of [...sceneGraph.root.children]) {
           if (!keep.has(child)) sceneGraph.root.removeChild(child)
         }
+        // Now that its nodes are out of the graph, let the outgoing scene release what
+        // dropping them does not: its GPU textures. Everything else it built is ordinary
+        // garbage from here (see SceneContent.dispose).
+        contentRef.current.dispose?.()
+        contentRef.current = {}
       }
 
       // The resources are only needed by scenes that build their own textures (images); the
@@ -352,6 +357,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       cancelled = true
       transformerRef.current = null
       cullBoundsOverlayRef.current = null
+      // Before the handle goes: the scene's textures are released through the device that is
+      // about to be destroyed, so this has to happen while there still is one.
+      contentRef.current.dispose?.()
+      contentRef.current = {}
       // Takes the input wiring - canvas listeners, window keys, the frame - down with it.
       handleRef.current?.destroy()
       handleRef.current = null

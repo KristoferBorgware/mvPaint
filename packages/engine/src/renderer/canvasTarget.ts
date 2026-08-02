@@ -30,6 +30,28 @@
 /** Anything createSceneRenderer() will accept as "draw here". See resolveCanvas(). */
 export type CanvasTarget = HTMLCanvasElement | HTMLElement | string | null | undefined
 
+/**
+ * The canvases this module built, so a renderer can take its own back out of the document
+ * when it is destroyed - see engineOwnsCanvas().
+ *
+ * A WeakSet rather than a Set: membership must not be a reason for a canvas to stay alive.
+ * A page that builds and tears down renderers would otherwise accumulate a dead element per
+ * cycle here, which is the exact leak the flag exists to prevent.
+ */
+const built = new WeakSet<HTMLCanvasElement>()
+
+/**
+ * Whether this canvas was created by resolveCanvas() rather than supplied by the caller.
+ *
+ * It decides who cleans up. A canvas the application passed in belongs to the application and
+ * is left exactly as it was; one the engine created has no other reference anywhere, so
+ * leaving it in the document on destroy would strand an element - and the GPU context bound
+ * to it - with nothing able to reach either again.
+ */
+export function engineOwnsCanvas(canvas: HTMLCanvasElement): boolean {
+  return built.has(canvas)
+}
+
 /** The part of `document` this needs - so a canvas can be built in another one (see below). */
 interface DocumentLike {
   querySelector(selectors: string): Element | null
@@ -95,5 +117,6 @@ function appendCanvas(owner: DocumentLike, parent: HTMLElement): HTMLCanvasEleme
   canvas.style.width = '100%'
   canvas.style.height = '100%'
   parent.appendChild(canvas)
+  built.add(canvas)
   return canvas
 }

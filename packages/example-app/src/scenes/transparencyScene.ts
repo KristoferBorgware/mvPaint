@@ -289,5 +289,12 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   }
   root.addChild(label(220, lowY - 116, 'translucent shapes, each casting its own shadow'))
 
-  return {}
+  // Both textures are built per load and belong to this scene alone - a switch away is the
+  // last anything sees of them, so this is where they go back to the GPU.
+  return {
+    dispose: () => {
+      checker.destroy()
+      holed.destroy()
+    },
+  }
 }

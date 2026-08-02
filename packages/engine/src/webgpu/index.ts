@@ -8,7 +8,7 @@
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
-import { resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
+import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
 import { createFrameListeners } from '../renderer/frameListeners'
 import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import { CanvasResizer } from '../systems/CanvasResizer'
@@ -266,6 +266,10 @@ export async function createWebGpuSceneRenderer(
       scene.destroy()
       resizer.dispose()
       gpu.device.destroy()
+      // A canvas the ENGINE built has no other reference anywhere - the caller never asked
+      // for it and cannot clean it up - so leaving it behind would strand an element, and a
+      // dead GPU context, per renderer. One the caller supplied is left exactly as it was.
+      if (engineOwnsCanvas(canvas)) canvas.remove()
     },
   }
 

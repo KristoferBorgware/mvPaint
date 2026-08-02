@@ -13,6 +13,21 @@ export interface SceneContent {
    * a switch without leaving anything behind.
    */
   onFrame?: (dt: number, speed: number) => void
+  /**
+   * Called when this scene is unloaded - on a switch, a reload, or the canvas unmounting -
+   * after its nodes have left the graph and before the next scene builds.
+   *
+   * For the one thing a scene owns that dropping the nodes does NOT release: a GPU texture.
+   * Everything else here is ordinary garbage the moment the scene graph lets go of it, but a
+   * texture is memory on the device, held by a handle the engine deliberately does not own
+   * (see ImageTexture - one texture is often shared by several Image nodes, so only the
+   * scene that made it knows when it is finished with). Without this, every switch back to
+   * an image scene left its last set on the GPU for good.
+   *
+   * A scene that memoizes a texture across builds must NOT destroy it here - it is going to
+   * hand the same one out again next time.
+   */
+  dispose?: () => void
 }
 
 export interface ExampleScene {

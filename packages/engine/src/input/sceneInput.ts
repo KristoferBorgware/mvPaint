@@ -400,8 +400,15 @@ export function attachSceneInput(
         keyboardTarget.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
       }
       dispatcher.destroy()
-      transformer?.remove()
-      marqueeOverlay?.remove()
+      // DESTROYED, not merely removed. Two things outlive a removal: the frame goes on
+      // holding whatever was selected - which is a reference to application content, and
+      // through its parents to the whole scene - and any listener an application put on it
+      // stays counted in the global census (events/listenerCensus.ts), which reads high and
+      // never comes down again, so every torn-down renderer would leave the scene paying to
+      // dispatch an event type nothing is listening for. destroy() drops both.
+      transformer?.clear()
+      transformer?.destroy()
+      marqueeOverlay?.destroy()
       canvas.style.cursor = previousCursor
     },
   }

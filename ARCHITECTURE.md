@@ -350,6 +350,34 @@ selector, container element or nothing — and runs in `createSceneRenderer` *be
 is tried, so a WebGL2 fallback after a failed WebGPU attempt draws into the canvas that already
 exists rather than creating a second one.
 
+### What destroy() gives back
+
+An application that tears a renderer down and builds another does it in whole renderers —
+switching render path, remounting a component, opening a second document — so anything the
+setup keeps must come back, or it accumulates a renderer at a time. `handle.destroy()` releases:
+
+| Taken | Given back by |
+| --- | --- |
+| Canvas + window listeners, the touch-hold timer, the frame subscription | `input.destroy()` |
+| The selection frame and marquee rectangle | `destroy()`, not `remove()` — see below |
+| A canvas the **engine** created | removed from the document; a caller's canvas is untouched |
+| GPU buffers, atlases, the device | the path's own `destroy()` |
+
+The furniture is *destroyed* rather than removed for two reasons that outlive a removal: the
+frame goes on holding whatever was selected — a reference to application content, and through
+its parents to the scene — and any listener an application put on it stays counted in the
+global census (`events/listenerCensus.ts`), which reads high and never comes back down, so the
+whole scene would keep paying to dispatch an event type nothing is listening for.
+
+The one thing dropping nodes does **not** release is a GPU texture: `ImageTexture` is handed to
+the scene that asked for it, because one texture is often shared by several `Image` nodes and
+only the scene knows when it is finished with. The example app's scenes therefore carry a
+`dispose()`, called once their nodes have left the graph.
+
+Measured over 28 build/destroy cycles of a 200-shape scene with `input: 'editor'`: zero
+outstanding DOM listeners, zero stranded canvases, every census tally back to zero, and a flat
+JS heap.
+
 ---
 
 ## Geometry construction

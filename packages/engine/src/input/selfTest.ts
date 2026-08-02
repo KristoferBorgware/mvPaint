@@ -22,11 +22,11 @@ import { draggedPosition } from './nodeDrag'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
 import { attachSceneInput, type SceneInputHost } from './sceneInput'
 import { resolveInputOptions, type InputEventHost } from './inputOptions'
-import { resolveCanvas } from '../renderer/canvasTarget'
+import { engineOwnsCanvas, resolveCanvas } from '../renderer/canvasTarget'
 import { Transformer } from '../shapes/Transformer'
 import { boxForNodes } from '../shapes/transformerMath'
 import { Circle } from '../shapes/Circle'
-import { resetListenerCensus } from '../events/listenerCensus'
+import { listenerCount, resetListenerCensus } from '../events/listenerCensus'
 import type { Shape } from '../shapes/Shape'
 import type { TransformableNode } from '../shapes/Group'
 
@@ -94,7 +94,8 @@ function stubKeyboard() {
   const press = (key: string): void => {
     for (const handler of listeners.get('keydown') ?? []) handler({ key, preventDefault: () => {} } as never)
   }
-  return { target, press }
+  const listenerCount = () => [...listeners.values()].reduce((total, entries) => total + entries.length, 0)
+  return { target, press, listenerCount }
 }
 
 interface FakeHost extends SceneInputHost {
@@ -594,6 +595,10 @@ const frameTicks: ((dt: number) => void)[] = []
 
   const overTheWindow = resolveCanvas(null, doc) as unknown as FakeElement
   assert(body.children[0] === overTheWindow, 'no target at all puts one in the body')
+  // Who cleans up: a canvas the engine built is the engine's to remove when the renderer is
+  // destroyed, and one the caller supplied is left exactly as it was found.
+  assert(engineOwnsCanvas(built as unknown as HTMLCanvasElement), 'a canvas the engine built is marked as its own')
+  assert(!engineOwnsCanvas(existing as unknown as HTMLCanvasElement), 'one the caller supplied is not')
   assert(overTheWindow.style.position === 'fixed', 'covering the viewport, so a page with no CSS still shows a scene')
 
   let refused = ''
@@ -761,6 +766,57 @@ const frameTicks: ((dt: number) => void)[] = []
 
   host.camera.x = 120
   assert(near(host.camera.x, 120), 'while the camera remains the application"s to move')
+  resetListenerCensus()
+}
+
+// --- destroying the input leaves nothing behind ------------------------------------------
+//
+// A leak here is not a slow one: an application that tears a renderer down and builds another
+// (switching render path, remounting a component, opening a second document) does it in whole
+// renderers. What must come back is everything the setup took out - the DOM listeners, the
+// keys, the per-frame subscription, the two nodes put into the scene, the references the frame
+// holds to whatever was selected, and the global listener census, which is the one that
+// silently never comes down again: it reads high by design, so a listener left counted makes
+// the whole scene keep paying to dispatch an event type nothing is listening for.
+{
+  resetListenerCensus()
+  const scene = new Scene()
+  const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 100, height: 100 }))
+  const host = fakeHost(scene, () => shape)
+  const canvas = stubCanvas()
+  const keys = stubKeyboard()
+  const input = attachSceneInput(host, canvas.element, { objects: true, keyboardTarget: keys.target })
+  assert(input !== null, 'the input is set up')
+
+  // Select something, so the frame is holding a reference to application content, and put an
+  // application listener on the frame - the two things a bare remove() would strand.
+  canvas.send('pointerdown', 0, 0)
+  canvas.send('pointerup', 0, 0)
+  let announced = 0
+  input!.transformer!.on('attachchange', () => {
+    announced++
+  })
+  assert(input!.selection.length === 1, 'with a node selected')
+  assert(host.frameListeners === 1, 'and one per-frame subscription for the frame refit')
+  assert(listenerCount('attachchange') === 1, 'and the census counting the listener')
+  assert(canvas.listenerCount() > 0 && keys.listenerCount() > 0, 'and listeners on the canvas and the keys')
+
+  const before = scene.root.children.length
+  input!.destroy()
+
+  assert(canvas.listenerCount() === 0, 'destroy leaves no listener on the canvas')
+  assert(keys.listenerCount() === 0, 'nor on the keyboard target')
+  assert(host.frameListeners === 0, 'nor a per-frame subscription')
+  assert(scene.root.children.length === before - 2, 'and takes both furniture nodes back out of the scene')
+  assert(announced === 1, 'the frame announces the selection it is dropping')
+  assert(input!.selection.length === 0, 'and really does let go of it')
+  assert(listenerCount('attachchange') === 0, "along with the application's listener, so the census comes down")
+  assert(listenerCount('pointerdown') === 0, 'as it does for every binding the setup registered on the root')
+  assert(listenerCount('wheel') === 0, 'including the camera ones')
+
+  // ...and again is harmless, which matters because handle.destroy() calls it too.
+  input!.destroy()
+  assert(scene.root.children.length === before - 2, 'a second destroy changes nothing')
   resetListenerCensus()
 }
 

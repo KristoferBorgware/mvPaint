@@ -298,5 +298,13 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
     onFrame: (dt, speed) => {
       spinner.rotation += dt * speed
     },
+    // The three textures this build made, and only those: the SVG pair above is memoized
+    // across builds (see prepare) and handed out again next time, so destroying it here
+    // would leave the next load drawing from a released texture.
+    dispose: () => {
+      checker.destroy()
+      strip.destroy()
+      pixels.destroy()
+    },
   }
 }

@@ -24,7 +24,7 @@
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
 import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
-import { resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
+import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
 import { createFrameListeners } from '../renderer/frameListeners'
 import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import type { Camera2D } from '../camera/Camera2D'
@@ -64,12 +64,18 @@ export async function createWebGl2SceneRenderer(
   // WebGL has no uncapturederror and no error scopes. What it does have is a context-loss
   // event, which is the one failure that turns a working canvas into a permanently blank one,
   // so it is worth reporting even though nothing here can recover from it.
-  canvas.addEventListener('webglcontextlost', (event) => {
+  // Named rather than inline, so destroy() can take it off again. An anonymous one outlives
+  // the renderer on a canvas the CALLER supplied - which the engine never removes - so an
+  // application that builds and tears down renderers over the same element (switching render
+  // path, remounting a component) accumulates one dead listener, and the closure behind it,
+  // per cycle.
+  const onContextLost = (event: Event): void => {
     event.preventDefault()
     const message = 'The WebGL2 context was lost.'
     console.error(message)
     options.onDeviceError?.(message)
-  })
+  }
+  canvas.addEventListener('webglcontextlost', onContextLost)
 
   // Load the MSDF atlases before building the renderer, so the text lane has its texture ready
   // for the first frame rather than showing a page of nothing on the way to showing text.
@@ -273,8 +279,13 @@ export async function createWebGl2SceneRenderer(
       input = null
       running = false
       cancelAnimationFrame(rafId)
+      canvas.removeEventListener('webglcontextlost', onContextLost)
       scene.destroy()
       resizer.dispose()
+      // A canvas the ENGINE built has no other reference anywhere - the caller never asked
+      // for it and cannot clean it up - so leaving it behind would strand an element, and a
+      // dead GL context, per renderer. One the caller supplied is left exactly as it was.
+      if (engineOwnsCanvas(canvas)) canvas.remove()
     },
   }
 
