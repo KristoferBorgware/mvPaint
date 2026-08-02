@@ -419,7 +419,20 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
               navigator.vibrate?.(12)
               controller.beginMarquee(world)
             }, 450)
-          } else {
+          } else if (marqueeAdds) {
+            // With a mouse, a bare drag on empty space pans - the same thing a bare finger
+            // drag does, and the reason neither space nor the middle button is needed for the
+            // commonest gesture there is. Shift is what asks for a rectangle instead.
+            //
+            // Nothing is done in the other branch, deliberately: a press that starts no
+            // marquee leaves the dispatcher's one-pointer gesture alone, and that gesture is
+            // already a pan (see SceneInputDispatcher.updateGesture, which suppresses the pan
+            // only while something has been grabbed - a node drag, a handle, or a marquee).
+            //
+            // Shift meaning "and also" is why this composes rather than collides: the
+            // rectangle extends the selection, exactly as shift-clicking a shape does, and
+            // marqueeAdds above is that same flag read at press time. To select a fresh set,
+            // click empty space to clear first.
             controller.beginMarquee(e.world)
           }
         })
