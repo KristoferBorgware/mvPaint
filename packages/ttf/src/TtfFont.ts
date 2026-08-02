@@ -2,67 +2,62 @@
 // (opentype.js ships no types of its own; the reference above travels with this
 // module so every consumer picks the declarations up without tsconfig changes.)
 
-// VectorFont / VectorFontBook - the second way this engine renders text: parse a TTF at
-// runtime with opentype.js and turn each glyph's contours into real polygon meshes, which
-// then go through the ordinary mesh lane exactly as a Path does. The MSDF path
-// (FontAtlas.ts) is untouched and still the default; the two are alternatives, not layers.
+// TtfFont / TtfFontBook - vector glyphs from a font FILE, at runtime: parse a TTF/OTF with
+// opentype.js and turn each glyph's contours into polygon meshes, which then go through the
+// engine's mesh lane exactly as a Path does.
 //
-// What differs from MSDF, concretely:
-//   - No atlas, no texture, no generation step - the .ttf is the only asset, so any font
-//     works without being processed first, and the character set isn't fixed in advance.
-//   - Geometry is resolution-independent by construction rather than by a distance field,
-//     so there is no atlas size / field range to trade against zoom.
-//   - Text becomes ordinary mesh geometry, which means it picks per-glyph (not per-bounding
-//     box) and casts a real blurred shadow through the shared shadow atlas, both for free.
-//   - It costs triangles instead of texels: a glyph is a few hundred vertices rather than
-//     four, so a page of small text is far heavier here than in the atlas.
+// This is the opt-in half of the vector text path, and it lives outside the engine on purpose.
+// The engine draws vector text from a polygon atlas (see the engine's text/PolygonFont.ts):
+// outlines flattened once, offline, and shipped as data. That covers every application whose
+// fonts are known when it is built - which is nearly all of them - and it keeps a quarter of a
+// megabyte of font parser out of every bundle.
 //
-// This module is deliberately free of asset imports and DOM APIs, so it parses fonts under
-// node in the self-tests as readily as in the browser; vectorFonts.ts is the thin browser
-// loader that fetches the bundled Inter TTFs and hands their buffers here.
+// What it does not cover is a font the application has never seen: a file the user just
+// dropped in, a font picker over a directory, a document that names its own typeface. That
+// needs a real parser, and this package is it. It satisfies the engine's VectorFonts
+// interface, so a VectorText cannot tell the difference:
 //
-// Metrics are exposed as the same FontMetrics the MSDF path uses, in FONT UNITS (so
-// `size` is the font's unitsPerEm and the shaper's `renderSize / size` scale falls out
-// unchanged). They are filled in ON DEMAND - ensure() measures exactly the code points and
-// kerning pairs a piece of text needs, rather than walking a font's few thousand glyphs up
-// front for the handful a label uses.
+//   const fonts = await TtfFontBook.load([{ style: 'regular', data: await file.arrayBuffer() }])
+//   scene.root.addChild(new VectorText({ fonts, runs: [{ text: 'Hello' }] }))
+//
+// Metrics are exposed as the same FontMetrics the MSDF path uses, in FONT UNITS (so `size` is
+// the font's unitsPerEm and the shaper's `renderSize / size` scale falls out unchanged). They
+// are filled in ON DEMAND - ensure() measures exactly the code points and kerning pairs a piece
+// of text needs, rather than walking a font's few thousand glyphs up front for the handful a
+// label uses. That is the one place this differs from an atlas, which arrives measured.
 
-// opentype.js is reached ONLY through the dynamic import inside parse() below; everything
-// else here refers to it with `import type`, which erases. That keeps the parser - a quarter
-// of a megabyte, most of the browser bundle's weight - out of the main chunk, so an app that
-// draws only MSDF text never downloads it. It is the same reasoning that keeps the TTFs
-// themselves lazy (see vectorFonts.ts).
+// opentype.js is reached ONLY through the dynamic import inside parse() below; everything else
+// here refers to it with `import type`, which erases. So even an application that installs this
+// package downloads the parser at the moment it first parses a font, not on load.
 import type { Font as OpenTypeFont, Glyph as OpenTypeGlyph } from 'opentype.js/dist/opentype.mjs'
-import type { Point2 } from '../render/meshFormat'
-import type { Contour } from '../render/stroke'
-import { classifyContours } from '../svg/contours'
-import { triangulateGroup } from '../svg/triangulate'
-import type { FontStyle } from '../webgpu/FontBook'
+
+// Imported by module path rather than from '@mvpaint/engine'. The engine's public entry point
+// pulls in `?url` imports for the atlas PNGs, which only a bundler can resolve - so importing
+// it here would make this package, and its self-test, unrunnable under node. The modules named
+// below are pure: geometry, metrics and the style ladder, no assets and no device.
+import type { FontMetrics, Glyph } from '@mvpaint/engine/src/text/msdfMetrics'
+import { resolveStyle, STYLE_ORDER, type FontStyle } from '@mvpaint/engine/src/text/msdfProvider'
+import type { ResolvedStyle } from '@mvpaint/engine/src/text/layout'
+import {
+  meshFromContours,
+  type VectorFonts,
+  type VectorGlyphFont,
+  type VectorGlyphMesh,
+} from '@mvpaint/engine/src/text/vectorGlyphs'
 import { DEFAULT_CURVE_TOLERANCE_EM, glyphContours } from './glyphOutline'
-import type { FontMetrics, Glyph } from './msdfMetrics'
-import type { FontProvider, ResolvedStyle } from './layout'
 
-/** A glyph's fillable geometry, in y-up font units - cached once and scaled per draw. */
-export interface VectorGlyphMesh {
-  /** Closed rings: what the contour stroker outlines, and what the fill was cut from. */
-  contours: Contour[]
-  /** Fill triangulation: vertices plus triangle indices into them. */
-  vertices: Point2[]
-  indices: number[]
-}
-
-export interface VectorFontOptions {
+export interface TtfFontOptions {
   /** Curve flatness as a fraction of the em square; see DEFAULT_CURVE_TOLERANCE_EM. */
   curveToleranceEm?: number
 }
 
-// Kerning pairs are keyed the same way msdfMetrics keys them, so the shaper's lookup is
-// identical whichever font kind it is walking.
+// Kerning pairs are keyed the same way the engine's metrics key them, so the shaper's lookup
+// is identical whichever font kind it is walking.
 function kerningKey(first: number, second: number): number {
   return first * 0x110000 + second
 }
 
-export class VectorFont {
+export class TtfFont implements VectorGlyphFont {
   /** Font units per em - the space `metrics` and every cached glyph mesh live in. */
   readonly unitsPerEm: number
   /** Shared with the shaper; its glyph and kerning maps grow as ensure() is called. */
@@ -76,7 +71,7 @@ export class VectorFont {
   private readonly measured = new Set<number>()
   private readonly kerned = new Set<number>()
 
-  private constructor(font: OpenTypeFont, options: VectorFontOptions) {
+  private constructor(font: OpenTypeFont, options: TtfFontOptions) {
     this.font = font
     this.unitsPerEm = font.unitsPerEm
     this.tolerance = (options.curveToleranceEm ?? DEFAULT_CURVE_TOLERANCE_EM) * font.unitsPerEm
@@ -126,17 +121,17 @@ export class VectorFont {
    * map, so node resolves its CommonJS bundle (which exposes only a default) while a bundler
    * resolves the ESM one (which exposes only named exports), and no single specifier works
    * in both. Naming the ESM file gets the same module everywhere - which matters because the
-   * self-tests parse real fonts under node and the app parses them in a browser. The
+   * self-test parses real fonts under node and an application parses them in a browser. The
    * dependency is pinned to an exact version for the same reason.
    */
-  static async parse(data: ArrayBuffer, options: VectorFontOptions = {}): Promise<VectorFont> {
+  static async parse(data: ArrayBuffer, options: TtfFontOptions = {}): Promise<TtfFont> {
     const { parse } = await import('opentype.js/dist/opentype.mjs')
-    return new VectorFont(parse(data), options)
+    return new TtfFont(parse(data), options)
   }
 
   /**
    * Measure everything `text` needs into `metrics`: one entry per distinct code point, plus
-   * the kerning for each adjacent pair. Call before shaping - the shaper reads the maps
+   * the kerning for each adjacent pair. Called before shaping - the shaper reads the maps
    * directly and treats a code point that isn't in them as whitespace.
    *
    * Pairs are recorded in both orders because a right-to-left run is laid out from a
@@ -169,21 +164,28 @@ export class VectorFont {
     const glyph = this.glyphFor(String.fromCodePoint(codePoint))
     if (!glyph) return undefined
 
-    const contours = glyphContours(glyph, this.unitsPerEm, this.tolerance)
-    const vertices: Point2[] = []
-    const indices: number[] = []
-    // Rings are grouped into solids-with-holes exactly as an SVG path's are, then earcut
-    // triangulates each group; the groups' index spaces are rebased into one flat mesh.
-    for (const group of classifyContours(contours)) {
-      const triangulated = triangulateGroup(group)
-      const base = vertices.length
-      for (const v of triangulated.vertices) vertices.push(v)
-      for (const i of triangulated.indices) indices.push(base + i)
-    }
-
-    const built: VectorGlyphMesh = { contours, vertices, indices }
+    // The same rings-to-triangles step the atlas path uses, so a glyph parsed here and the
+    // same glyph read from a polygon atlas become identical geometry.
+    const built = meshFromContours(glyphContours(glyph, this.unitsPerEm, this.tolerance))
     this.meshes.set(codePoint, built)
     return built
+  }
+
+  /** The glyph's flattened outline in y-up font units, or undefined if it has none. */
+  contours(codePoint: number): VectorGlyphMesh['contours'] | undefined {
+    const glyph = this.glyphFor(String.fromCodePoint(codePoint))
+    return glyph ? glyphContours(glyph, this.unitsPerEm, this.tolerance) : undefined
+  }
+
+  /** Whether this font has a real glyph for a code point - what an atlas generator asks. */
+  hasGlyph(codePoint: number): boolean {
+    return this.glyphFor(String.fromCodePoint(codePoint)) !== undefined
+  }
+
+  /** The kerning between two code points, in font units, measuring it if it is not yet known. */
+  kerning(first: number, second: number): number {
+    this.measureKerning(first, second)
+    return this.metrics.kernings.get(kerningKey(first, second)) ?? 0
   }
 
   private glyphFor(char: string): OpenTypeGlyph | undefined {
@@ -234,38 +236,34 @@ export class VectorFont {
   }
 }
 
-/** One style's font data, as handed to VectorFontBook.load. */
-export interface VectorFontSource {
+/** One style's font data, as handed to TtfFontBook.load. */
+export interface TtfFontSource {
   style: FontStyle
   data: ArrayBuffer
 }
 
-// Same order the MSDF book uses, so a style's index means the same thing in both.
-const STYLE_ORDER: readonly FontStyle[] = ['regular', 'bold', 'italic', 'bold-italic']
-
 /**
- * The four Inter styles as parsed outlines - the vector counterpart of FontBook, and a
- * FontProvider, so the SAME shaper lays out both text kinds. It owns no GPU resources at
- * all, which is the other half of why the two paths can coexist: nothing here has to be
- * created before a device exists or destroyed with one.
+ * A set of parsed styles - what a VectorText draws from, and the runtime counterpart of the
+ * engine's PolygonFontBook. It owns no GPU resources, so nothing here has to be created before
+ * a device exists or destroyed with one.
  */
-export class VectorFontBook implements FontProvider {
-  private readonly fonts: (VectorFont | undefined)[] // indexed by STYLE_ORDER
+export class TtfFontBook implements VectorFonts {
+  private readonly fonts: (TtfFont | undefined)[] // indexed by STYLE_ORDER
 
-  private constructor(fonts: (VectorFont | undefined)[]) {
+  private constructor(fonts: (TtfFont | undefined)[]) {
     this.fonts = fonts
   }
 
   /** Parse a set of styles. Missing ones are synthesized from what's present (see resolve). */
-  static async load(sources: readonly VectorFontSource[], options: VectorFontOptions = {}): Promise<VectorFontBook> {
-    const fonts: (VectorFont | undefined)[] = STYLE_ORDER.map(() => undefined)
+  static async load(sources: readonly TtfFontSource[], options: TtfFontOptions = {}): Promise<TtfFontBook> {
+    const fonts: (TtfFont | undefined)[] = STYLE_ORDER.map(() => undefined)
     const known = sources.filter((source) => STYLE_ORDER.includes(source.style))
-    const parsed = await Promise.all(known.map((source) => VectorFont.parse(source.data, options)))
+    const parsed = await Promise.all(known.map((source) => TtfFont.parse(source.data, options)))
     known.forEach((source, i) => {
       fonts[STYLE_ORDER.indexOf(source.style)] = parsed[i]
     })
-    if (!fonts.some((font) => font)) throw new Error('VectorFontBook: no usable font in sources')
-    return new VectorFontBook(fonts)
+    if (!fonts.some((font) => font)) throw new Error('TtfFontBook: no usable font in sources')
+    return new TtfFontBook(fonts)
   }
 
   /** Stable index for a style - the `atlasIndex` a shaped quad carries. */
@@ -274,33 +272,25 @@ export class VectorFontBook implements FontProvider {
   }
 
   /**
-   * Resolve a requested style to a parsed font, flagging whatever has to be synthesized -
-   * the same fallback ladder FontBook.resolve walks, so faux bold/italic behave identically
-   * on both paths. With all four Inter styles loaded this always returns the real font.
+   * Resolve a requested style to a parsed font, flagging whatever has to be synthesized - the
+   * same fallback ladder every other font book walks, so faux bold/italic behave identically
+   * whichever path is drawing.
    */
   resolve(style: FontStyle): ResolvedStyle {
-    const wantBold = style.includes('bold')
-    const wantItalic = style.includes('italic')
-    const candidates: FontStyle[] = [style, wantItalic ? 'italic' : 'regular', wantBold ? 'bold' : 'regular', 'regular']
-    for (const candidate of candidates) {
-      const index = STYLE_ORDER.indexOf(candidate)
-      const font = index >= 0 ? this.fonts[index] : undefined
-      if (font) {
-        return {
-          metrics: font.metrics,
-          atlasIndex: index,
-          fauxBold: wantBold && !candidate.includes('bold'),
-          fauxItalic: wantItalic && !candidate.includes('italic'),
-        }
-      }
+    const found = resolveStyle(style, (index) => this.fonts[index])
+    // resolveStyle's last resort is index 0 ('regular'), which a book loaded with one other
+    // style does not have. load() guarantees at least one, so fall back to whichever it is.
+    const index = found.value ? found.atlasIndex : this.fonts.findIndex((font) => font)
+    return {
+      metrics: (found.value ?? this.fonts[index]!).metrics,
+      atlasIndex: index,
+      fauxBold: found.fauxBold,
+      fauxItalic: found.fauxItalic,
     }
-    // load() guarantees at least one style, so the fallback scan below always lands.
-    const index = this.fonts.findIndex((font) => font)
-    return { metrics: this.fonts[index]!.metrics, atlasIndex: index, fauxBold: wantBold, fauxItalic: wantItalic }
   }
 
   /** The font behind a resolved style's index - where a shaped quad's outline comes from. */
-  fontByIndex(index: number): VectorFont | undefined {
+  fontByIndex(index: number): TtfFont | undefined {
     return this.fonts[index]
   }
 

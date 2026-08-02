@@ -38,8 +38,8 @@ export interface ExampleScene {
   /**
    * Any assets this scene needs prepared before it can be built - awaited by the canvas, and
    * expected to memoize, since it runs again on every switch back to the scene. Only for
-   * things the engine doesn't load at startup: the vector text scene's TTFs are ~1.6MB and
-   * would be dead weight for every other scene, so they're fetched on first open instead,
+   * things the engine doesn't load at startup: the vector text scene's glyph atlases would be
+   * dead weight for every other scene, so they're fetched on first open instead,
    * and rasterizing an SVG is asynchronous whether or not anything is fetched. The device is
    * there for assets that live on the GPU; the canvas keeps the previous scene on screen
    * while this runs. It is the renderer's own factory, so the same scene builds on whichever

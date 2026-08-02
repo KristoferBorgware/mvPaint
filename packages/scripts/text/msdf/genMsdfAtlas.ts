@@ -1,7 +1,7 @@
 // Offline generator: font file -> MSDF atlas PNG + glyph-metrics JSON, one pair per style.
 // MSDF (multi-channel signed distance field) glyphs stay crisp at any size and zoom from a
 // single atlas, so one atlas per style serves every font size the renderer draws. Run with:
-//   npm run gen:fonts        (or: npx tsx scripts/genFontAtlas.ts)
+//   npm run gen:msdf         (or: npx tsx text/msdf/genMsdfAtlas.ts)
 // The generated PNG/JSON are committed so the production build (which only runs `vite build`)
 // and GitHub Pages serve them directly; this script is a manual dev-time regeneration step.
 //
@@ -9,15 +9,15 @@
 // `decoration` block (underline/strikethrough position + thickness, as em fractions read
 // from the font tables) that the runtime uses to place text-decoration lines.
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import generateBMFont from 'msdf-bmfont-xml'
-import opentype from 'opentype.js'
+import { TtfFont } from '@mvpaint/ttf'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const FONT_SRC = join(HERE, '..', 'src', 'text', 'fonts', 'src')
-const OUT_DIR = join(HERE, '..', 'src', 'text', 'fonts')
+const FONT_SRC = join(HERE, '..', '..', 'fonts')
+const OUT_DIR = join(HERE, '..', '..', '..', 'engine', 'src', 'text', 'fonts')
 
 // One MSDF atlas per style. The four styles the renderer selects between per text run.
 const STYLES = [
@@ -36,6 +36,8 @@ const CHARSET = Array.from({ length: 0x7e - 0x20 + 1 }, (_, i) => String.fromCha
 const FONT_SIZE = 42 // SDF generation size in px; runtime scales freely from it.
 const DISTANCE_RANGE = 4 // SDF spread in px; the shader uses it for the screen-px conversion.
 const TEXTURE_SIZE = 512 // one page must hold the whole charset (asserted below).
+
+type BmDecoration = import('@mvpaint/engine/src/text/msdfMetrics').BmDecoration
 
 interface BmChar {
   id: number
@@ -85,24 +87,19 @@ function generate(fontPath: string, name: string): Promise<{ textures: Generated
   })
 }
 
-// Underline / strikethrough placement and thickness, in em fractions (baseline at 0, +y up).
-function readDecoration(fontPath: string): {
-  underlineOffset: number
-  underlineThickness: number
-  strikeOffset: number
-  strikeThickness: number
-} {
-  const font = opentype.loadSync(fontPath)
-  const em = font.unitsPerEm
-  const post = font.tables.post ?? {}
-  const os2 = font.tables.os2 ?? {}
-  // post.underlinePosition is the top of the underline (negative = below baseline). Fall back
-  // to sensible fractions when a table is missing.
-  const underlineThickness = (post.underlineThickness ?? em * 0.05) / em
-  const underlineOffset = (post.underlinePosition ?? -em * 0.1) / em
-  const strikeThickness = (os2.yStrikeoutSize ?? em * 0.05) / em
-  const strikeOffset = (os2.yStrikeoutPosition ?? em * 0.25) / em
-  return { underlineOffset, underlineThickness, strikeOffset, strikeThickness }
+/**
+ * Underline / strikethrough placement and thickness, in em fractions (baseline at 0, +y up).
+ *
+ * Read through @mvpaint/ttf rather than through a second reading of the same tables here: the
+ * polygon atlas next door writes the same four numbers, and the vector and MSDF paths drawing
+ * a decoration in different places would be a hard bug to see and an easy one to introduce.
+ * One reader, one answer.
+ */
+async function readDecoration(fontPath: string): Promise<BmDecoration> {
+  const bytes = await readFile(fontPath)
+  const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+  const font = await TtfFont.parse(data)
+  return font.metrics.decoration
 }
 
 async function main(): Promise<void> {
@@ -120,14 +117,14 @@ async function main(): Promise<void> {
 
     // Single page: normalize the JSON to name exactly one page and embed decoration metrics.
     json.pages = [`${base}.png`]
-    const augmented = { ...json, decoration: readDecoration(fontPath) }
+    const augmented = { ...json, decoration: await readDecoration(fontPath) }
 
     await writeFile(join(OUT_DIR, `${base}.png`), textures[0].texture)
     await writeFile(join(OUT_DIR, `${base}.json`), `${JSON.stringify(augmented)}\n`)
     process.stdout.write(`ok (${json.chars.length} glyphs, ${json.kernings.length} kernings)\n`)
   }
 
-  console.log(`Wrote ${STYLES.length} atlases to src/text/fonts/`)
+  console.log(`Wrote ${STYLES.length} MSDF atlases to packages/engine/src/text/fonts/`)
 }
 
 main().catch((err) => {

@@ -8,9 +8,11 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @mvpaint/example-app",
-    "build": "npm run build -w @mvpaint/engine && npm run build -w @mvpaint/example-app",
+    "build": "npm run build -w @mvpaint/engine && npm run build -w @mvpaint/ttf && npm run build -w @mvpaint/scripts && npm run build -w @mvpaint/example-app",
     "preview": "npm run preview -w @mvpaint/example-app",
-    "gen:fonts": "npm run gen:fonts -w @mvpaint/engine",
-    "test": "npm run test -w @mvpaint/engine"
+    "gen:fonts": "npm run gen:fonts -w @mvpaint/scripts",
+    "gen:msdf": "npm run gen:msdf -w @mvpaint/scripts",
+    "gen:polygons": "npm run gen:polygons -w @mvpaint/scripts",
+    "test": "npm run test -w @mvpaint/engine && npm run test -w @mvpaint/ttf && npm run test -w @mvpaint/scripts"
   }
 }

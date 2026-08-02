@@ -136,6 +136,13 @@ per-glyph picking. Both share one shaper: wrapping, alignment (including justifi
 letter spacing, line height, baseline shift, RTL and vertical flow, per-run colour or gradient,
 underline/strikethrough, highlight, per-letter outline, and text laid along an arbitrary path.
 
+Both read **generated assets** — a distance-field PNG for one, a polygon atlas of flattened
+outlines for the other — so the engine carries no font parser: its whole dependency list is
+`earcut` and `svgpath`. Outlines are flattened once, offline, rather than in every browser on
+every load, which is smaller *and* faster than shipping the font. Where the font genuinely
+isn't known until runtime — a user upload, a font picker — `@mvpaint/ttf` parses one and hands
+the engine the same interface; an application that doesn't need it never downloads a parser.
+
 **Shadows**
 The canvas 2D model — colour, blur, offset, opacity — plus CSS `box-shadow`'s spread. Blurred
 silhouettes are baked once into a shared atlas keyed on geometry, so moving, spinning or
@@ -315,33 +322,35 @@ has shipped it).
 
 ```bash
 npm install
-npm run dev      # the example app, with every demo scene
-npm test         # engine self-tests (no GPU needed)
-npm run build    # typecheck + production build
+npm run dev          # the example app, with every demo scene
+npm test             # self-tests across every package (no GPU needed)
+npm run build        # typecheck + production build
+npm run gen:fonts    # regenerate the glyph atlases from the fonts in packages/scripts
 ```
 
 ### Repository layout
 
 ```
-packages/engine        the renderer - no demo content, no framework
+packages/engine        the renderer - no demo content, no framework, no font parser
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
-  src/text/            MSDF metrics + atlas, the shaper, outline glyph extraction
+  src/text/            the shaper, MSDF metrics, and the polygon atlas glyphs are read from
   src/input/           the pointer dispatcher, and the 'view'/'editor' bindings over it
   src/renderer/        choosing a render path, and finding or building the canvas
   src/webgpu/          SceneRenderer: the gather, the passes, createSceneRenderer()
-  scripts/             offline font → MSDF atlas generation (npm run gen:fonts)
-packages/example-app   a React host for the demo scenes; the engine needs neither
+packages/scripts       offline tools: MSDF and polygon atlas generation, and the font sources
+packages/ttf           opt-in: parse a TTF in the browser, for fonts unknown until runtime
+packages/example-app   a React host for the demo scenes; the engine needs none of them
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,985 assertions
-across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
-verified in a browser instead.
+Each engine subdirectory carries a `selfTest.ts` covering its pure half, and the two satellite
+packages carry their own — 2,140 assertions across thirteen suites, run under plain Node with no
+GPU. Anything needing a GPU or a DOM is verified in a browser instead.
 
 ### Demo scenes
 
 Shapes and gradients · Custom shapes · Stroke and scale · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
-Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
+Runtime TTF · Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
 (100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
 
 ---

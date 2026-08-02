@@ -10,7 +10,7 @@
 // rather than a second implementation of one. What it costs is triangles - a glyph is a few
 // hundred vertices where the atlas needs four - so this is the path for display text, and
 // Text remains the one for a page of body copy. Neither replaces the other; see
-// text/VectorFont.ts for the full comparison.
+// text/vectorGlyphs.ts for the full comparison.
 //
 // A run's independent styling survives the trip through a lane that paints one object in one
 // color because a shape may claim several material records (see Shape.materials()): each
@@ -18,20 +18,26 @@
 // Everything else - shaping, wrapping, alignment, decorations, faux bold/italic, shadows and
 // glows - is the shaper's output, identical to what the MSDF lane consumes.
 //
-// Fonts are supplied per node rather than by the renderer: parsed outlines own no GPU
+// Fonts are supplied per node rather than by the renderer: glyph outlines own no GPU
 // resources, so there is nothing for a device to hand out, and an app that never uses this
-// path never loads the font files at all (see text/vectorFonts.ts).
+// path never loads the atlases at all (see text/vectorFonts.ts). Where they come from is the
+// application's choice - a bundled polygon atlas, or a font file parsed at runtime through
+// @mvpaint/ttf - and this node cannot tell the difference (see text/vectorGlyphs.ts).
 
 import { TextBlock, type TextBlockOptions } from './TextBlock'
 import type { MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
-import type { VectorFontBook } from '../text/VectorFont'
+import type { VectorFonts } from '../text/vectorGlyphs'
 import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
 import { quadCorner, type TextQuad } from '../text/textQuad'
 
 export interface VectorTextOptions extends TextBlockOptions {
-  /** The parsed outlines this node draws from - see loadDefaultVectorFonts(). */
-  fonts: VectorFontBook
+  /**
+   * The outlines this node draws from - the bundled polygon atlases via
+   * loadDefaultVectorFonts(), or any other VectorFonts (see @mvpaint/ttf, which parses a font
+   * file at runtime).
+   */
+  fonts: VectorFonts
 }
 
 // Round joins on the dilation ring: a glow or a faux-bold thickening follows the letterform,
@@ -69,7 +75,7 @@ interface ShapingResult {
 export class VectorText extends TextBlock {
   override readonly nodeName: string = 'VectorText'
 
-  readonly fonts: VectorFontBook
+  readonly fonts: VectorFonts
 
   private shapingCache: ShapingResult | null = null
 

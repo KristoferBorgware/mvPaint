@@ -19,6 +19,7 @@ import { buildTransparencyScene } from './transparencyScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildTextPathScene, prepareTextPathScene } from './textPathScene'
 import { buildVectorTextStressScene, prepareVectorTextStressScene } from './vectorTextStressScene'
+import { buildRuntimeTtfScene, prepareRuntimeTtfScene } from './runtimeTtfScene'
 import { buildZIndexScene } from './zIndexScene'
 import type { ExampleScene } from './types'
 
@@ -71,9 +72,17 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'vector-text',
     title: 'Outline text',
     description:
-      'The same runs and shaping drawn as tessellated glyph outlines through the mesh lane instead of an MSDF atlas - with real blurred shadows and per-glyph picking. Fetches the TTFs on first open.',
+      'The same runs and shaping drawn as tessellated glyph outlines through the mesh lane instead of an MSDF atlas - with real blurred shadows and per-glyph picking. Outlines come from the polygon atlases, generated offline; the engine needs no font parser to read them. Fetches them on first open.',
     prepare: prepareVectorTextScene,
     build: buildVectorTextScene,
+  },
+  {
+    id: 'runtime-ttf',
+    title: 'Runtime TTF',
+    description:
+      'The same outline text, from a font file parsed in the browser instead of a generated atlas - the opt-in @mvpaint/ttf package, which lives outside the engine so only an application that needs an unknown font downloads a parser. Characters outside the atlases\u2019 charset draw here and nowhere else.',
+    prepare: prepareRuntimeTtfScene,
+    build: buildRuntimeTtfScene,
   },
   {
     id: 'text-path',
@@ -162,7 +171,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'vector-text-stress',
     title: 'Outline text stress test',
     description:
-      'The identical twenty pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Viewport culling is off, same as the MSDF version. Fetches the TTFs on first open.',
+      'The identical twenty pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Viewport culling is off, same as the MSDF version. Fetches the glyph atlases on first open.',
     disableCulling: true,
     prepare: prepareVectorTextStressScene,
     build: buildVectorTextStressScene,

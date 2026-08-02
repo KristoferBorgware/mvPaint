@@ -1,0 +1,23 @@
+{
+  "name": "@mvpaint/scripts",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "gen:msdf": "tsx text/msdf/genMsdfAtlas.ts",
+    "gen:polygons": "tsx text/polygon/genPolygonAtlas.ts",
+    "gen:fonts": "npm run gen:msdf && npm run gen:polygons",
+    "test": "tsx text/polygon/selfTest.ts"
+  },
+  "dependencies": {
+    "@mvpaint/engine": "*",
+    "@mvpaint/ttf": "*",
+    "msdf-bmfont-xml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.3"
+  }
+}

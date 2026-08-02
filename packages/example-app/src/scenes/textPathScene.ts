@@ -22,12 +22,12 @@ import {
   type Point2,
   type Scene,
   type TextPathOptions,
-  type VectorFontBook,
+  type VectorFonts,
 } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
-let fonts: VectorFontBook | null = null
+let fonts: VectorFonts | null = null
 
 /** The outline fonts, for the one node that draws its curved text through the mesh lane. */
 export async function prepareTextPathScene(): Promise<void> {

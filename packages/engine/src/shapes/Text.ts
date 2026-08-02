@@ -8,7 +8,7 @@
 //
 // VectorText is the same content drawn the other way - real glyph outlines through the mesh
 // lane. The two share this class's whole public surface via TextBlock, so which one a scene
-// uses is a choice of constructor; see text/VectorFont.ts for what actually differs.
+// uses is a choice of constructor; see text/vectorGlyphs.ts for what actually differs.
 
 import { TextBlock, type TextBlockOptions } from './TextBlock'
 import { layoutText, type FontProvider, type ShapedText } from '../text/layout'

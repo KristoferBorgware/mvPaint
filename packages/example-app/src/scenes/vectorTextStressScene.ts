@@ -17,16 +17,16 @@
 // batcher at the default zoom - the opposite of what a scene meant to stress-test all of them
 // should do.
 
-import { Text, VectorText, type Scene, type VectorFontBook, loadDefaultVectorFonts } from '@mvpaint/engine'
+import { Text, VectorText, type Scene, type VectorFonts, loadDefaultVectorFonts } from '@mvpaint/engine'
 import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT } from './loremStress'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
 // Held here rather than passed through the scene contract, same reasoning as vectorTextScene:
 // parsed outlines own no GPU resources, so there's nothing for the renderer to hand out.
-let fonts: VectorFontBook | null = null
+let fonts: VectorFonts | null = null
 
-/** Fetch and parse the TTFs. Called by the canvas before build(), and memoized downstream. */
+/** Fetch and parse the glyph atlases. Called by the canvas before build(), and memoized downstream. */
 export async function prepareVectorTextStressScene(): Promise<void> {
   fonts = await loadDefaultVectorFonts()
 }

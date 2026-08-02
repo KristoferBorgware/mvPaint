@@ -957,6 +957,37 @@ object buffer and its bind group. Expensive, and rare.
 
 ---
 
+## Where glyphs come from
+
+Both text paths draw from **generated assets**, and neither reads a font file. That is a
+deliberate boundary: the engine's whole dependency list is `earcut` and `svgpath`, and turning
+a `.ttf` into something drawable happens once, offline, in `packages/scripts`.
+
+| Path | Asset | Per style | What the runtime does with it |
+| --- | --- | --- | --- |
+| `Text` | MSDF atlas — `inter-*.png` + `inter-*.json` | ~90–120 kB PNG | samples a distance field in the text lane |
+| `VectorText` | polygon atlas — `inter-*.polygons.json` | ~50 kB | triangulates rings into mesh geometry |
+
+The polygon atlas is the newer of the two and the reason the parser left. It holds each glyph's
+outline already flattened to line segments in **whole font units** (at Inter's 2048 units per em
+that is a rounding error of 1/2048 em, far below the 1/400 em tolerance the curves were
+flattened at, and it makes the file a fraction of the size it would be as floats), plus the
+boxes, advances, kerning pairs and decoration metrics the shaper needs. `PolygonFont` reads it
+into the same `FontMetrics` the MSDF path uses and triangulates a glyph the first time it is
+drawn.
+
+What that replaced was 1.6 MB of TTF plus a 240 kB parser, downloaded to recompute a fixed
+answer on every load — the flattened outline of Inter's 'A' does not change between sessions.
+Four polygon atlases are about 200 kB in total and need no parser at all.
+
+The cost is that a polygon atlas, like an MSDF one, covers the charset it was generated for.
+Where the font genuinely is not known until runtime — a user upload, a font picker — the opt-in
+`@mvpaint/ttf` package parses one in the browser and satisfies the same `VectorFonts` interface
+(`text/vectorGlyphs.ts`), so a `VectorText` cannot tell the difference. It shares its extraction
+code with the offline generator, which is what makes a baked glyph and a live-parsed one
+identical rather than merely similar; the generator's self-test asserts it, and also that the
+committed atlases are the ones the tool produces today.
+
 ## Why text repacks more often than shapes do
 
 The rule above is single: a rebuild is needed when a value **baked into the vertex buffer**
@@ -1186,6 +1217,9 @@ renderer, which both paths also warn about once at startup.
 | Shapes you write yourself | `shapes/CustomShape.ts`, `shapes/ShapeContext.ts` |
 | Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
+| Where glyphs come from | `text/msdfMetrics.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
+| Generating those assets | `packages/scripts/text/msdf/`, `packages/scripts/text/polygon/` |
+| Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |
 | Packing and uploads | `webgpu/lanes/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |
 | Shaders | `webgpu/shaders/mesh.wgsl.ts`, `text.wgsl.ts`, `image.wgsl.ts`, `shadowQuad.wgsl.ts`, `shadowBake.wgsl.ts` |

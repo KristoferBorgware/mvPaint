@@ -13,7 +13,10 @@ import { parseColor, parseStops } from '../render/color'
 import type { ColorInput, ColorStopInput, FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
-import type { FontStyle } from '../webgpu/FontBook'
+// From the metrics module, not from webgpu/FontBook which re-exports it: the shaper is pure
+// and must stay importable without dragging a render path - and its `?url` atlas imports -
+// in behind it.
+import type { FontStyle } from './msdfProvider'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
 
 export interface TextGradient {

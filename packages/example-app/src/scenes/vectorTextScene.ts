@@ -10,10 +10,12 @@
 // its glyphs instead), and glyph-accurate picking, since the letters ARE the geometry the hit
 // test walks.
 //
-// The four Inter TTFs are fetched the first time this scene opens - about 1.6MB, which is why
-// they aren't loaded at startup like the atlases.
+// The outlines come from the polygon atlases (packages/scripts/text/polygon generates them),
+// fetched the first time this scene opens rather than at startup - about 200kB, and the reason
+// the engine needs no font parser at all. A font the atlases do not cover is the other scene:
+// Runtime TTF.
 
-import { Text, VectorText, type Scene, type VectorFontBook, loadDefaultVectorFonts } from '@mvpaint/engine'
+import { Text, VectorText, type Scene, type VectorFonts, loadDefaultVectorFonts } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -24,9 +26,9 @@ const VERTICAL = 520
 
 // Held here rather than passed through the scene contract: parsed outlines own no GPU
 // resources, so nothing about them has to be handed out by the renderer.
-let fonts: VectorFontBook | null = null
+let fonts: VectorFonts | null = null
 
-/** Fetch and parse the TTFs. Called by the canvas before build(), and memoized downstream. */
+/** Fetch the glyph atlases. Called by the canvas before build(), and memoized downstream. */
 export async function prepareVectorTextScene(): Promise<void> {
   fonts = await loadDefaultVectorFonts()
 }
@@ -64,7 +66,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
     }),
   )
 
-  root.addChild(label(LEFT, 288, 'Every glyph below is triangulated from the TTF at runtime - no atlas.'))
+  root.addChild(label(LEFT, 288, 'Every glyph below is real geometry, triangulated from an outline - not a sampled field.'))
 
   // --- the four styles, one node, one run each.
   root.addChild(
