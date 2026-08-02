@@ -24,6 +24,9 @@
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
 import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
+import { resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
+import { createFrameListeners } from '../renderer/frameListeners'
+import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
@@ -49,9 +52,12 @@ const GL_ERRORS: Record<number, string> = {
  * `backend: 'webgl2'` asks for it deliberately.
  */
 export async function createWebGl2SceneRenderer(
-  canvas: HTMLCanvasElement,
+  target?: CanvasTarget,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
+  // A no-op when the caller already has the element, which is what createSceneRenderer passes
+  // down - so nothing is ever queried, or created, twice.
+  const canvas = resolveCanvas(target)
   const context = createGl2Context(canvas, { powerPreference: options.powerPreference })
   const { gl } = context
 
@@ -88,6 +94,9 @@ export async function createWebGl2SceneRenderer(
   // Backed by a closure variable so the frame loop reads whatever is currently set, and a
   // caller can attach, replace or clear it at any point after construction.
   let onFrame: ((dt: number) => void) | null = null
+  // The application's slot, then the engine's own per-frame work (the selection frame refits
+  // from whatever the animation above just moved). See renderer/frameListeners.ts.
+  const frames = createFrameListeners()
 
   // One message, however many frames the problem lasts: a per-frame report would bury the
   // first (and only useful) one under sixty a second.
@@ -135,6 +144,7 @@ export async function createWebGl2SceneRenderer(
     try {
       resizer.update()
       onFrame?.(dt)
+      frames.run(dt)
       // Baking binds its own framebuffer, so it happens before the frame rather than inside
       // it - the same ordering the WebGPU path gets from its prepass hook.
       scene.prepareShadows()
@@ -165,7 +175,10 @@ export async function createWebGl2SceneRenderer(
     return pixelsToCanvas(pixels, plan.pixelWidth, plan.pixelHeight)
   }
 
-  return {
+  // Assigned once the handle exists, because the bindings are built ON it - see below.
+  let input: SceneInput | null = null
+
+  const handle: SceneRendererHandle = {
     path: 'webgl2',
     adapter: context.adapter,
     get onFrame() {
@@ -173,6 +186,10 @@ export async function createWebGl2SceneRenderer(
     },
     set onFrame(next: ((dt: number) => void) | null) {
       onFrame = next
+    },
+    addFrameListener: frames.add,
+    get input() {
+      return input
     },
     images,
     scene: scene.scene,
@@ -252,10 +269,18 @@ export async function createWebGl2SceneRenderer(
       scene.markImageGeometryDirty()
     },
     destroy() {
+      input?.destroy()
+      input = null
       running = false
       cancelAnimationFrame(rafId)
       scene.destroy()
       resizer.dispose()
     },
   }
+
+  // Last, and only if asked for: the pointer/keyboard bindings need the finished handle to
+  // pick, project and measure through. Nothing at all is listened for without the option.
+  input = attachSceneInput(handle, canvas, options.input)
+
+  return handle
 }

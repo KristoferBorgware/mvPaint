@@ -20,6 +20,8 @@ import type { PickableNode } from '../scene/picking'
 import type { MarqueeOptions } from '../scene/selection'
 import type { ImageTextureFactory } from '../image/ImageTexture'
 import type { ColorInput } from '../render/color'
+import type { InputOptions } from '../input/inputOptions'
+import type { SceneInput } from '../input/sceneInput'
 import type { GpuPowerPreference, RendererAdapter } from './adapter'
 
 /** Which render path drew this frame. `'auto'` is only an input; a renderer is always one. */
@@ -92,6 +94,21 @@ export interface SceneRendererHandle extends SceneResources {
    * stop. It is called with the seconds elapsed since the previous frame.
    */
   onFrame: ((dt: number) => void) | null
+  /**
+   * The same thing for several subscribers, running just after `onFrame`, and what the
+   * engine's own per-frame furniture uses (the selection frame refits here). Returns the
+   * function that unsubscribes.
+   *
+   * `onFrame` stays a single settable slot because that is the shape an application wants;
+   * this is what keeps the engine from quietly taking it.
+   */
+  addFrameListener: (listener: (dt: number) => void) => () => void
+  /**
+   * The input the engine wired up for this canvas, or null for a static render - see the
+   * `input` option below. Holds the selection frame and the pointer dispatcher, and is torn
+   * down with the renderer.
+   */
+  readonly input: SceneInput | null
   /**
    * Draws the scene once into an offscreen target and hands back a canvas of it - the
    * primitive the other two are built on, and the one to reach for when the pixels are going
@@ -192,4 +209,20 @@ export interface CreateSceneRendererOptions {
    * moving it is how an application pans and zooms.
    */
   camera?: Camera2D
+  /**
+   * Which pointer and keyboard bindings the engine should set up for this canvas. Omitted
+   * (the default) is a STATIC render: nothing is listened for and nothing is hit-tested,
+   * while the camera stays an ordinary object the application can move whenever it likes.
+   *
+   *   'view'    pan, zoom and the keyboard - the reader's set. Nothing is ever picked, so a
+   *             press always lands on empty space and a scene of any size costs nothing per
+   *             pointer move.
+   *   'editor'  that plus the content: hover and click events on nodes, dragging, selection,
+   *             the resize/rotate frame, and marquee selection.
+   *
+   * The long form turns individual behaviours off - `{ objects: { drag: false } }`,
+   * `{ camera: { zoom: false } }` - and everything it sets up is reachable afterwards through
+   * `handle.input`. See input/inputOptions.ts.
+   */
+  input?: InputOptions
 }

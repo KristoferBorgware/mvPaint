@@ -248,7 +248,9 @@ rather than left to fail inside the backend with a message about attachments.
 `Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*
 the scene, it is the frame the scene is viewed through, and the **application owns it** —
 `createSceneRenderer({ camera })`, or `setCamera` later. Nothing in the graph refers to it and
-it refers to nothing in the graph, so one scene can be drawn through two cameras at once.
+it refers to nothing in the graph, so one scene can be drawn through two cameras at once. The
+`'view'` and `'editor'` input sets move this object like any other caller would, through
+`panToAnchor`/`zoomToward`; a static render leaves it entirely to the application.
 
 It is a rectangle of world placed like any other rectangle here: `x, y` is the world point at
 the viewport's **top-left**, `zoom` is viewport pixels per world unit, and `rotation` turns the
@@ -312,6 +314,41 @@ dispatch path genuinely depends on the answer. The tally reads high rather than 
 wrong answer is always "pick anyway".
 
 On the 100k scene that took a wheel event from **82 ms to 0.1 ms**.
+
+### Setting input up, and the three settings of it
+
+The dispatcher decides nothing — it reports what a pointer did, and something above it decides
+what that means. That split has not moved, but the *ordinary* answers now ship with the engine,
+because "a wheel notch zooms about the cursor" and "a press selects what it landed on" are not
+choices most applications want to make; they are the ones every canvas application makes
+identically.
+
+`createSceneRenderer(target, { input })` takes a preset (`input/inputOptions.ts` resolves it,
+`input/sceneInput.ts` wires it) and the composition roots attach it last, once the handle they
+build on exists:
+
+| `input` | Dispatcher | `pick` it is given | Furniture in the scene |
+| --- | --- | --- | --- |
+| *omitted* | none | — | none |
+| `'view'` | yes | `() => null` | none |
+| `'editor'` | yes | `handle.pick` | `Transformer`, `MarqueeOverlay` |
+
+The middle column is the whole of why `'view'` is cheap: a view is not a scene with its policy
+removed, it is one that never asks the question — see the measurements above for what asking
+costs at scale. Everything else follows from it. No pick means no hover target, no drag arming,
+no handles, and every press resolving to the root.
+
+The bindings are built entirely from the public parts (`SceneInputDispatcher`, `MarqueeTool`,
+`Transformer`, `panToAnchor`/`zoomToward`, `nodesInBox`), so an application whose needs diverge
+turns the preset off and writes the same thing with the same materials. What it must not do is
+take `handle.onFrame` and expect the frame to keep fitting: the selection frame refits once a
+frame, and it subscribes through `handle.addFrameListener` (`renderer/frameListeners.ts`) rather
+than through that single application-owned slot, which runs first.
+
+`resolveCanvas` (`renderer/canvasTarget.ts`) does the same job for the other argument — canvas,
+selector, container element or nothing — and runs in `createSceneRenderer` *before* either path
+is tried, so a WebGL2 fallback after a failed WebGPU attempt draws into the canvas that already
+exists rather than creating a second one.
 
 ---
 
@@ -1128,12 +1165,14 @@ renderer, which both paths also warn about once at startup.
 | The gather (shared, GPU-free) | `render/gather.ts` |
 | Orchestration | `webgpu/index.ts`, `webgpu/SceneRenderer.ts`, `webgpu/FrameRenderer.ts`, `webgpu/GpuContext.ts` |
 | Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
+| Where the canvas comes from | `renderer/canvasTarget.ts` |
 | Choosing a GPU | `renderer/adapter.ts`, `webgpu/GpuContext.ts`, `webgl/Gl2Context.ts` |
 | The WebGL2 fallback (temporary) | `webgl/` |
 | Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
 | Draw order and the two passes | `render/opacity.ts`, `render/drawOrder.ts` |
 | Invalidation | `shapes/contentEpoch.ts` |
 | Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts` |
+| The bindings themselves | `input/inputOptions.ts`, `input/sceneInput.ts`, `input/MarqueeOverlay.ts` |
 
 Each engine subdirectory carries a `selfTest.ts` covering its pure half, run with
 `npx tsx src/<dir>/selfTest.ts`. Everything needing a GPU or a DOM is verified in a browser

@@ -1,19 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import Stats from 'stats.js'
 import {
-  boxForNodes,
   createSceneRenderer,
-  SceneInputDispatcher,
-  screenToWorld,
-  Transformer,
-  panToAnchor,
   Camera2D,
-  Shape,
-  outermostGroup,
+  Transformer,
   type TransformableNode,
-  zoomToward,
-  type CameraGestureEvent,
-  type MarqueeEvent,
   type Node,
   type RendererAdapter,
   type Scene,
@@ -21,7 +12,6 @@ import {
   type SceneResources,
 } from '@mvpaint/engine'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
-import { MarqueeOverlay } from '../webgpu/marqueeOverlay'
 import type { ExampleScene, SceneContent } from '../scenes'
 
 // How often a live camera-zoom change (wheel/pinch/keyboard) is reported back to React
@@ -127,10 +117,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SceneRendererHandle | null>(null)
-  const controllerRef = useRef<SceneInputDispatcher | null>(null)
+  // The engine's selection frame, built by the 'editor' input preset. The app holds it only
+  // to read the selection back out and to keep it out of screenshots.
   const transformerRef = useRef<Transformer | null>(null)
   const cullBoundsOverlayRef = useRef<CullBoundsOverlay | null>(null)
-  const marqueeOverlayRef = useRef<MarqueeOverlay | null>(null)
   // The live scene graph + what the current scene handed back, so a switch can swap content
   // without touching anything the renderer owns.
   const sceneGraphRef = useRef<Scene | null>(null)
@@ -146,6 +136,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // out from (0, 0) downward.
   const cameraRef = useRef(new Camera2D())
   const speedRef = useRef(speed)
+  const uniformCornerScaleRef = useRef(uniformCornerScale)
   const onZoomChangeRef = useRef(onZoomChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onErrorRef = useRef(onError)
@@ -176,14 +167,16 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     const commit = () => {
       const sceneGraph = sceneGraphRef.current
       const handle = handleRef.current
-      const transformer = transformerRef.current
       if (!sceneGraph || !resourcesRef.current) return
 
-      if (replace && handle && transformer) {
-        // Drop the selection first: the transformer holds references to nodes that are about
-        // to leave the graph, and a stale selection would keep re-fitting a frame around them.
-        transformer.clear()
-        const furniture: (Node | null)[] = [transformer, cullBoundsOverlayRef.current, marqueeOverlayRef.current]
+      if (replace && handle) {
+        // Drop the selection first: the frame holds references to nodes that are about to
+        // leave the graph, and a stale selection would keep re-fitting itself around them.
+        handle.input?.clearSelection()
+        // What survives a scene switch is editor FURNITURE, not content: the engine's own
+        // selection frame and marquee rectangle (handle.input.nodes), plus this app's debug
+        // overlay. Everything else in the root is the outgoing scene.
+        const furniture: (Node | null)[] = [...(handle.input?.nodes ?? []), cullBoundsOverlayRef.current]
         const keep = new Set<Node>(furniture.filter((n): n is Node => n !== null))
         for (const child of [...sceneGraph.root.children]) {
           if (!keep.has(child)) sceneGraph.root.removeChild(child)
@@ -230,25 +223,25 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   useImperativeHandle(
     ref,
     () => ({
-      clearSelection: () => transformerRef.current?.clear(),
+      clearSelection: () => handleRef.current?.input?.clearSelection(),
       // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the body reports its
       // own failures through onError; nothing is left for a caller to catch.
       captureSnapshot: async (pixelRatio = 2) => {
         const handle = handleRef.current
         if (!handle) throw new Error('The renderer is not ready yet.')
 
-        // The transformer is scene content like anything else and would be captured with the
-        // rest of it. Detached for the shot and restored straight after, so the user's
+        // The selection frame is scene content like anything else and would be captured with
+        // the rest of it. Detached for the shot and restored straight after, so the user's
         // selection survives taking a picture of it.
-        const framed = transformerRef.current?.nodes.slice() ?? []
-        transformerRef.current?.clear()
+        const framed = handle.input?.selection.slice() ?? []
+        handle.input?.clearSelection()
         try {
           // An opaque white background: this one is going to be looked at on its own, where a
           // transparent PNG would show whatever is behind it. Omit it for one meant to be
           // composited.
           return await handle.toBlob({ pixelRatio, background: [1, 1, 1, 1] })
         } finally {
-          if (framed.length > 0) transformerRef.current?.attach(framed)
+          if (framed.length > 0) handle.input?.select(framed)
         }
       },
     }),
@@ -263,17 +256,8 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     let cancelled = false
     let lastReportedZoom = zoom
     let lastZoomReportTime = 0
-    let inputController: SceneInputDispatcher | null = null
-    let detachKeyboard: (() => void) | null = null
     const cullBoundsOverlay = new CullBoundsOverlay()
     cullBoundsOverlayRef.current = cullBoundsOverlay
-    const marqueeOverlay = new MarqueeOverlay()
-    marqueeOverlayRef.current = marqueeOverlay
-
-    // The selection frame: eight resize anchors plus a rotate handle. It lives in the
-    // scene like any other content, and is re-fitted to the selection every frame below.
-    const transformer = new Transformer({ keepRatio: uniformCornerScale })
-    transformerRef.current = transformer
 
     // stats.js - the small FPS/MS/memory overlay three.js examples use. Click it to
     // cycle panels. It renders itself into a fixed-position DOM node it owns, updated
@@ -287,6 +271,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     createSceneRenderer(canvas, {
       backend,
       camera: cameraRef.current,
+      // The whole of this application's input setup. 'editor' is pointer, keyboard, selection,
+      // dragging, the resize/rotate frame and marquee selection - the bindings every canvas
+      // editor writes identically, so the engine writes them once. A viewer would say 'view'
+      // (camera only, nothing ever picked); a thumbnail would say nothing at all.
+      input: 'editor',
       onDeviceError: (message) => onErrorRef.current?.(message),
     })
       .then((handle) => {
@@ -297,23 +286,30 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         handleRef.current = handle
         onPathChangeRef.current?.(handle.path, handle.adapter)
 
+        const transformer = handle.input?.transformer ?? null
+        transformerRef.current = transformer
+        // Read from the ref rather than the prop: the renderer resolves a frame or two after
+        // mount, and a toggle flipped in between would otherwise be lost.
+        if (transformer) transformer.keepRatio = uniformCornerScaleRef.current
+        // This application keeps its own idea of the selection in React state, for the panel
+        // on the right; the frame is what changed it, so the frame is what says so.
+        transformer?.on('attachchange', () => onSelectionChangeRef.current?.(transformer.nodes))
+
         // A renderer arrives with an EMPTY scene and draws it every frame, so content is
         // added here rather than through a construction-time callback. The first frame or two
         // may show an empty canvas; that is the trade for not having to know the scene before
         // the renderer exists.
         sceneGraphRef.current = handle.scene
         resourcesRef.current = handle
-        // The transformer and both debug/gesture overlays are added ONCE and deliberately
-        // outlive every scene switch: they are editor furniture, not content, so applyScene
-        // skips them when clearing (see the `keep` set above).
-        handle.scene.root.addChild(transformer)
+        // The debug overlay is added ONCE and deliberately outlives every scene switch - like
+        // the engine's own input furniture, it is editor chrome rather than content, so
+        // applyScene skips it when clearing (see the `keep` set above).
         handle.scene.root.addChild(cullBoundsOverlay)
-        handle.scene.root.addChild(marqueeOverlay)
         applyScene(sceneDefRef.current, false)
 
         // Per-frame work, attached now rather than at construction: everything it touches -
-        // the handle itself, the transformer, the overlays - exists by this point, so there
-        // is nothing to guard against.
+        // the handle itself, the overlay - exists by this point, so there is nothing to guard
+        // against.
         handle.onFrame = (dt) => {
           // A scene's own animation. It would overwrite anything the transformer's rotate
           // handle did, so at speed 0 the animation lets go entirely and shapes can be turned
@@ -340,254 +336,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Draws the (margin-expanded) cull rectangle when the debug slider is non-zero;
           // updated every frame since it tracks the camera as it pans/zooms.
           cullBoundsOverlay.update(handle.getCullMargin() !== 0 ? handle.getCullBounds() : null)
-          // Re-fit the frame to whatever is selected: the selection may be moving under a
-          // drag, spinning with the animation above, or unchanged - all one code path.
-          const selection = transformer.nodes
-          const box = selection.length > 0 ? boxForNodes(selection, (node) => handle.localBoundsOf(node)) : null
-          transformer.update(box, handle.getZoom())
           stats.update()
         }
 
         handle.setZoom(zoom)
         frameSceneOrigin(handle.camera, canvas)
         handle.setCullMargin(cullMargin)
-        inputController = new SceneInputDispatcher(canvas, {
-          // A lean surface rather than the whole renderer handle: the dispatcher needs to
-          // hit-test, project a point into the scene, and resolve a rectangle - nothing else.
-          root: handle.scene.root,
-          pick: (x, y) => handle.pick(x, y),
-          toWorld: (x, y) => screenToWorld(handle.camera, x, y, { width: canvas.clientWidth, height: canvas.clientHeight }),
-          nodesInBox: (from, to) => handle.nodesInBox(from, to),
-          transformer,
-          // Settle onto the 45-degree marks while rotating, which is what makes it
-          // possible to get something exactly upright again by hand.
-          rotationSnaps: [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, (5 * Math.PI) / 4, (3 * Math.PI) / 2, (7 * Math.PI) / 4],
-        })
-        controllerRef.current = inputController
-
-        // --- what a press on empty space means, which is this application's to decide ---
-        //
-        // The engine reports where the pointer went and provides the rectangle; everything
-        // below - that a bare drag pulls one out, that a held finger does too, that what it
-        // covers becomes the selection, that shift adds to it rather than replacing it - is
-        // policy, and lives here so a different host can choose differently.
-        const root = handle.scene.root
-        const controller = inputController
-
-        // This application keeps its selection IN the transformer: what is framed is what is
-        // selected. A larger editor would keep its own list and push a subset here instead.
-        // No markGeometryDirty() on any of it - every transformer part is a permanent,
-        // unit-quad slot in the mesh batcher (see Transformer's class comment), so changing
-        // what is framed never changes the batcher's shape set.
-        transformer.on('attachchange', () => onSelectionChangeRef.current?.(transformer.nodes))
-
-        // Pressing a shape selects it; shift adds to what is already framed. Done on the
-        // press rather than the click so that dragging a shape picks it up immediately.
-        //
-        // A press inside a group selects the whole GROUP. That is this application's choice,
-        // not the engine's - a pick reports the shape that is actually there, and an editor
-        // that wanted to reach inside a group (or step in on a second click) would simply
-        // not ask for the group here.
-        const selectionTarget = (hit: Shape): TransformableNode => outermostGroup(hit) ?? hit
-
-        root.on('pointerdown', (e) => {
-          const hit = e.target
-          if (hit === root || !(hit instanceof Shape)) return
-          const target = selectionTarget(hit)
-          if ((e.evt as PointerEvent | undefined)?.shiftKey) transformer.add(target)
-          else if (!transformer.has(target)) transformer.attach([target])
-        })
-        let marqueeAdds = false
-        let holdTimer: ReturnType<typeof setTimeout> | null = null
-        const cancelHold = () => {
-          if (holdTimer !== null) clearTimeout(holdTimer)
-          holdTimer = null
-        }
-
-        root.on('pointerdown', (e) => {
-          // Only a press that reached the root itself landed on empty space; anything over
-          // a shape has that shape as its target.
-          if (e.target !== root || !e.world) return
-          // Not while the press is asking for the VIEW - ctrl or space held. Without this the
-          // rectangle starts anyway and suppresses the pan it was meant to make way for (see
-          // SceneInputDispatcher.updateGesture), which is why space+drag over empty space
-          // never panned either.
-          if (!controller.grabContent) return
-          marqueeAdds = (e.evt as PointerEvent | undefined)?.shiftKey ?? false
-          if ((e.evt as PointerEvent | undefined)?.pointerType === 'touch') {
-            // A finger has no spare button, so a bare drag keeps panning and a held finger
-            // is what asks for a rectangle instead.
-            const world = e.world
-            cancelHold()
-            holdTimer = setTimeout(() => {
-              holdTimer = null
-              navigator.vibrate?.(12)
-              controller.beginMarquee(world)
-            }, 450)
-          } else {
-            // A mouse drag on empty space draws a rectangle; shift makes it extend the
-            // selection rather than replace it (marqueeAdds, read at press time above).
-            // Panning is ctrl-drag, handled by the grabContent check at the top.
-            controller.beginMarquee(e.world)
-          }
-        })
-        // Moving before the hold fires means a pan was meant, not a rectangle.
-        //
-        // Listened for on the CANVAS rather than on the scene root, because this asks only
-        // whether the finger moved - never what it moved over. A scene 'pointermove' is a
-        // hover-class event, so registering one anywhere makes the dispatcher resolve a
-        // hover target on every single move, and resolving one means hit-testing the whole
-        // scene (see SceneInputDispatcher.hoverIsIdle). Paying for an answer this handler
-        // does not even read would be a tax on every scene in the application.
-        const cancelHoldOnMove = () => {
-          if (holdTimer !== null && !controller.marquee.active) cancelHold()
-        }
-        canvas.addEventListener('pointermove', cancelHoldOnMove)
-        root.on('pointerup pointercancel', cancelHold)
-
-        // The overlay follows the rectangle. No markGeometryDirty(): every marquee part is a
-        // permanent, unit-quad slot in the mesh batcher (see MarqueeOverlay's class comment),
-        // so pulling one out never changes the batcher's shape set.
-        root.on('marqueestart marqueemove', (e) => {
-          const { from, to } = e as MarqueeEvent
-          marqueeOverlay.update({ from, to }, handle.getZoom())
-        })
-        root.on('marqueeend', (e) => {
-          marqueeOverlay.update(null, handle.getZoom())
-          const covered = ((e as MarqueeEvent).nodes ?? []) as Shape[]
-          if (covered.length === 0 && !marqueeAdds) return
-          // Same rule as a press: a rectangle that catches part of a group has caught the
-          // group. Deduplicated, since several members map to the same one.
-          const targets = [...new Set(covered.map(selectionTarget))]
-          if (marqueeAdds) for (const node of targets) transformer.add(node)
-          else transformer.attach(targets)
-        })
-
-        // A click that hit nothing clears the selection - again a choice, not a given.
-        root.on('click tap', (e) => {
-          if (e.target !== root) return
-          if (!(e.evt as PointerEvent | undefined)?.shiftKey) transformer.clear()
-        })
-
-        // --- driving the camera, which the engine reports on but never moves ---
-        //
-        // The engine recognises a pan, a pinch and a wheel notch and says where they are;
-        // how far a notch is worth, how far the view may zoom, and which keys move it are
-        // all decisions, so they are made here.
-        const MIN_ZOOM = 0.05
-        const MAX_ZOOM = 10
-        const WHEEL_SENSITIVITY = 0.002 // ~18% per 100px of wheel delta
-        const KEY_ZOOM_STEP = 1.2
-        const KEY_PAN_STEP_PX = 40
-        const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z))
-        const viewportOf = () => ({ width: canvas.clientWidth, height: canvas.clientHeight })
-        // zoomToward sets the camera's zoom itself and keeps the world point under the
-        // pointer fixed while doing it, so there is nothing else to keep in step.
-        const applyZoom = (screenX: number, screenY: number, next: number) => {
-          zoomToward(handle.camera, viewportOf(), screenX, screenY, next)
-        }
-
-        root.on('panmove', (e) => {
-          const g = e as CameraGestureEvent
-          panToAnchor(handle.camera, viewportOf(), g.point.x, g.point.y, g.anchor)
-        })
-
-        let pinchStartZoom = 1
-        root.on('pinchstart', () => {
-          pinchStartZoom = handle.getZoom()
-        })
-        root.on('pinchmove', (e) => {
-          const g = e as CameraGestureEvent
-          const next = clampZoom(pinchStartZoom * g.scale)
-          handle.camera.zoom = next
-          // Pinch pins the gesture's own anchor rather than whatever is under the midpoint
-          // right now, so the content follows two fingers spreading apart.
-          panToAnchor(handle.camera, viewportOf(), g.point.x, g.point.y, g.anchor)
-        })
-
-        root.on('wheel', (e) => {
-          const raw = e.evt as WheelEvent | undefined
-          if (!raw || !e.screen) return
-          applyZoom(e.screen.x, e.screen.y, clampZoom(handle.getZoom() * Math.exp(-raw.deltaY * WHEEL_SENSITIVITY)))
-        })
-
-        // Keyboard: arrow-pan, +/- zoom about the viewport centre, space to grab the view,
-        // Escape to clear the selection.
-        const editable = (el: Element | null) =>
-          !!el && ((el as HTMLElement).isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))
-        const previousCursor = canvas.style.cursor
-
-        // Two ways to ask for the view instead of the content, tracked separately so releasing
-        // one does not cancel the other. grabContent false means a press ignores handles and
-        // draggable nodes, so the drag is reported as a pan wherever it lands - over a shape
-        // as much as over nothing.
-        let spaceHeld = false
-        let viewKeyHeld = false
-        const refreshGrab = () => {
-          const grab = !(spaceHeld || viewKeyHeld)
-          if (controller.grabContent === grab) return
-          controller.grabContent = grab
-          canvas.style.cursor = grab ? previousCursor : 'grab'
-        }
-
-        // The press itself is what decides, not a remembered keystroke: a keyup that arrives
-        // while another window has focus is never seen, and a modifier believed held forever
-        // would leave the canvas unable to select anything. Capture phase on the window, so
-        // this has already run by the time the canvas's own pointerdown listener resolves the
-        // press. Meta as well as Control, so the Mac chord is the one Mac users expect.
-        const onPointerDownCapture = (ev: PointerEvent) => {
-          viewKeyHeld = ev.ctrlKey || ev.metaKey
-          refreshGrab()
-        }
-        window.addEventListener('pointerdown', onPointerDownCapture, { capture: true })
-
-        const onKeyDown = (ev: KeyboardEvent) => {
-          if (editable(document.activeElement)) return
-          if (ev.key === ' ') {
-            spaceHeld = true
-            refreshGrab()
-            ev.preventDefault()
-            return
-          }
-          // Only for the cursor: the press above is what actually decides.
-          if (ev.key === 'Control' || ev.key === 'Meta') {
-            viewKeyHeld = true
-            refreshGrab()
-            return
-          }
-          const viewport = viewportOf()
-          // A fixed number of SCREEN pixels per press, so a key-pan feels the same however
-          // far the view is zoomed in.
-          const step = KEY_PAN_STEP_PX / Math.max(1e-6, handle.camera.zoom)
-          const centre = { x: viewport.width / 2, y: viewport.height / 2 }
-          switch (ev.key) {
-            case 'ArrowLeft': handle.camera.x -= step; break
-            case 'ArrowRight': handle.camera.x += step; break
-            case 'ArrowUp': handle.camera.y += step; break
-            case 'ArrowDown': handle.camera.y -= step; break
-            case '+':
-            case '=': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() * KEY_ZOOM_STEP)); break
-            case '-':
-            case '_': applyZoom(centre.x, centre.y, clampZoom(handle.getZoom() / KEY_ZOOM_STEP)); break
-            case 'Escape': transformer.clear(); return
-            default: return
-          }
-          ev.preventDefault()
-        }
-        const onKeyUp = (ev: KeyboardEvent) => {
-          if (ev.key === ' ') spaceHeld = false
-          else if (ev.key === 'Control' || ev.key === 'Meta') viewKeyHeld = false
-          else return
-          refreshGrab()
-        }
-        window.addEventListener('keydown', onKeyDown)
-        window.addEventListener('keyup', onKeyUp)
-        detachKeyboard = () => {
-          window.removeEventListener('keydown', onKeyDown)
-          window.removeEventListener('keyup', onKeyUp)
-          window.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
-          canvas.removeEventListener('pointermove', cancelHoldOnMove)
-        }
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err)
@@ -596,12 +350,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
     return () => {
       cancelled = true
-      detachKeyboard?.()
-      inputController?.destroy()
-      controllerRef.current = null
       transformerRef.current = null
       cullBoundsOverlayRef.current = null
-      marqueeOverlayRef.current = null
+      // Takes the input wiring - canvas listeners, window keys, the frame - down with it.
       handleRef.current?.destroy()
       handleRef.current = null
       stats.dom.remove()
@@ -613,13 +364,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   }, [backend])
 
   // Swap the scene's content in place - on a scene change, or on an explicit reload of the
-  // same one. The renderer, its pipelines, the font atlases and the transformer all
+  // same one. The renderer, its pipelines, the font atlases and the input furniture all
   // survive; only the scene graph's content is replaced.
   useEffect(() => {
     sceneDefRef.current = scene
     // The very first scene is built where the renderer is created, so before that there is
     // nothing to swap yet.
-    if (!handleRef.current || !sceneGraphRef.current || !transformerRef.current) return
+    if (!handleRef.current || !sceneGraphRef.current) return
     applyScene(scene, true)
   }, [scene, reloadToken, applyScene])
 
@@ -638,8 +389,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     handleRef.current?.setCullMargin(cullMargin)
   }, [cullMargin])
 
-  // Push the uniform/free corner-scaling toggle to the live transformer.
+  // Push the uniform/free corner-scaling toggle to the live selection frame.
   useEffect(() => {
+    uniformCornerScaleRef.current = uniformCornerScale
     if (transformerRef.current) transformerRef.current.keepRatio = uniformCornerScale
   }, [uniformCornerScale])
 

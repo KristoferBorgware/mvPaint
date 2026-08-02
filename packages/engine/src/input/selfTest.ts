@@ -12,16 +12,23 @@
 import { Container } from '../shapes/Container'
 import { Group } from '../shapes/Group'
 import { Rect , type RectOptions } from '../shapes/Rect'
+import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector2 } from '../math/Vector2'
 import { Vector3 } from '../math/Vector3'
+import { Camera2D } from '../camera/Camera2D'
+import { Scene } from '../scene/Scene'
 import { draggedPosition } from './nodeDrag'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
+import { attachSceneInput, type SceneInputHost } from './sceneInput'
+import { resolveInputOptions, type InputEventHost } from './inputOptions'
+import { resolveCanvas } from '../renderer/canvasTarget'
 import { Transformer } from '../shapes/Transformer'
 import { boxForNodes } from '../shapes/transformerMath'
 import { Circle } from '../shapes/Circle'
 import { resetListenerCensus } from '../events/listenerCensus'
 import type { Shape } from '../shapes/Shape'
+import type { TransformableNode } from '../shapes/Group'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -37,6 +44,90 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
  */
 const centredRect = (options: RectOptions = {}): Rect =>
   new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+
+/**
+ * A canvas stand-in, and a way to drive it: the dispatcher only ever adds listeners, captures
+ * the pointer, sets a cursor and measures the element, and its coordinates are already client
+ * coordinates here.
+ */
+function stubCanvas(width = 800, height = 600) {
+  // A LIST per type, not one handler: a canvas really does take several - the dispatcher's
+  // own pointermove and the marquee's hold-cancel are both on this element - and a stub that
+  // kept only the last would silently unregister the first.
+  const listeners = new Map<string, ((e: never) => void)[]>()
+  const element = {
+    addEventListener: (type: string, fn: (e: never) => void) =>
+      listeners.set(type, [...(listeners.get(type) ?? []), fn]),
+    removeEventListener: (type: string, fn: (e: never) => void) =>
+      listeners.set(type, (listeners.get(type) ?? []).filter((entry) => entry !== fn)),
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+    hasPointerCapture: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0 }),
+    clientWidth: width,
+    clientHeight: height,
+    style: { cursor: '', touchAction: '' },
+  }
+  const send = (type: string, x: number, y: number, extra: Record<string, unknown> = {}): void => {
+    const event = {
+      pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX: x, clientY: y,
+      shiftKey: false, ctrlKey: false, metaKey: false, altKey: false,
+      preventDefault: () => {}, type, ...extra,
+    } as never
+    for (const handler of [...(listeners.get(type) ?? [])]) handler(event)
+  }
+  const listenerCount = () => [...listeners.values()].reduce((total, entries) => total + entries.length, 0)
+  return { element: element as unknown as HTMLCanvasElement, send, listenerCount }
+}
+
+/** Somewhere to hear keys that is not a window, since there is no window here. */
+function stubKeyboard() {
+  const listeners = new Map<string, ((e: never) => void)[]>()
+  const target: InputEventHost = {
+    addEventListener(type, handler) {
+      listeners.set(type, [...(listeners.get(type) ?? []), handler])
+    },
+    removeEventListener(type, handler) {
+      listeners.set(type, (listeners.get(type) ?? []).filter((entry) => entry !== handler))
+    },
+  }
+  const press = (key: string): void => {
+    for (const handler of listeners.get('keydown') ?? []) handler({ key, preventDefault: () => {} } as never)
+  }
+  return { target, press }
+}
+
+interface FakeHost extends SceneInputHost {
+  camera: Camera2D
+  nodesInBox: () => Shape[]
+  /** How many per-frame subscriptions the input took out - zero unless it needs one. */
+  frameListeners: number
+}
+
+/** The renderer surface the bindings read, without a renderer: a scene, a camera and a pick. */
+function fakeHost(scene: Scene, pick: () => Shape | null): FakeHost {
+  const camera = new Camera2D()
+  const host: FakeHost = {
+    scene,
+    camera,
+    getZoom: () => camera.zoom,
+    pick,
+    nodesInBox: () => [],
+    localBoundsOf: (node: TransformableNode) => (node as Rect).localBounds() ?? new AABB(),
+    frameListeners: 0,
+    addFrameListener: (listener) => {
+      host.frameListeners++
+      frameTicks.push(listener)
+      return () => {
+        host.frameListeners--
+      }
+    },
+  }
+  return host
+}
+
+/** Every frame callback the tests below have handed out, so one can be driven by hand. */
+const frameTicks: ((dt: number) => void)[] = []
 
 
 
@@ -460,6 +551,216 @@ const centredRect = (options: RectOptions = {}): Rect =>
   picks = 0
   dispatcher.contextMenu({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
   assert(picks === 0, 'and a type with no listeners anywhere is not dispatched or picked')
+  resetListenerCensus()
+}
+
+// --- the canvas a target names ---------------------------------------------------------
+//
+// Four forms in, one canvas out. The interesting halves are the two that CREATE one: a
+// selector naming something that is not a canvas means "put one in here", and no target at
+// all means "put one over the window" - which is what makes a page with no HTML of its own a
+// legitimate way to start.
+{
+  class FakeElement {
+    readonly style: Record<string, string> = {}
+    readonly children: FakeElement[] = []
+    constructor(readonly tagName: string) {}
+    appendChild(child: FakeElement): void {
+      this.children.push(child)
+    }
+  }
+
+  const body = new FakeElement('BODY')
+  const existing = new FakeElement('CANVAS')
+  const container = new FakeElement('DIV')
+  const doc = {
+    querySelector: (selector: string) =>
+      (selector === '#board' ? existing : selector === '#stage' ? container : null) as unknown as Element | null,
+    createElement: (tag: string) => new FakeElement(tag.toUpperCase()) as unknown as HTMLElement,
+    body: body as unknown as HTMLElement,
+  }
+
+  const byElement = resolveCanvas(existing as unknown as HTMLCanvasElement, doc)
+  assert(byElement === (existing as unknown as HTMLCanvasElement), 'a canvas element is used as it is')
+
+  const bySelector = resolveCanvas('#board', doc)
+  assert(bySelector === (existing as unknown as HTMLCanvasElement), 'a selector naming a canvas resolves to it')
+
+  const built = resolveCanvas('#stage', doc) as unknown as FakeElement
+  assert(built.tagName === 'CANVAS', 'a selector naming anything else builds a canvas')
+  assert(container.children[0] === built, 'inside that element')
+  assert(built.style.width === '100%' && built.style.height === '100%', 'filling it, sized by the page CSS')
+  assert(built.style.display === 'block', "and block, so it doesn't sit on a text baseline")
+
+  const overTheWindow = resolveCanvas(null, doc) as unknown as FakeElement
+  assert(body.children[0] === overTheWindow, 'no target at all puts one in the body')
+  assert(overTheWindow.style.position === 'fixed', 'covering the viewport, so a page with no CSS still shows a scene')
+
+  let refused = ''
+  try {
+    resolveCanvas('#nothing-here', doc)
+  } catch (error) {
+    refused = error instanceof Error ? error.message : String(error)
+  }
+  assert(refused.includes('#nothing-here'), 'a selector that matches nothing says so, naming it')
+}
+
+// --- what "handle input" was asked for ---------------------------------------------------
+//
+// The vocabulary's whole meaning, and the one part of it that is pure: which presets expand
+// to what, which combinations amount to no input at all, and that an option object states
+// only what differs from the preset it sits in.
+{
+  assert(resolveInputOptions(undefined) === null, 'no option at all is a static render')
+  assert(resolveInputOptions(null) === null, 'and so is null, explicitly')
+  assert(resolveInputOptions(false) === null, 'and false')
+  assert(
+    resolveInputOptions({ camera: false, objects: false }) === null,
+    'as is a long form with both halves off - a static render however it was asked for',
+  )
+
+  const view = resolveInputOptions('view')
+  assert(view?.camera !== null && view?.objects === null, "'view' is the camera alone")
+  assert(view?.camera?.pan === true && view?.camera?.zoom === true, 'panning and zooming')
+
+  const editor = resolveInputOptions('editor')
+  assert(editor?.camera !== null && editor?.objects !== null, "'editor' is both halves")
+  assert(editor?.objects?.select === true && editor?.objects?.marquee === true, 'with the full object set')
+  assert(resolveInputOptions(true)?.objects !== null, 'and true means the same as editor')
+
+  // An option object is the preset's defaults with its own fields over them - so turning one
+  // behaviour off does not quietly turn the other twelve off with it.
+  const partial = resolveInputOptions({ objects: { drag: false } })
+  assert(partial?.objects?.drag === false, 'a stated field takes effect')
+  assert(partial?.objects?.select === true, 'and the rest of the half keeps its defaults')
+  assert(partial?.camera?.zoom === true, 'as does the half that was not mentioned')
+  assert(partial?.objects?.transformer !== undefined, 'including the ones that are objects themselves')
+
+  // undefined is "unstated", not "off" - what a plain spread would have got wrong.
+  const unstated = resolveInputOptions({ camera: { zoom: undefined } })
+  assert(unstated?.camera?.zoom === true, 'an undefined field means unstated, not off')
+}
+
+// --- a view never asks what is under the pointer -----------------------------------------
+//
+// The point of the 'view' set is not that its policy ignores the hit - it is that the
+// question is never asked. A pick walks every shape in the scene, so on a large one the
+// difference between "picked and discarded" and "never picked" is the whole frame.
+{
+  resetListenerCensus()
+  const scene = new Scene()
+  const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 400, height: 400 }))
+
+  let picks = 0
+  const host = fakeHost(scene, () => {
+    picks++
+    return shape
+  })
+  const canvas = stubCanvas()
+  const input = attachSceneInput(host, canvas.element, 'view')
+  assert(input !== null, 'a view does set input up')
+  assert(input?.transformer === null, 'but with no selection frame - there is nothing to select')
+
+  // A drag straight over the shape. In an editor this would pick it up; here it moves the view.
+  canvas.send('pointerdown', 100, 100)
+  canvas.send('pointermove', 150, 100)
+  canvas.send('pointerup', 150, 100)
+
+  assert(picks === 0, 'a whole press-drag-release over a shape hit-tests exactly zero times')
+  assert(shape.x === 0 && shape.y === 0, 'so nothing in the scene moved')
+  assert(near(host.camera.x, -50), 'the view did - dragging right by 50 pulls the camera 50 left')
+  assert(input?.selection.length === 0, 'and nothing is selected, because nothing can be')
+
+  input?.destroy()
+  resetListenerCensus()
+}
+
+// --- the editor set: press to select, drag to move, empty space to clear -----------------
+{
+  resetListenerCensus()
+  const scene = new Scene()
+  const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 200, height: 200 }))
+
+  let over: Shape | null = shape
+  const host = fakeHost(scene, () => over)
+  const canvas = stubCanvas()
+  const keys = stubKeyboard()
+  const input = attachSceneInput(host, canvas.element, { objects: true, keyboardTarget: keys.target })
+  assert(input?.transformer !== null, 'an editor gets a selection frame')
+  assert(scene.root.children.includes(input!.transformer!), 'which lives in the scene like any other content')
+  assert(input!.nodes.length === 2, 'and is furniture, alongside the marquee rectangle')
+
+  // A press selects what it landed on, and the drag that follows moves it.
+  canvas.send('pointerdown', 0, 0)
+  assert(input?.selection[0] === shape, 'a press selects the node under it')
+  canvas.send('pointermove', 40, 0)
+  canvas.send('pointerup', 40, 0)
+  assert(near(shape.x, 40), 'and the drag moved the node, not the view')
+  assert(near(host.camera.x, 0), 'which stayed exactly where it was')
+
+  // A click on empty space clears it. The pick answers null, which is what "empty" means.
+  over = null
+  canvas.send('pointerdown', 300, 300)
+  canvas.send('pointerup', 300, 300)
+  assert(input?.selection.length === 0, 'a click on empty space clears the selection')
+
+  // Selecting from code is the same set - what is framed is what is selected.
+  input?.select(shape)
+  assert(input?.selection[0] === shape, 'select() frames a node')
+  keys.press('Escape')
+  assert(input?.selection.length === 0, 'and Escape drops it')
+
+  input?.destroy()
+  resetListenerCensus()
+}
+
+// --- a rectangle dragged over empty space selects what it covered ------------------------
+{
+  resetListenerCensus()
+  const scene = new Scene()
+  const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 100, height: 100 }))
+
+  const host = fakeHost(scene, () => null)
+  host.nodesInBox = () => [shape]
+  const canvas = stubCanvas()
+  const input = attachSceneInput(host, canvas.element, 'editor')
+
+  canvas.send('pointerdown', 200, 200)
+  assert(input!.dispatcher.marquee.active, 'a drag from empty space pulls out a rectangle')
+  canvas.send('pointermove', 300, 300)
+  canvas.send('pointerup', 300, 300)
+  assert(input?.selection[0] === shape, 'and what it covered is what ends up selected')
+  assert(near(host.camera.x, 0), 'the view did not move under it')
+
+  // Ctrl held asks for the view instead, which is what the rectangle has to make way for.
+  input!.dispatcher.grabContent = false
+  canvas.send('pointerdown', 200, 200)
+  assert(!input!.dispatcher.marquee.active, 'a press asking for the view starts no rectangle')
+  canvas.send('pointermove', 250, 200)
+  assert(near(host.camera.x, -50), 'it pans instead')
+  canvas.send('pointerup', 250, 200)
+
+  input?.destroy()
+  resetListenerCensus()
+}
+
+// --- a static render listens to nothing at all -------------------------------------------
+//
+// Not "listens and ignores": no canvas listener is registered, no scene event is ever raised,
+// and no frame work is scheduled. The camera is still an ordinary object, so a static render
+// can still be panned - from code, by the application, whenever it likes.
+{
+  resetListenerCensus()
+  const scene = new Scene()
+  const host = fakeHost(scene, () => null)
+  const canvas = stubCanvas()
+
+  assert(attachSceneInput(host, canvas.element, null) === null, 'no input option means no input')
+  assert(canvas.listenerCount() === 0, 'and not one listener on the canvas')
+  assert(host.frameListeners === 0, 'nor any per-frame work')
+
+  host.camera.x = 120
+  assert(near(host.camera.x, 120), 'while the camera remains the application"s to move')
   resetListenerCensus()
 }
 

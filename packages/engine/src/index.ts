@@ -64,6 +64,9 @@ export * from './systems/CanvasResizer'
 export * from './webgpu/GpuContext'
 export * from './webgpu/FrameRenderer'
 
+export * from './input/inputOptions'
+export * from './input/sceneInput'
+export * from './input/MarqueeOverlay'
 export * from './input/viewport'
 export * from './input/cameraControls'
 export * from './input/nodeDrag'
@@ -73,6 +76,8 @@ export * from './shapes/transformerMath'
 export * from './input/MarqueeTool'
 
 export * from './renderer/adapter'
+export * from './renderer/canvasTarget'
+export * from './renderer/frameListeners'
 export * from './renderer/SceneRendererHandle'
 export { createSceneRenderer } from './renderer/createSceneRenderer'
 // The WebGPU path's own entry point, for an application that wants it and no fallback.

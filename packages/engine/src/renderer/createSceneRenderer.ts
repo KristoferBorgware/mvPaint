@@ -14,10 +14,16 @@
 // WebGPU, forcing the flag is the only way to see what the other half of the world sees.
 
 import type { CreateSceneRendererOptions, SceneRendererHandle } from './SceneRendererHandle'
+import { resolveCanvas, type CanvasTarget } from './canvasTarget'
 import { createWebGpuSceneRenderer } from '../webgpu'
 
 /**
- * Creates a renderer for `canvas`, preferring WebGPU.
+ * Creates a renderer for `target`, preferring WebGPU.
+ *
+ * The target is a canvas element, a CSS selector for one, an element to build one inside, or
+ * nothing at all - see canvasTarget.ts. It is resolved HERE, once, before either path is
+ * tried, so a fallback after a failed WebGPU attempt draws into the same canvas rather than
+ * making a second one.
  *
  * `backend: 'auto'` (the default) tries WebGPU and falls back to WebGL2 if anything about it
  * is missing - no `navigator.gpu`, no adapter, no context. If both fail, the error names both
@@ -32,9 +38,10 @@ import { createWebGpuSceneRenderer } from '../webgpu'
  * buffer.
  */
 export async function createSceneRenderer(
-  canvas: HTMLCanvasElement,
+  target?: CanvasTarget,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
+  const canvas = resolveCanvas(target)
   const choice = options.backend ?? 'auto'
 
   if (choice === 'webgl2') return createFallback(canvas, options)

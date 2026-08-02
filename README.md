@@ -138,6 +138,13 @@ are on the root resolves `event.target` lazily, since everything bubbles there r
 100k-shape scene that is the difference between 82 ms and 0.1 ms per wheel event. Included: node dragging, marquee selection, and a
 `Transformer` for resize/rotate with angle snapping.
 
+**Input by name**
+`input: 'editor'` is the whole of it: selection, dragging, the resize/rotate frame, marquee,
+pan, pinch, wheel and keyboard, wired to the canvas by the engine. `input: 'view'` is the
+camera alone and never picks anything; leaving it out is a static render that still owns its
+camera. See [Setup](#setup) — the presets are built from the same public parts an application
+would use to write its own, and switch off a behaviour at a time.
+
 **Screenshots**
 `handle.toCanvas()` / `toDataURL()` / `toBlob()` render the scene again offscreen and hand back
 the pixels. A second render, not a copy of the canvas, so the image can be any region of world at
@@ -148,7 +155,9 @@ live frames have none: that cost is per-frame and a screenshot is taken once.
 **Camera**
 `Camera2D` is a plain object the application owns and mutates — pan, zoom, rotate. Supplying
 none is a valid choice, not a missing one: the scene then renders with world (0, 0) at the
-viewport's top-left at one unit per CSS pixel.
+viewport's top-left at one unit per CSS pixel. The `'view'` and `'editor'` input sets move that
+same object for you; a static render leaves it entirely yours, and it is still yours to move
+from code under either.
 
 **SVG**
 `loadSvg()` parses a document into `Path` nodes, flattening curves and carrying fills,
@@ -159,16 +168,12 @@ gradients and strokes across.
 ## A small example
 
 ```ts
-import {
-  Camera2D, Circle, Group, Rect, SceneInputDispatcher, Text,
-  createSceneRenderer, screenToWorld,
-} from '@mvpaint/engine'
+import { Circle, Group, Rect, Text, createSceneRenderer } from '@mvpaint/engine'
 
-const canvas = document.querySelector('canvas') as HTMLCanvasElement
-const camera = new Camera2D({ zoom: 1 })
-
-// The renderer starts with an EMPTY scene and draws it every frame.
-const handle = await createSceneRenderer(canvas, { camera })
+// Where to draw, and what a pointer means. Both are optional: a canvas element, a CSS
+// selector, an element to build one inside, or null for a canvas over the whole window.
+// 'editor' is the full interactive set - see Setup below for the other two.
+const handle = await createSceneRenderer('#board', { input: 'editor' })
 
 // A card: a rounded rect with a soft shadow, and a label sitting on top of it.
 const card = new Group({ x: 120, y: -80 })
@@ -221,13 +226,11 @@ handle.scene.root.on('click', (event) => {
   console.log('clicked', event.target.name)
 })
 
-// Pointer input is opt-in: the engine hit-tests and reports, the host decides what a press
-// means. This is all it takes to make clicks, hovers and drags reach the nodes above.
-new SceneInputDispatcher(canvas, {
-  root: handle.scene.root,
-  pick: (x, y) => handle.pick(x, y),
-  toWorld: (x, y) =>
-    screenToWorld(handle.camera, x, y, { width: canvas.clientWidth, height: canvas.clientHeight }),
+// Everything the 'editor' set does is already live: pressing a shape selects and drags it,
+// a rectangle dragged over empty space selects what it covers, ctrl-drag and the wheel move
+// the view. What is selected is here, and is the application's to read or replace.
+handle.input?.transformer?.on('attachchange', () => {
+  console.log('selected', handle.input?.selection.map((node) => node.name))
 })
 ```
 
@@ -240,6 +243,56 @@ Changing a transform, a colour or a gradient is free — those live in a per-obj
 refreshed every frame. Changing what a shape *is* (a radius, a point list, a stroke width) needs
 `shape.markGeometryDirty()`, because it invalidates cached tessellation. Adding or removing
 nodes needs `handle.markGeometryDirty()`.
+
+---
+
+## Setup
+
+Two arguments, both optional: **where to draw**, and **what a pointer means**.
+
+```ts
+await createSceneRenderer()                              // a canvas over the whole window
+await createSceneRenderer('#board')                      // that canvas
+await createSceneRenderer('#stage', { input: 'view' })   // a canvas built inside that element
+await createSceneRenderer(canvasEl, { input: 'editor' }) // the element you already have
+```
+
+A **selector naming a canvas** uses it; one naming anything else treats that element as the
+container and builds a canvas filling it, so the page's own CSS decides the size. `null` (or
+nothing) builds one over the viewport — for a sketch or a test page, where writing the HTML
+first is the only thing between an idea and seeing it drawn.
+
+Input is **opt-in**, in three settings:
+
+| `input` | what listens | what a press does |
+| --- | --- | --- |
+| *omitted* | nothing at all | nothing — a **static** render. The camera is still yours to move from code |
+| `'view'` | canvas + keyboard | pans; wheel/pinch zoom about the cursor. Nothing is ever picked, so a press always lands on empty space |
+| `'editor'` | canvas + keyboard | selects, drags, resizes and rotates through the frame; a drag over empty space pulls out a marquee; ctrl/space-drag pans |
+
+`'view'` does not merely ignore what is under the pointer — it never asks. A pick walks every
+shape in the scene, so on a large one the difference between *picked and discarded* and *never
+picked* is the whole frame.
+
+Nothing is all-or-nothing: the long form turns individual behaviours off, and everything the
+preset built is reachable afterwards.
+
+```ts
+const handle = await createSceneRenderer('#board', {
+  input: {
+    camera: { zoom: false },            // a fixed-scale view that still pans
+    objects: { drag: false },           // select and frame, but never move anything
+    keyboardTarget: null,               // an embedded canvas that must not eat the space bar
+  },
+})
+
+handle.input?.select(node)              // the selection is an ordinary API too
+handle.input?.dispatcher.grabContent = false   // what a hand tool does
+```
+
+An application whose bindings genuinely differ leaves `input` out and builds its own on the
+same public parts — `SceneInputDispatcher`, `MarqueeTool`, `Transformer`, `panToAnchor`,
+`zoomToward`. The presets are the ordinary answers, not the only ones.
 
 ---
 
@@ -267,7 +320,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,891 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,968 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 

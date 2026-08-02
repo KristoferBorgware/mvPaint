@@ -8,6 +8,9 @@
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
+import { resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
+import { createFrameListeners } from '../renderer/frameListeners'
+import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { createAtlasBindGroupLayout } from './layouts'
 import { DEPTH_FORMAT } from './depthFormat'
@@ -33,9 +36,12 @@ const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
  * comes here first and only falls back if this throws.
  */
 export async function createWebGpuSceneRenderer(
-  canvas: HTMLCanvasElement,
+  target?: CanvasTarget,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
+  // A no-op when the caller already has the element, which is what createSceneRenderer passes
+  // down - so nothing is ever queried, or created, twice.
+  const canvas = resolveCanvas(target)
   const gpu = await createGpuContext(canvas, { powerPreference: options.powerPreference })
 
   // Surface asynchronous device (validation) errors - an invalid pipeline or a bad
@@ -68,11 +74,16 @@ export async function createWebGpuSceneRenderer(
 
   const resizer = new CanvasResizer(canvas)
 
+  // The application's slot, then the engine's own per-frame work (the selection frame refits
+  // from whatever the animation above just moved). See renderer/frameListeners.ts.
+  const frames = createFrameListeners()
+
   const frameRenderer = new FrameRenderer(
     gpu,
     resizer,
     ({ pass, dt, width, height }: FrameContext) => {
       onFrame?.(dt)
+      frames.run(dt)
       scene.draw(pass, width, height)
     },
     {
@@ -154,7 +165,10 @@ export async function createWebGpuSceneRenderer(
     return pixelsToCanvas(pixels, plan.pixelWidth, plan.pixelHeight)
   }
 
-  return {
+  // Assigned once the handle exists, because the bindings are built ON it - see below.
+  let input: SceneInput | null = null
+
+  const handle: SceneRendererHandle = {
     path: 'webgpu',
     adapter: gpu.adapter,
     get onFrame() {
@@ -162,6 +176,10 @@ export async function createWebGpuSceneRenderer(
     },
     set onFrame(next: ((dt: number) => void) | null) {
       onFrame = next
+    },
+    addFrameListener: frames.add,
+    get input() {
+      return input
     },
     images,
     scene: scene.scene,
@@ -241,6 +259,8 @@ export async function createWebGpuSceneRenderer(
       scene.markImageGeometryDirty()
     },
     destroy() {
+      input?.destroy()
+      input = null
       captureTarget?.destroy()
       frameRenderer.stop()
       scene.destroy()
@@ -248,4 +268,10 @@ export async function createWebGpuSceneRenderer(
       gpu.device.destroy()
     },
   }
+
+  // Last, and only if asked for: the pointer/keyboard bindings need the finished handle to
+  // pick, project and measure through. Nothing at all is listened for without the option.
+  input = attachSceneInput(handle, canvas, options.input)
+
+  return handle
 }
