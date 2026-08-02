@@ -164,6 +164,11 @@ export class VectorText extends TextBlock {
           join: this.lineJoin,
           cap: this.lineCap,
           miterLimit: this.miterLimit,
+          // A per-letter outline is a stroke and obeys strokeScaleEnabled like any other. The
+          // dilation above deliberately does not: a glow or a faux-bold weight is part of the
+          // letterform, and holding it at a fixed width while the glyphs grew would make the
+          // text change typeface as it scaled.
+          gauge: this.strokeGauge(),
         })
       }
     })

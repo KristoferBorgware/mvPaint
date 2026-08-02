@@ -47,6 +47,7 @@ export class Polyline extends Shape {
       join: this.lineJoin,
       cap: this.lineCap,
       miterLimit: this.miterLimit,
+      gauge: this.strokeGauge(),
     })
   }
 }

@@ -176,6 +176,7 @@ export class Rect extends Shape {
         join: this.lineJoin,
         miterLimit: this.miterLimit,
         roundSegments: 4,
+        gauge: this.strokeGauge(),
       })
     }
   }

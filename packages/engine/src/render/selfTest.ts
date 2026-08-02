@@ -9,9 +9,10 @@
 import { Rect , type RectOptions } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
 import { CustomShape } from '../shapes/CustomShape'
+import { Group } from '../shapes/Group'
 import { describeAdapter, type RendererAdapter } from '../renderer/adapter'
 import type { ShapeContext } from '../shapes/ShapeContext'
-import { Polyline } from '../shapes/Polyline'
+import { Polyline, type PolylineOptions } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
 import {
   FILL_TYPE_CODE,
@@ -1555,6 +1556,138 @@ assert(
   // looks exactly like the engine being slow, so it has to be visible in the readout.
   assert(describeAdapter({ ...disclosed, fallback: true }).endsWith(' (software)'), 'a software adapter says so')
   assert(describeAdapter({ ...redacted, fallback: true }) === 'GPU not disclosed (software)', 'even an undisclosed one')
+}
+
+// --- a stroke that does not follow the scale --------------------------------------------------
+//
+// Everything here is asserted in WORLD space, because that is the only space the claim is
+// about: the ribbon has to come out `strokeWidth` wide after the transform, whatever the
+// transform is. Measuring the local triangles would only restate what the code does.
+{
+  /** A point's world position, through the node's own matrix. */
+  const toWorld = (node: Shape, v: { x: number; y: number }): { x: number; y: number } => {
+    const m = node.worldMatrix().m
+    return { x: m[0] * v.x + m[4] * v.y + m[12], y: m[1] * v.x + m[5] * v.y + m[13] }
+  }
+  /** Every stroke vertex's perpendicular distance from the line the segment runs along. */
+  const worldHalfWidths = (node: Shape, from: Point2, to: Point2): number[] => {
+    const a = toWorld(node, from)
+    const b = toWorld(node, to)
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy)
+    return capture(node).verts.map((v) => {
+      const w = toWorld(node, v)
+      return Math.abs((w.x - a.x) * dy - (w.y - a.y) * dx) / len
+    })
+  }
+  const segment = (options: Partial<PolylineOptions> = {}): Polyline =>
+    new Polyline({ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], closed: false, strokeWidth: 10, ...options })
+
+  // The default is unchanged: a stroke is a local-space measurement like every other
+  // coordinate, so a stretched node draws a stretched ribbon.
+  const scaled = segment()
+  scaled.scaleY = 5
+  assert(
+    worldHalfWidths(scaled, { x: 0, y: 0 }, { x: 100, y: 0 }).every((d) => near(d, 25)),
+    'by default the scale reaches the stroke, so a 5x stretch draws it 5x thick',
+  )
+
+  const fixed = segment({ strokeScaleEnabled: false })
+  fixed.scaleY = 5
+  assert(
+    worldHalfWidths(fixed, { x: 0, y: 0 }, { x: 100, y: 0 }).every((d) => near(d, 5)),
+    'strokeScaleEnabled: false holds it at the width that was asked for',
+  )
+
+  // The case a single compensating number cannot fix, and the reason the gauge is a matrix.
+  // Under a 4:1 stretch a diagonal is thickened by neither 4 nor 1 but by something between,
+  // and by a different amount for every direction on the shape.
+  const diagonal = (enabled: boolean): Polyline => {
+    const line = new Polyline({
+      points: [{ x: 0, y: 0 }, { x: 100, y: 100 }],
+      closed: false,
+      strokeWidth: 10,
+      strokeScaleEnabled: enabled,
+    })
+    line.scaleX = 4
+    return line
+  }
+  const naive = worldHalfWidths(diagonal(true), { x: 0, y: 0 }, { x: 100, y: 100 })
+  assert(!near(naive[0], 5, 1e-3), 'a diagonal under a non-uniform scale is not thickened by either axis factor')
+  assert(
+    worldHalfWidths(diagonal(false), { x: 0, y: 0 }, { x: 100, y: 100 }).every((d) => near(d, 5, 1e-9)),
+    'and the fixed one is exactly right anyway - non-uniform scale is handled, not approximated',
+  )
+
+  // The WORLD scale, not the node's own: a keyline inside a scaled group is drawn at the
+  // group's scale, so compensating for only its own would be wrong by exactly that factor.
+  const group = new Group({ name: 'zoomed' })
+  group.scaleX = 3
+  group.scaleY = 3
+  const inGroup = group.addChild(segment({ strokeScaleEnabled: false }))
+  assert(
+    worldHalfWidths(inGroup, { x: 0, y: 0 }, { x: 100, y: 0 }).every((d) => near(d, 5)),
+    "an ancestor's scale counts too",
+  )
+
+  // Scaled to nothing there is no ribbon and no width that would make one - so no geometry,
+  // rather than a division by zero's worth of NaN vertices.
+  const flattened = segment({ strokeScaleEnabled: false })
+  flattened.scaleX = 0
+  assert(capture(flattened).verts.length === 0, 'a transform that collapses an axis draws no stroke at all')
+}
+
+// --- ...and noticing when the scale it was built against has moved ----------------------------
+{
+  const line = (): Polyline =>
+    new Polyline({
+      points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+      closed: false,
+      strokeWidth: 10,
+      strokeScaleEnabled: false,
+    })
+
+  const node = line()
+  const before = capture(node).verts.map((v) => v.y)
+  assert(Math.max(...before) === 5, 'unscaled, the fixed stroke is just the ordinary one')
+  assert(!node.refreshStrokeGauge(), 'nothing has moved, so nothing is invalidated')
+
+  node.scaleY = 4
+  assert(node.refreshStrokeGauge(), 'a changed scale invalidates the geometry it was built into')
+  const after = capture(node).verts.map((v) => v.y)
+  assert(Math.max(...after) === 5 / 4, 'and the rebuilt ribbon compensates for it')
+  assert(!node.refreshStrokeGauge(), 'once rebuilt it settles, rather than dirtying itself every frame')
+
+  // Neither of these can change a ribbon's width, so neither costs a rebuild - which matters,
+  // because a rebuild is what this feature is paying for.
+  node.rotation = 0.7
+  node.x = 500
+  assert(!node.refreshStrokeGauge(), 'rotating and moving it invalidate nothing')
+
+  // And that shortcut is a shortcut, not a lie: a shape built from scratch at an angle
+  // produces the same triangles as one built square, because stroking commutes with rotation.
+  // Two fresh shapes, so this is the geometry answering and not the cache. The tolerance is
+  // there because the world matrix is float32 and the angle makes a round trip through it -
+  // the difference is ~4e-8, which is the storage, not the maths.
+  const square = line()
+  const turned = line()
+  turned.rotation = 0.7
+  turned.x = 500
+  const squareVerts = capture(square).verts
+  const turnedVerts = capture(turned).verts
+  assert(
+    squareVerts.length === turnedVerts.length &&
+      squareVerts.every((v, i) => near(v.x, turnedVerts[i].x, 1e-6) && near(v.y, turnedVerts[i].y, 1e-6)),
+    'and a fixed stroke built at an angle is the same one built square - invariance, not a cache hit',
+  )
+
+  // And a shape that never opted out is never asked anything, however it is transformed -
+  // this is the sweep's cost for the whole rest of the scene.
+  const ordinary = new Polyline({ points: [{ x: 0, y: 0 }, { x: 10, y: 0 }], strokeWidth: 2 })
+  ordinary.scaleX = 9
+  capture(ordinary)
+  assert(!ordinary.refreshStrokeGauge(), 'a shape whose stroke follows its scale is never invalidated by one')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

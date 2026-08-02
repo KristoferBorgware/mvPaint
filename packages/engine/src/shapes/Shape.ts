@@ -40,6 +40,12 @@
 // affects buildGeometry()'s output - Circle.radius, Rect.cornerRadius, Polyline.points,
 // stroke/strokeWidth/lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
 //
+// strokeScaleEnabled = false is the one exception to the first sentence, and the only place
+// in the engine where a transform reaches geometry: a stroke held at a fixed width has to be
+// built against the world scale, so a scale change genuinely invalidates it. Nobody has to
+// call anything - refreshStrokeGauge() below is asked once per frame by the gather - but the
+// rebuild is real, which is why the flag is opt-in per shape rather than a scene-wide mode.
+//
 // WHERE THE ORIGIN SITS. A shape's local origin is the point that lands at (x, y), and
 // which point of the shape that is depends on the shape:
 //
@@ -80,7 +86,7 @@ import { bumpMeshGeometryEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
 import type { ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
-import type { LineCap, LineJoin } from '../render/stroke'
+import { sameGauge, type LineCap, type LineJoin, type StrokeGauge } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
 
@@ -143,6 +149,14 @@ export interface ShapeOptions extends NodeOptions {
   /** Only applies to open contours (e.g. Polyline with `closed: false`). */
   lineCap?: LineCap
   miterLimit?: number
+  /**
+   * Whether the shape's scale applies to its stroke as well. Default true.
+   *
+   * False keeps the stroke `strokeWidth` wide however the node (or any ancestor) is scaled -
+   * an outline that stays one pixel while the thing it outlines is resized. See
+   * Shape.strokeScaleEnabled for what it costs, which is not nothing.
+   */
+  strokeScaleEnabled?: boolean
 }
 
 export abstract class Shape extends Node {
@@ -308,6 +322,31 @@ export abstract class Shape extends Node {
   lineJoin: LineJoin = 'miter'
   lineCap: LineCap = 'butt'
   miterLimit = 10
+  /**
+   * Whether the shape's scale applies to its stroke as well. Default true.
+   *
+   * True is the ordinary reading: a stroke width is a local-space measurement like every
+   * other coordinate, so a node at scale 3 draws a ribbon three times as thick, and the whole
+   * shape zooms as one picture.
+   *
+   * False is the other thing people mean by a stroke - a keyline, a selection outline, a
+   * hairline on a technical drawing - which is a fixed width that the object's size has
+   * nothing to do with. The ribbon is then built to arrive at exactly `strokeWidth` AFTER the
+   * world transform, and it stays that width under non-uniform scale and skew too, not just
+   * under a uniform one (see StrokeGauge).
+   *
+   * WHAT IT COSTS, and why it is not the default. A stroke lives in the tessellated geometry,
+   * and the whole design elsewhere is that a transform never touches geometry: it is applied
+   * per frame from the world matrix, so moving, turning and scaling are free. A stroke that
+   * has to come out the same width under any scale cannot be free that way - the triangles
+   * genuinely differ - so the shape re-tessellates whenever its world scale changes, and that
+   * costs its lane a repack. Standing still it costs nothing at all; dragged through a live
+   * resize it is a rebuild per frame. Set it on the handful of nodes that want a keyline, not
+   * across a scene.
+   *
+   * Rotation and translation change nothing, since neither can alter a ribbon's width.
+   */
+  strokeScaleEnabled = true
 
   // A Shape is its own (single) material - see materials(). Held as a fixed one-element
   // array so the common case costs no per-frame allocation in the batcher's hot loop.
@@ -345,6 +384,7 @@ export abstract class Shape extends Node {
     this.lineJoin = options.lineJoin ?? 'miter'
     this.lineCap = options.lineCap ?? 'butt'
     this.miterLimit = options.miterLimit ?? 10
+    this.strokeScaleEnabled = options.strokeScaleEnabled ?? true
   }
 
   protected override attrKeys(): readonly string[] {
@@ -381,6 +421,7 @@ export abstract class Shape extends Node {
       'lineJoin',
       'lineCap',
       'miterLimit',
+      'strokeScaleEnabled',
     ]
   }
 
@@ -510,7 +551,7 @@ export abstract class Shape extends Node {
           triangles.push([a, b, c])
         },
       })
-      this.geometryCache = { vertices, triangles }
+      this.geometryCache = { vertices, triangles, gauge: this.strokeGauge() }
     }
     return this.geometryCache
   }
@@ -527,6 +568,46 @@ export abstract class Shape extends Node {
       this.pickCache = { xs, ys, tris, bounds }
     }
     return this.pickCache
+  }
+
+  /**
+   * The transform this shape's stroke is to be measured after, or undefined when the stroke
+   * follows the scale like everything else (the default, and every shape until it says
+   * otherwise). Shapes pass it straight to the stroker as `gauge` - see StrokeGauge.
+   *
+   * The linear part of the WORLD matrix, not the local one: a shape inside a group scaled by
+   * 4 is drawn four times as large whether it was scaled itself or not, so a keyline that
+   * only compensated for its own scaleX would be wrong by exactly the group's.
+   */
+  protected strokeGauge(): StrokeGauge | undefined {
+    if (this.strokeScaleEnabled) return undefined
+    const m = this.worldMatrix().m
+    // Column-major: column 0 is the x axis, column 1 the y axis (see Node.applyLocalMatrix).
+    return { a: m[0], b: m[1], c: m[4], d: m[5] }
+  }
+
+  /**
+   * Drops the cached geometry if the scale it was built against has moved. Returns whether it
+   * did. Called once per shape per frame by the gather (render/gather.ts).
+   *
+   * This is the price of strokeScaleEnabled = false, and the reason it is opt-in: nothing else
+   * in the engine has to be told that a transform changed, because nothing else bakes one into
+   * geometry. A stroke of fixed width does, so something has to notice, and the shape cannot
+   * notice on its own - its world scale depends on every ancestor, and no setter anywhere is
+   * in a position to say that a whole subtree's strokes are now stale.
+   *
+   * For a shape that has not opted out - which is almost all of them - this is one boolean
+   * read and a return, which is what keeps it affordable in a per-frame loop over the visible
+   * set.
+   */
+  refreshStrokeGauge(): boolean {
+    if (this.strokeScaleEnabled) return false
+    const cache = this.geometryCache
+    // Nothing built yet is not stale; the first tessellation will read the current scale.
+    if (!cache) return false
+    if (sameGauge(cache.gauge, this.strokeGauge())) return false
+    this.markGeometryDirty()
+    return true
   }
 
   /**
@@ -549,6 +630,8 @@ type CachedTriangle = readonly [number, number, number]
 interface CachedGeometry {
   vertices: CachedVertex[]
   triangles: CachedTriangle[]
+  /** The world scale this was built against, when the stroke was told not to follow it. */
+  gauge: StrokeGauge | undefined
 }
 
 interface PickGeometry {

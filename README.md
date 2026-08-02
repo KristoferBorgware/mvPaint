@@ -71,6 +71,11 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+`strokeScaleEnabled: false` holds a stroke at the width it was given however the shape (or an
+ancestor) is scaled — a keyline, a selection frame, a hairline on a drawing. It stays even under
+non-uniform scale and skew, not just uniform: the ribbon is built through the transform rather
+than divided by a factor, because a 4:1 stretch thickens a diagonal by neither 4 nor 1.
+
 Every colour takes either form — the `[r, g, b, a]` tuple in 0..1, or a string: `'#f80'`,
 `'#ff8800cc'`, `'rgb(255 136 0)'`, `'rgba(255,136,0,0.5)'`, `'hsl(32 100% 50%)'`, `'tomato'`,
 `'transparent'`. Strings are converted on assignment and read back as the tuple, so nothing
@@ -259,13 +264,13 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,841 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,855 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
 ### Demo scenes
 
-Shapes and gradients · Custom shapes · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
+Shapes and gradients · Custom shapes · Stroke and scale · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
 Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
 (100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
 

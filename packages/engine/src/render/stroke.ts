@@ -43,6 +43,39 @@ export interface StrokeOptions {
   miterLimit?: number
   /** Segments used to tessellate a round join or round cap. Default 8. */
   roundSegments?: number
+  /**
+   * The transform this ribbon will be seen through, when `width` is meant to survive it -
+   * see StrokeGauge and Shape.strokeScaleEnabled. Omitted (the usual case), the ribbon is
+   * `width` wide in the space the points are given in, and whatever transform is applied
+   * later scales it along with everything else.
+   */
+  gauge?: StrokeGauge
+}
+
+/**
+ * The linear (2x2) part of a transform a stroke is to be measured AFTER, rather than before.
+ *
+ * A stroke width is normally a local-space measurement like any other coordinate, so a node
+ * at scale 3 gets a ribbon three times as thick - correct for a drawing, wrong for an outline
+ * that is meant to stay one pixel while the thing it outlines is resized. Given a gauge, the
+ * stroker measures the width where the gauge puts it and hands back local-space triangles
+ * that arrive at exactly that width once the transform is applied.
+ *
+ * Written in the column-major convention the rest of the engine uses, so for a world matrix
+ * `m` it is `{ a: m[0], b: m[1], c: m[4], d: m[5] }`: x' = a·x + c·y, y' = b·x + d·y. The
+ * translation is deliberately absent, because a stroke is made of offsets and offsets do not
+ * translate - only the linear part can change a ribbon's shape.
+ *
+ * Non-uniform scale and skew are handled exactly, not approximated: it is the whole reason
+ * this is a matrix and not a single number. Dividing the width by an average scale would give
+ * an outline that is too thick on one axis and too thin on the other, which is precisely the
+ * case - dragging one edge handle of a selection - that the feature exists for.
+ */
+export interface StrokeGauge {
+  a: number
+  b: number
+  c: number
+  d: number
 }
 
 export interface Contour {
@@ -127,6 +160,38 @@ function strokeCap(
  * space the shape wants to draw in - typically its own local space, pre-transform).
  */
 export function strokePolyline(points: readonly Point2[], sink: MeshSink, options: StrokeOptions): void {
+  // A gauged stroke is the ordinary one, done somewhere else and brought back. Push the path
+  // through the transform, stroke it THERE - where the width is the width that was asked for,
+  // and where the joins, the caps and the miter limit are all measured in the units they are
+  // meant to be measured in - then map every vertex back through the inverse. What returns is
+  // local-space geometry that becomes an exactly even ribbon once the transform is applied,
+  // for any invertible transform: non-uniform scale and skew included, with round joins
+  // correctly coming back as the ellipse arcs they have to be.
+  //
+  // Doing it this way rather than by adjusting the width means there is ONE stroker, and this
+  // is a wrapper around it: nothing below can disagree with the ungauged case, because it is
+  // the ungauged case.
+  if (options.gauge) {
+    const inverse = invertGauge(options.gauge)
+    // Singular - some axis has been scaled to nothing. There is no ribbon to draw and no
+    // width that would make one, so drawing nothing is the answer rather than a division by
+    // zero's worth of NaN geometry.
+    if (!inverse) return
+    const forward = options.gauge
+    strokePolyline(
+      points.map((p) => applyGauge(forward, p)),
+      {
+        vertex: (x, y, isFill, material) => {
+          const local = applyGauge(inverse, { x, y })
+          return sink.vertex(local.x, local.y, isFill, material)
+        },
+        triangle: (a, b, c) => sink.triangle(a, b, c),
+      },
+      { ...options, gauge: undefined },
+    )
+    return
+  }
+
   const {
     width,
     closed = true,
@@ -244,4 +309,49 @@ export function strokeContours(contours: readonly Contour[], sink: MeshSink, opt
   for (const contour of contours) {
     strokePolyline(contour.points, sink, { ...options, closed: contour.closed ?? options.closed })
   }
+}
+
+/** x' = a·x + c·y, y' = b·x + d·y - see StrokeGauge for the convention. */
+function applyGauge(g: StrokeGauge, p: Point2): Point2 {
+  return { x: g.a * p.x + g.c * p.y, y: g.b * p.x + g.d * p.y }
+}
+
+/** The inverse gauge, or null when the transform collapses a dimension. */
+function invertGauge(g: StrokeGauge): StrokeGauge | null {
+  const det = g.a * g.d - g.b * g.c
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null
+  return { a: g.d / det, b: -g.b / det, c: -g.c / det, d: g.a / det }
+}
+
+/**
+ * Whether two gauges produce the SAME stroke geometry - which is a weaker question than
+ * whether they are the same transform, and deliberately so.
+ *
+ * Stroking commutes with rotation, so a gauge and that gauge turned by any angle give byte-
+ * for-byte identical triangles: `(RG)⁻¹ · stroke(RG·p)` is `G⁻¹R⁻¹ · R·stroke(G·p)`, which is
+ * `G⁻¹ · stroke(G·p)`. Comparing the four numbers directly would therefore rebuild a spinning
+ * keyline every frame to arrive back at the geometry it already had.
+ *
+ * What is left when orientation is factored out is `GᵀG` - the lengths of the two axes and
+ * the angle between them, three numbers, invariant under exactly the rotations that do not
+ * matter and sensitive to every scale and skew that does.
+ *
+ * The tolerance is relative and generous by float32 standards (the world matrix is stored as
+ * float32, so a rotation alone perturbs these by ~1e-7 relative). It is still four orders of
+ * magnitude tighter than any scale change a person could see, and a slow drift accumulates
+ * against the gauge the geometry was BUILT with rather than against last frame's, so it
+ * crosses the threshold and rebuilds rather than creeping past it unnoticed.
+ */
+export function sameGauge(a: StrokeGauge | undefined, b: StrokeGauge | undefined): boolean {
+  if (!a || !b) return a === b
+  // GᵀG, written out: |x axis|², |y axis|², and their dot product.
+  const ax = a.a * a.a + a.b * a.b
+  const ay = a.c * a.c + a.d * a.d
+  const axy = a.a * a.c + a.b * a.d
+  const bx = b.a * b.a + b.b * b.b
+  const by = b.c * b.c + b.d * b.d
+  const bxy = b.a * b.c + b.b * b.d
+  const scale = Math.max(ax, ay, bx, by, 1)
+  const tolerance = scale * 1e-5
+  return Math.abs(ax - bx) <= tolerance && Math.abs(ay - by) <= tolerance && Math.abs(axy - bxy) <= tolerance
 }

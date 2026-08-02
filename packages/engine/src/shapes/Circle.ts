@@ -107,6 +107,7 @@ export class Circle extends Shape {
         join: this.lineJoin,
         miterLimit: this.miterLimit,
         roundSegments: 4,
+        gauge: this.strokeGauge(),
       })
     }
   }

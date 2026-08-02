@@ -99,7 +99,16 @@ export class SceneGather {
    * actually a cached answer to reuse.
    */
   run(input: GatherInput, reuse: boolean): GatherResult {
-    if (reuse && this.cached) return this.cached
+    if (reuse && this.cached) {
+      // Even here, because this is not about the visible SET. A shape whose stroke was told
+      // not to follow its scale has geometry that depends on that scale, and the reuse path
+      // is exactly the state in which nothing else would ever look again. What it finds costs
+      // a frame here rather than none - the renderer has already decided to reuse by the time
+      // this runs, so the rebuild it asks for lands on the next one - and it is the only
+      // configuration where that is true.
+      refreshStrokeGauges(this.cached.ordered)
+      return this.cached
+    }
 
     const { scene, camera, fonts, viewWidth, viewHeight } = input
 
@@ -108,6 +117,11 @@ export class SceneGather {
     // runs first (see scene/picking.ts). Depth ranks are scene-wide (based on EVERY shape),
     // not affected by culling below.
     const ordered = collectZOrder(scene, input.zSortEnabled)
+    // Before anything reads geometry: a stroke built not to follow its shape's scale is stale
+    // the moment that scale moves, and this is the one loop that sees every shape every frame.
+    // It marks them dirty, which the renderer's rebuild check - made after this returns -
+    // picks up in the same frame. See Shape.refreshStrokeGauge for why it has to be a sweep.
+    refreshStrokeGauges(ordered)
     const depths = new Map<Shape, number>()
     // Text is the only Shape kind that doesn't tessellate for the mesh lane (its tessellate()
     // is the inherited no-op) - everything else belongs to the mesh batcher, VectorText very
@@ -239,4 +253,15 @@ export function sameMembers<T>(a: readonly T[], b: readonly T[]): boolean {
     if (a[i] !== b[i]) return false
   }
   return true
+}
+
+/**
+ * Asks every shape whether the scale its stroke was built against still holds.
+ *
+ * Free for a shape that never opted out of scaling its stroke - one boolean read - which is
+ * what makes it affordable to run over the whole scene rather than over a list somebody has
+ * to remember to keep. See Shape.refreshStrokeGauge.
+ */
+function refreshStrokeGauges(shapes: readonly Shape[]): void {
+  for (let i = 0; i < shapes.length; i++) shapes[i].refreshStrokeGauge()
 }

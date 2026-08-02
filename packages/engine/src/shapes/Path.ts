@@ -64,6 +64,7 @@ export class Path extends Shape {
         join: this.lineJoin,
         cap: this.lineCap,
         miterLimit: this.miterLimit,
+        gauge: this.strokeGauge(),
       })
     }
   }

@@ -112,6 +112,7 @@ export abstract class CustomShape extends Shape {
         join: op.join,
         cap: op.cap,
         miterLimit: op.miterLimit,
+        gauge: this.strokeGauge(),
       })
     }
   }

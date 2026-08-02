@@ -743,12 +743,46 @@ anything.
 Nothing is rebuilt. `localMatrix()` misses its cache, produces a new matrix instance, and next
 frame `updateObjects()` sees a different `model` reference and rewrites that object's record.
 
+**With one exception**, and it is the only one in the engine: a shape with
+`strokeScaleEnabled = false` has its stroke width baked into geometry in a way that depends on
+the world scale, so a scale change *does* rebuild it. See below.
+
 The upload is by **dirty range**. Each slot keeps an `ObjectCache` of what was last written;
 unchanged slots are skipped outright. Changed slots are collected into ranges, merging any two
 within 8 slots of each other — a few hundred wasted bytes beat an extra `writeBuffer` call. If
 a frame's changes scatter into more than 512 ranges, it falls back to one whole-buffer upload
 rather than issuing an unbounded number of small writes. At 100k objects that is the difference
 between a ~30 MB copy every frame and a few hundred bytes while dragging one shape.
+
+### A stroke that does not scale — `strokeScaleEnabled = false`
+
+The exception above, and the reason it is opt-in per shape.
+
+A stroke width is normally a local-space measurement like any other coordinate: the ribbon is
+tessellated once and the transform stretches it along with the rest of the shape. An outline
+that must stay the same width whatever the shape's size cannot work that way — the triangles
+genuinely differ per scale — so the shape re-tessellates whenever its world scale changes, and
+that costs its lane a repack.
+
+How the ribbon is built is the interesting half. It is **not** the width divided by a scale
+factor: under a 4:1 stretch a diagonal edge is thickened by neither 4 nor 1 but by something
+between, and by a different amount for every direction around the shape, so no single number
+fixes it. Instead the stroker is handed a `StrokeGauge` — the linear part of the world matrix —
+and pushes the path *through* it, strokes there where the width is the width that was asked
+for, and maps every vertex back through the inverse. Non-uniform scale and skew come out exact,
+round joins correctly returning as the ellipse arcs they have to be. There is still one
+stroker: this is a wrapper around it, so the gauged case cannot disagree with the ungauged one.
+
+Noticing is a sweep. `render/gather.ts` asks every shape once a frame whether the scale its
+stroke was built against still holds (`Shape.refreshStrokeGauge`) — one boolean read for a
+shape that never opted out, which is what makes it affordable over the whole scene. It has to
+be a sweep rather than a setter: a shape's world scale depends on every ancestor, and no setter
+is in a position to say that a whole subtree's strokes are now stale.
+
+Rotation and translation are free, and provably so. Stroking commutes with rotation, so a gauge
+and that gauge turned by any angle give identical triangles; the staleness check compares
+`GᵀG` — the two axis lengths and the angle between them — which is invariant under exactly the
+rotations that do not matter and sensitive to every scale and skew that does.
 
 ### A colour changes
 

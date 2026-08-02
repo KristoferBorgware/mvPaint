@@ -10,6 +10,7 @@ import { buildMsdfStressScene } from './msdfStressScene'
 import { buildOpacityScene } from './opacityScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
+import { buildStrokeScaleScene } from './strokeScaleScene'
 import { buildShapeStressScene } from './shapeStressScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
@@ -37,6 +38,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Five shapes the engine knows nothing about, each a class in the scene file that draws its own contour into a path-building context - moveTo/lineTo/curves/arcs, then fill and stroke. A star and a heart from a description and nothing else; one continuous route whose legs each carry their own colour and width; a gear with a bore through it, wearing a gradient and a shadow it never asks for; and a wave whose outline really does change, which is the one that has to say so. All of them are picked on the real outline and stacked with everything else.',
     build: buildCustomShapeScene,
+  },
+  {
+    id: 'stroke-scale',
+    title: 'Stroke and scale',
+    description:
+      "Two readings of what a stroke width means, paired under the same transforms. By default a stroke is a local measurement like any other coordinate, so scaling a shape scales its outline and the whole thing zooms as one picture; strokeScaleEnabled: false holds the outline at the width it was given, which is what a keyline or a selection frame means. The same star at three scales, a pair inside a group scaled by 2.2 (neither was scaled itself - what is measured is the world transform), an animated pair showing what a live resize costs, and a shape stretched 4:1, where a fixed outline is even the whole way round because the ribbon is built through the transform rather than divided by a factor.",
+    build: buildStrokeScaleScene,
   },
   {
     id: 'groups',

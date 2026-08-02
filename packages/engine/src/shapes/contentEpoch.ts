@@ -18,6 +18,11 @@
 // Transforms deliberately do NOT bump anything. They are re-uploaded every frame from the
 // world matrix and never baked into the packed buffers, so moving, scaling or spinning a
 // node has always worked and still costs nothing.
+//
+// The one thing that does is a shape whose stroke was told not to follow its scale (see
+// Shape.strokeScaleEnabled), because that stroke IS baked and the scale is what it was baked
+// against. It goes through markGeometryDirty() like any other geometry change and lands here
+// as an ordinary mesh bump - not a special case, just the one transform that is also content.
 
 let meshEpochCounter = 0
 let textEpochCounter = 0
