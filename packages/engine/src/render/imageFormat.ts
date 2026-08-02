@@ -23,6 +23,18 @@ export const IMAGE_VERTEX_FLOATS = 5 // 32-bit slots per vertex (2 + 2 + 1)
 //   84  opacity: f32 (the object's own transparency - see Shape.opacity)
 //   88  (8 bytes padding, to a 16-byte multiple)
 //   96  end
+//
+// Those 8 bytes are TWO f32 pads in the shader's struct, and the count is load-bearing rather
+// than decorative: WGSL rounds a struct's size up to its own alignment, 16 here because of the
+// mat4x4, so a third pad would make the struct 112 bytes while this stride stays 96. The shader
+// indexes the storage buffer by ITS size, so object 0 would be perfect and every one after it
+// would read its transform out of the middle of its neighbour's record - image quads spread
+// across the screen. That is not hypothetical: adding `opacity` at byte 84 put a real field
+// where a pad had been without taking a pad away, and the image lane drew exactly that on the
+// WebGPU path for several commits. The WebGL path was unaffected throughout, since it reads
+// these records out of a data texture by texel arithmetic and never consults the WGSL at all -
+// which is precisely why it went unnoticed. render/selfTest.ts now computes every shader
+// struct's size from its source and checks it against the stride here.
 export const IMAGE_OBJECT_TINT_OFFSET = 64
 export const IMAGE_OBJECT_DEPTH_OFFSET = 80
 export const IMAGE_OBJECT_OPACITY_OFFSET = 84

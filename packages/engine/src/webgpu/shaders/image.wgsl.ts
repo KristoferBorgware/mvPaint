@@ -21,9 +21,14 @@ struct ObjectData {
   depth : f32,
   // Byte 84, in what would otherwise be padding out to the record's 16-byte multiple.
   opacity : f32,
+  // Exactly enough to reach 96, and no more. WGSL rounds a struct's size up to its own
+  // alignment - 16 here, because of the mat4x4 - so ONE spare float past this point would
+  // make the struct 112 bytes while the buffer is still packed at 96, and every object after
+  // the first would read its transform from the middle of its neighbour's record. See the
+  // record-layout assertions in render/selfTest.ts, which now compute this rather than
+  // trusting the comment.
   _pad0 : f32,
   _pad1 : f32,
-  _pad2 : f32,
 };
 
 @group(0) @binding(0) var<uniform> frame : Frame;

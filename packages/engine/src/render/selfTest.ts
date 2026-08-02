@@ -18,7 +18,10 @@ import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,
   MESH_VERTEX_STRIDE,
+  OBJECT_DEPTH_OFFSET,
+  OBJECT_FILL_COLOR_OFFSET,
   OBJECT_OPACITY_OFFSET,
+  OBJECT_STROKE_COLOR_OFFSET,
   OBJECT_STOP_COLORS_OFFSET,
   OBJECT_STOP_POSITIONS_OFFSET,
   OBJECT_STRIDE,
@@ -31,9 +34,13 @@ import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
 import { parseColor } from './color'
 import { MAX_CAPTURE_PIXELS, flipRows, paddedBytesPerRow, resolveCapture, unpadRows } from './capture'
-import { IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE } from './imageFormat'
+import { IMAGE_OBJECT_DEPTH_OFFSET, IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE, IMAGE_OBJECT_TINT_OFFSET } from './imageFormat'
 import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
 import { depthForRank } from '../scene/picking'
+import { meshShaderCode } from '../webgpu/shaders/mesh.wgsl'
+import { textShaderCode } from '../webgpu/shaders/text.wgsl'
+import { imageShaderCode } from '../webgpu/shaders/image.wgsl'
+import { shadowQuadShaderCode } from '../webgpu/shaders/shadowQuad.wgsl'
 import { SceneGather, type GatherInput } from './gather'
 import { Scene } from '../scene/Scene'
 import { Text } from '../shapes/Text'
@@ -51,6 +58,7 @@ import {
   worldAxisScale,
 } from './shadowMath'
 import {
+  SHADOW_OBJECT_COLOR_OFFSET,
   SHADOW_OBJECT_DEPTH_OFFSET,
   SHADOW_OBJECT_QUAD_OFFSET,
   SHADOW_OBJECT_STRIDE,
@@ -1688,6 +1696,136 @@ assert(
   ordinary.scaleX = 9
   capture(ordinary)
   assert(!ordinary.refreshStrokeGauge(), 'a shape whose stroke follows its scale is never invalidated by one')
+}
+
+// --- every shader's object record is the size the CPU packs it at ------------------------------
+//
+// The one class of bug in this engine that no amount of reading catches and no CPU test could
+// have found. A storage buffer is an ARRAY of records: the shader indexes it by multiplying by
+// the struct's size as WGSL computes it, while the batcher writes at a stride of its own. Agree
+// on the field offsets but not on the total, and object 0 is perfect while every object after
+// it reads its transform out of the middle of its neighbour - quads spreading across the
+// screen, which looks like anything but a padding mistake.
+//
+// It bit the image lane exactly this way. Adding `opacity` put a real field where a pad had
+// been but left all three pads in place, so the struct came to 100 bytes and WGSL rounded it up
+// to 112 against a record packed at 96. Invisible on the WebGL path, which reads the same
+// records out of a data texture by texel arithmetic of its own and so never consults the WGSL
+// at all.
+//
+// So the sizes are computed here from the shader source, by WGSL's own layout rules, rather
+// than read off a comment.
+//
+// Only the storage-buffer records need it. A uniform struct is bound whole, so a size
+// disagreement there is a binding-size validation error the browser reports out loud; it is
+// being INDEXED as an array that turns the same mistake into silently wrong pixels.
+{
+  interface Layout {
+    align: number
+    size: number
+  }
+  /** WGSL alignment and size for the types these shaders actually use. */
+  const typeLayout = (type: string, consts: Map<string, number>): Layout => {
+    const array = /^array<\s*(.+?)\s*,\s*([\w]+)\s*>$/.exec(type)
+    if (array) {
+      const element = typeLayout(array[1], consts)
+      // The length may be a literal or one of the shader's own `const N: u32 = 8u;`.
+      const length = /^\d+$/.test(array[2]) ? Number(array[2]) : consts.get(array[2])
+      assert(length !== undefined, `the array length '${array[2]}' resolves`)
+      // An array's element stride is the element size rounded up to its alignment.
+      const stride = Math.ceil(element.size / element.align) * element.align
+      return { align: element.align, size: stride * (length ?? 0) }
+    }
+    switch (type) {
+      case 'f32':
+      case 'u32':
+      case 'i32':
+        return { align: 4, size: 4 }
+      case 'vec2<f32>':
+      case 'vec2<u32>':
+        return { align: 8, size: 8 }
+      case 'vec3<f32>':
+        return { align: 16, size: 12 }
+      case 'vec4<f32>':
+      case 'vec4<u32>':
+        return { align: 16, size: 16 }
+      case 'mat4x4<f32>':
+        return { align: 16, size: 64 }
+      default:
+        throw new Error(`the record-layout check does not know the WGSL type '${type}'`)
+    }
+  }
+
+  /** The struct's size and its members' byte offsets, exactly as WGSL lays them out. */
+  const structLayout = (source: string, name: string): { size: number; offsets: Map<string, number> } => {
+    const body = new RegExp(`struct\\s+${name}\\s*\\{([^}]*)\\}`).exec(source)
+    assert(body !== null, `${name} is declared in the shader`)
+    // The shader's own integer constants, for array lengths written as `array<f32, MAX_STOPS>`.
+    const consts = new Map<string, number>()
+    for (const m of source.matchAll(/const\s+(\w+)\s*:\s*[iu]32\s*=\s*(\d+)[iu]?\s*;/g)) {
+      consts.set(m[1], Number(m[2]))
+    }
+    const offsets = new Map<string, number>()
+    let offset = 0
+    let align = 1
+    // Comments first: one of them says "byte 132," and that comma is not a member boundary.
+    const declarations = body![1].replace(/\/\/[^\n]*/g, '')
+    // Then split on the commas BETWEEN members - not the one inside `array<f32, MAX_STOPS>`.
+    const members: string[] = []
+    let depth = 0
+    let current = ''
+    for (const ch of declarations) {
+      if (ch === '<') depth++
+      else if (ch === '>') depth--
+      if (ch === ',' && depth === 0) {
+        members.push(current)
+        current = ''
+        continue
+      }
+      current += ch
+    }
+    members.push(current)
+
+    for (const raw of members) {
+      const line = raw.trim()
+      if (line.length === 0) continue
+      const at = line.indexOf(':')
+      if (at < 0) continue
+      const field = line.slice(0, at).trim()
+      const layout = typeLayout(line.slice(at + 1).trim(), consts)
+      offset = Math.ceil(offset / layout.align) * layout.align
+      offsets.set(field, offset)
+      offset += layout.size
+      align = Math.max(align, layout.align)
+    }
+    // A struct's size is rounded up to its own alignment - the step the image lane missed.
+    return { size: Math.ceil(offset / align) * align, offsets }
+  }
+
+  const lanes = [
+    { name: 'mesh', source: meshShaderCode, struct: 'ObjectData', stride: OBJECT_STRIDE,
+      fields: { model: 0, depth: OBJECT_DEPTH_OFFSET, opacity: OBJECT_OPACITY_OFFSET, stopPositions: OBJECT_STOP_POSITIONS_OFFSET, stopColors: OBJECT_STOP_COLORS_OFFSET, fillColor: OBJECT_FILL_COLOR_OFFSET, strokeColor: OBJECT_STROKE_COLOR_OFFSET } },
+    { name: 'text', source: textShaderCode, struct: 'ObjectData', stride: TEXT_OBJECT_STRIDE,
+      fields: { model: 0, opacity: TEXT_OBJECT_OPACITY_OFFSET } },
+    { name: 'image', source: imageShaderCode, struct: 'ObjectData', stride: IMAGE_OBJECT_STRIDE,
+      fields: { model: 0, tint: IMAGE_OBJECT_TINT_OFFSET, depth: IMAGE_OBJECT_DEPTH_OFFSET, opacity: IMAGE_OBJECT_OPACITY_OFFSET } },
+    { name: 'shadow', source: shadowQuadShaderCode, struct: 'ShadowObject', stride: SHADOW_OBJECT_STRIDE,
+      fields: { model: 0, color: SHADOW_OBJECT_COLOR_OFFSET, quad: SHADOW_OBJECT_QUAD_OFFSET, uv: SHADOW_OBJECT_UV_OFFSET, depth: SHADOW_OBJECT_DEPTH_OFFSET } },
+  ]
+
+  for (const lane of lanes) {
+    const layout = structLayout(lane.source, lane.struct)
+    assert(
+      layout.size === lane.stride,
+      `the ${lane.name} lane's shader struct is ${layout.size} bytes, and its records are packed at ${lane.stride}`,
+    )
+    for (const [field, expected] of Object.entries(lane.fields)) {
+      assert(
+        layout.offsets.get(field) === expected,
+        `the ${lane.name} lane's ${field} sits at ${expected} in the shader as well as on the CPU`,
+      )
+    }
+  }
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)
