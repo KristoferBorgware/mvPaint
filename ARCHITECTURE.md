@@ -989,6 +989,32 @@ texel row and GL in its *last* — and it is corrected in exactly two places, pi
 `npx tsx src/webgl/selfTest.ts` covers the pure half: the data texture's index maths, and
 every generated shader's agreement with the record layout it was generated from.
 
+### Choosing a GPU
+
+Both paths take the same option and both default it the same way (`renderer/adapter.ts`):
+
+```ts
+createSceneRenderer(canvas, { powerPreference: 'high-performance' })  // the default
+```
+
+WebGPU passes it to `requestAdapter()`, WebGL2 to `getContext('webgl2', …)`. It is a **hint
+with two settings** and the only control the platform offers — there is no device list to
+enumerate and no way to name a GPU, because an exact hardware list is a strong fingerprint.
+On a machine with an integrated GPU and a discrete card it selects between them; on a machine
+with one it does nothing; and it loses outright to a browser already pinned to an adapter from
+outside the page (Windows Graphics Settings, the vendor control panel — `chrome://gpu` says
+which one the browser is on).
+
+The default is deliberately **not** the platform's. Left to choose, browsers pick the
+integrated GPU — right for a page that draws a form, wrong for a renderer whose premise is a
+hundred thousand shapes through a depth-tested pass.
+
+Since the request can be silently ignored, what came back is reported rather than assumed.
+`handle.adapter` carries vendor, architecture, device and the driver's description as far as
+the browser discloses them (WebGPU's `adapter.info`; WebGL's `WEBGL_debug_renderer_info`,
+which is more specific but more often withheld), plus a `fallback` flag for a software
+renderer, which both paths also warn about once at startup.
+
 ---
 
 ## Where to look
@@ -1008,6 +1034,7 @@ every generated shader's agreement with the record layout it was generated from.
 | The gather (shared, GPU-free) | `render/gather.ts` |
 | Orchestration | `webgpu/index.ts`, `webgpu/SceneRenderer.ts`, `webgpu/FrameRenderer.ts`, `webgpu/GpuContext.ts` |
 | Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
+| Choosing a GPU | `renderer/adapter.ts`, `webgpu/GpuContext.ts`, `webgl/Gl2Context.ts` |
 | The WebGL2 fallback (temporary) | `webgl/` |
 | Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
 | Draw order and the two passes | `render/opacity.ts`, `render/drawOrder.ts` |

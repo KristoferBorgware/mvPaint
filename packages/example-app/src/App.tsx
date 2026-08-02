@@ -27,7 +27,7 @@ import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
-import { Shape, type TransformableNode } from '@mvpaint/engine'
+import { describeAdapter, Shape, type RendererAdapter, type TransformableNode } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
 import { ShadowControls } from './components/ShadowControls'
@@ -67,6 +67,8 @@ export default function App() {
   // 'auto' falls back, which is the case worth being able to see.
   const [backend, setBackend] = useState<'auto' | 'webgpu' | 'webgl2'>('auto')
   const [activePath, setActivePath] = useState<'webgpu' | 'webgl2' | null>(null)
+  // What the renderer actually got, as opposed to what the picker above asked for.
+  const [adapter, setAdapter] = useState<RendererAdapter | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [snapshotBusy, setSnapshotBusy] = useState(false)
 
@@ -113,6 +115,7 @@ export default function App() {
     // The old path's error - "WebGPU is not supported", say - says nothing about the new one.
     setError(null)
     setActivePath(null)
+    setAdapter(null)
     setBackend(next)
   }
 
@@ -136,7 +139,10 @@ export default function App() {
         uniformCornerScale={uniformCornerScale}
         backend={backend}
         onError={setError}
-        onPathChange={setActivePath}
+        onPathChange={(path, adapter) => {
+          setActivePath(path)
+          setAdapter(adapter)
+        }}
         onSelectionChange={handleSelectionChange}
       />
 
@@ -293,6 +299,15 @@ export default function App() {
                       ? 'Drawing through WebGPU. Pick WebGL2 to see what a machine without it sees.'
                       : 'Auto uses WebGPU and falls back to WebGL2 only if it is unavailable.'}
                 </Typography>
+                {adapter && (
+                  <Typography variant="caption" color="text.secondary">
+                    {/* Which GPU actually drew this. Both paths ask for the high-performance
+                        one, but that is a hint: a machine with one GPU ignores it, and a
+                        browser pinned to the integrated GPU (Windows Graphics Settings, the
+                        vendor control panel, chrome://gpu) overrides it from outside the page. */}
+                    GPU: {describeAdapter(adapter)} - asked for {adapter.powerPreference}
+                  </Typography>
+                )}
               </Stack>
 
               <ShadowControls selected={selected.filter((node): node is Shape => node instanceof Shape)} />

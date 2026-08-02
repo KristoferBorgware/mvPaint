@@ -72,6 +72,7 @@ export * from './shapes/Transformer'
 export * from './shapes/transformerMath'
 export * from './input/MarqueeTool'
 
+export * from './renderer/adapter'
 export * from './renderer/SceneRendererHandle'
 export { createSceneRenderer } from './renderer/createSceneRenderer'
 // The WebGPU path's own entry point, for an application that wants it and no fallback.

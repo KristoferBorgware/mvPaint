@@ -20,6 +20,7 @@ import type { PickableNode } from '../scene/picking'
 import type { MarqueeOptions } from '../scene/selection'
 import type { ImageTextureFactory } from '../image/ImageTexture'
 import type { ColorInput } from '../render/color'
+import type { GpuPowerPreference, RendererAdapter } from './adapter'
 
 /** Which render path drew this frame. `'auto'` is only an input; a renderer is always one. */
 export type RenderPathKind = 'webgpu' | 'webgl2'
@@ -37,6 +38,14 @@ export interface SceneResources {
 export interface SceneRendererHandle extends SceneResources {
   /** Which path this renderer actually took - `'webgl2'` means WebGPU was unavailable. */
   readonly path: RenderPathKind
+  /**
+   * Which GPU is drawing, and which one was asked for - see renderer/adapter.ts.
+   *
+   * Reported rather than assumed, because `powerPreference` is a hint that a machine with one
+   * GPU ignores and a machine whose browser is pinned elsewhere overrides. This is how an
+   * application (or a person looking at a debug panel) can tell what it actually got.
+   */
+  readonly adapter: RendererAdapter
   /**
    * The scene graph. A renderer starts with an empty one and draws it every frame, so content
    * is added here after the renderer exists - `handle.scene.root.addChild(node)` - rather than
@@ -159,6 +168,16 @@ export interface CreateSceneRendererOptions {
    * tested on a machine that has WebGPU, and the only reason to ask for it deliberately.
    */
   backend?: 'auto' | RenderPathKind
+  /**
+   * Which GPU to ask for on a machine that has more than one. Default `'high-performance'`,
+   * which is NOT the platform default - browsers left to themselves pick the integrated GPU.
+   * Pass `'low-power'` for an application that would rather have the battery.
+   *
+   * It is a hint, and the only one there is: neither WebGPU nor WebGL lets a page enumerate
+   * GPUs or name one. See renderer/adapter.ts for what it can and cannot do, and read
+   * `handle.adapter` for what came back.
+   */
+  powerPreference?: GpuPowerPreference
   /**
    * Called with a human-readable message on a device error (e.g. an invalid pipeline from a
    * shader/layout mismatch). Such errors do NOT throw - they surface asynchronously - so

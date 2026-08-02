@@ -15,6 +15,7 @@ import {
   type CameraGestureEvent,
   type MarqueeEvent,
   type Node,
+  type RendererAdapter,
   type Scene,
   type SceneRendererHandle,
   type SceneResources,
@@ -77,8 +78,13 @@ interface WebGPUCanvasProps {
   backend?: 'auto' | 'webgpu' | 'webgl2'
   /** Called with a human-readable message on renderer init or device errors. */
   onError?: (message: string) => void
-  /** Called once the renderer exists, with the path it actually took. */
-  onPathChange?: (path: 'webgpu' | 'webgl2') => void
+  /**
+   * Called once the renderer exists, with the path it actually took and the GPU it got.
+   *
+   * Both are outcomes rather than settings - `backend` and `powerPreference` are requests the
+   * browser may not honour - which is why they are reported back rather than assumed.
+   */
+  onPathChange?: (path: 'webgpu' | 'webgl2', adapter: RendererAdapter) => void
   /** Called with every selected node (empty when the selection is cleared). */
   onSelectionChange?: (nodes: readonly TransformableNode[]) => void
 }
@@ -289,7 +295,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           return
         }
         handleRef.current = handle
-        onPathChangeRef.current?.(handle.path)
+        onPathChangeRef.current?.(handle.path, handle.adapter)
 
         // A renderer arrives with an EMPTY scene and draws it every frame, so content is
         // added here rather than through a construction-time callback. The first frame or two

@@ -36,7 +36,7 @@ export async function createWebGpuSceneRenderer(
   canvas: HTMLCanvasElement,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
-  const gpu = await createGpuContext(canvas)
+  const gpu = await createGpuContext(canvas, { powerPreference: options.powerPreference })
 
   // Surface asynchronous device (validation) errors - an invalid pipeline or a bad
   // draw does not throw; it just poisons the command buffer and the canvas stays blank.
@@ -156,6 +156,7 @@ export async function createWebGpuSceneRenderer(
 
   return {
     path: 'webgpu',
+    adapter: gpu.adapter,
     get onFrame() {
       return onFrame
     },

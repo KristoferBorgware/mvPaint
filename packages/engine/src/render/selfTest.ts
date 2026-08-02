@@ -9,6 +9,7 @@
 import { Rect , type RectOptions } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
 import { CustomShape } from '../shapes/CustomShape'
+import { describeAdapter, type RendererAdapter } from '../renderer/adapter'
 import type { ShapeContext } from '../shapes/ShapeContext'
 import { Polyline } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
@@ -1515,6 +1516,45 @@ assert(
   assert(runs === 2, 'markGeometryDirty() asks for a fresh description')
   assert(grown.verts.some((v) => near(v.x, 90)), 'and the new one is what gets drawn')
   assert(node.localBounds().max.x === 90, 'with the picking layout rebuilt from it too')
+}
+
+// --- which GPU drew it ----------------------------------------------------------------------
+//
+// The choosing happens in a browser and cannot be tested here. What CAN be is the one piece
+// that runs on whatever the browser said - and the case that matters is a browser that said
+// almost nothing, since every field is redacted somewhere.
+{
+  const disclosed: RendererAdapter = {
+    powerPreference: 'high-performance',
+    vendor: 'nvidia',
+    architecture: 'blackwell',
+    device: '',
+    description: 'NVIDIA GeForce RTX 5090',
+    fallback: false,
+  }
+  assert(
+    describeAdapter(disclosed) === 'NVIDIA GeForce RTX 5090',
+    "the driver's own description wins outright - it already names the vendor and the part",
+  )
+  assert(
+    describeAdapter({ ...disclosed, description: '' }) === 'nvidia blackwell',
+    'and the coarser fields are what is left when there is no description, which is WebGPU\'s usual case',
+  )
+
+  const redacted: RendererAdapter = {
+    powerPreference: 'low-power',
+    vendor: '',
+    architecture: '',
+    device: '',
+    description: '',
+    fallback: false,
+  }
+  assert(describeAdapter(redacted) === 'GPU not disclosed', 'a browser that withholds everything still gets a sentence')
+
+  // The one flag worth acting on: a scene drawing correctly at 12fps on a software renderer
+  // looks exactly like the engine being slow, so it has to be visible in the readout.
+  assert(describeAdapter({ ...disclosed, fallback: true }).endsWith(' (software)'), 'a software adapter says so')
+  assert(describeAdapter({ ...redacted, fallback: true }) === 'GPU not disclosed (software)', 'even an undisclosed one')
 }
 
 console.log(`[render] self-test passed (${count} assertions)`)

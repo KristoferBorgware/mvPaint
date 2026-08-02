@@ -27,6 +27,7 @@ import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } 
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
+import { describeAdapter } from '../renderer/adapter'
 import { GlFontBook } from './FontBook'
 import { glImageFactory } from './ImageTexture'
 import { GlSceneRenderer } from './SceneRenderer'
@@ -43,24 +44,6 @@ const GL_ERRORS: Record<number, string> = {
 }
 
 /**
- * The GPU behind this context, when the browser will say.
- *
- * WEBGL_debug_renderer_info is not always exposed - it is fingerprinting surface, and some
- * browsers withhold it - so this is best effort. It exists because the failures this path is
- * most likely to hit are per-driver, and "it is black on my phone" is a much harder report to
- * act on than the same sentence with an Adreno or Mali string attached to it.
- */
-function describeRenderer(gl: WebGL2RenderingContext): string {
-  try {
-    const info = gl.getExtension('WEBGL_debug_renderer_info')
-    if (info) return String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL))
-  } catch {
-    // Withheld; the version string below is always available and still narrows it down.
-  }
-  return String(gl.getParameter(gl.VERSION))
-}
-
-/**
  * Composition root for the WebGL2 path. Applications call createSceneRenderer()
  * (renderer/createSceneRenderer.ts), which comes here only when WebGPU is unavailable or when
  * `backend: 'webgl2'` asks for it deliberately.
@@ -69,7 +52,7 @@ export async function createWebGl2SceneRenderer(
   canvas: HTMLCanvasElement,
   options: CreateSceneRendererOptions = {},
 ): Promise<SceneRendererHandle> {
-  const context = createGl2Context(canvas)
+  const context = createGl2Context(canvas, { powerPreference: options.powerPreference })
   const { gl } = context
 
   // WebGL has no uncapturederror and no error scopes. What it does have is a context-loss
@@ -127,7 +110,7 @@ export async function createWebGl2SceneRenderer(
     const code = gl.getError()
     if (code === gl.NO_ERROR) return
     const name = GL_ERRORS[code] ?? `0x${code.toString(16)}`
-    const renderer = describeRenderer(gl)
+    const renderer = describeAdapter(context.adapter)
     console.error(`WebGL2: the first frame reported ${name} on ${renderer}`)
     reportOnce(`WebGL2 error on the first frame: ${name} (${renderer}).`)
   }
@@ -184,6 +167,7 @@ export async function createWebGl2SceneRenderer(
 
   return {
     path: 'webgl2',
+    adapter: context.adapter,
     get onFrame() {
       return onFrame
     },

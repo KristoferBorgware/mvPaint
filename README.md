@@ -28,6 +28,25 @@ objects rather than hundreds of thousands.
 It is temporary, and built to be deleted: `src/webgl/` plus one branch in
 `renderer/createSceneRenderer.ts`. Nothing in the WebGPU path was reshaped to accommodate it.
 
+### Which GPU
+
+On a machine with two — an integrated one and a discrete card — both paths ask for the
+**discrete** one, which is not what the platform does on its own: browsers left to choose pick
+the integrated GPU. `powerPreference: 'low-power'` asks for the other, for an application that
+would rather have the battery.
+
+That is the whole of the control available. Neither WebGPU nor WebGL lets a page enumerate the
+GPUs in a machine or name one, deliberately — an exact hardware list is a strong fingerprint —
+so what there is is a two-setting hint, and a machine with one GPU ignores it. A browser
+already pinned elsewhere overrides it too: on Windows the GPU process follows the per-app
+setting in Windows Graphics Settings and in the vendor's control panel, and no page can undo
+that from inside. `chrome://gpu` says which adapter the browser itself is on.
+
+Because a hint that was not honoured is otherwise invisible, `handle.adapter` reports what
+actually came back — vendor, family and the driver's own description, as far as the browser
+will disclose them — and flags a **software** renderer (SwiftShader, llvmpipe, WARP), which
+draws the right picture slowly and otherwise looks exactly like the engine being slow.
+
 ## What it is for
 
 Applications that draw a lot of vector content, keep it interactive, and need it to stay sharp
@@ -240,7 +259,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,836 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,841 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
