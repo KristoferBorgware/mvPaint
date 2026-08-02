@@ -408,6 +408,11 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // Only a press that reached the root itself landed on empty space; anything over
           // a shape has that shape as its target.
           if (e.target !== root || !e.world) return
+          // Not while the press is asking for the VIEW - ctrl or space held. Without this the
+          // rectangle starts anyway and suppresses the pan it was meant to make way for (see
+          // SceneInputDispatcher.updateGesture), which is why space+drag over empty space
+          // never panned either.
+          if (!controller.grabContent) return
           marqueeAdds = (e.evt as PointerEvent | undefined)?.shiftKey ?? false
           if ((e.evt as PointerEvent | undefined)?.pointerType === 'touch') {
             // A finger has no spare button, so a bare drag keeps panning and a held finger
@@ -419,20 +424,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
               navigator.vibrate?.(12)
               controller.beginMarquee(world)
             }, 450)
-          } else if (marqueeAdds) {
-            // With a mouse, a bare drag on empty space pans - the same thing a bare finger
-            // drag does, and the reason neither space nor the middle button is needed for the
-            // commonest gesture there is. Shift is what asks for a rectangle instead.
-            //
-            // Nothing is done in the other branch, deliberately: a press that starts no
-            // marquee leaves the dispatcher's one-pointer gesture alone, and that gesture is
-            // already a pan (see SceneInputDispatcher.updateGesture, which suppresses the pan
-            // only while something has been grabbed - a node drag, a handle, or a marquee).
-            //
-            // Shift meaning "and also" is why this composes rather than collides: the
-            // rectangle extends the selection, exactly as shift-clicking a shape does, and
-            // marqueeAdds above is that same flag read at press time. To select a fresh set,
-            // click empty space to clear first.
+          } else {
+            // A mouse drag on empty space draws a rectangle; shift makes it extend the
+            // selection rather than replace it (marqueeAdds, read at press time above).
+            // Panning is ctrl-drag, handled by the grabContent check at the top.
             controller.beginMarquee(e.world)
           }
         })
@@ -521,14 +516,43 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         const editable = (el: Element | null) =>
           !!el && ((el as HTMLElement).isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))
         const previousCursor = canvas.style.cursor
+
+        // Two ways to ask for the view instead of the content, tracked separately so releasing
+        // one does not cancel the other. grabContent false means a press ignores handles and
+        // draggable nodes, so the drag is reported as a pan wherever it lands - over a shape
+        // as much as over nothing.
+        let spaceHeld = false
+        let viewKeyHeld = false
+        const refreshGrab = () => {
+          const grab = !(spaceHeld || viewKeyHeld)
+          if (controller.grabContent === grab) return
+          controller.grabContent = grab
+          canvas.style.cursor = grab ? previousCursor : 'grab'
+        }
+
+        // The press itself is what decides, not a remembered keystroke: a keyup that arrives
+        // while another window has focus is never seen, and a modifier believed held forever
+        // would leave the canvas unable to select anything. Capture phase on the window, so
+        // this has already run by the time the canvas's own pointerdown listener resolves the
+        // press. Meta as well as Control, so the Mac chord is the one Mac users expect.
+        const onPointerDownCapture = (ev: PointerEvent) => {
+          viewKeyHeld = ev.ctrlKey || ev.metaKey
+          refreshGrab()
+        }
+        window.addEventListener('pointerdown', onPointerDownCapture, { capture: true })
+
         const onKeyDown = (ev: KeyboardEvent) => {
           if (editable(document.activeElement)) return
           if (ev.key === ' ') {
-            if (controller.grabContent) {
-              controller.grabContent = false
-              canvas.style.cursor = 'grab'
-            }
+            spaceHeld = true
+            refreshGrab()
             ev.preventDefault()
+            return
+          }
+          // Only for the cursor: the press above is what actually decides.
+          if (ev.key === 'Control' || ev.key === 'Meta') {
+            viewKeyHeld = true
+            refreshGrab()
             return
           }
           const viewport = viewportOf()
@@ -551,15 +575,17 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           ev.preventDefault()
         }
         const onKeyUp = (ev: KeyboardEvent) => {
-          if (ev.key !== ' ') return
-          controller.grabContent = true
-          canvas.style.cursor = previousCursor
+          if (ev.key === ' ') spaceHeld = false
+          else if (ev.key === 'Control' || ev.key === 'Meta') viewKeyHeld = false
+          else return
+          refreshGrab()
         }
         window.addEventListener('keydown', onKeyDown)
         window.addEventListener('keyup', onKeyUp)
         detachKeyboard = () => {
           window.removeEventListener('keydown', onKeyDown)
           window.removeEventListener('keyup', onKeyUp)
+          window.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
           canvas.removeEventListener('pointermove', cancelHoldOnMove)
         }
       })

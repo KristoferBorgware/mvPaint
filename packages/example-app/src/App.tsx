@@ -352,7 +352,7 @@ export default function App() {
                   </Stack>
                 ) : (
                   <Typography variant="caption" color="text.secondary">
-                    Nothing selected - click a shape, or shift-drag a box around several.
+                    Nothing selected - click a shape, or drag a box around several (shift adds).
                   </Typography>
                 )}
               </Stack>
@@ -361,7 +361,7 @@ export default function App() {
                 Gradient-filled and stroked shapes in the Z=0 plane, viewed through a 2D
                 orthographic camera. Drag a shape to move it; drag empty space to rubber-band
                 a selection (on touch, press and hold first). Shift extends the selection.
-                Drag empty space to pan (or middle-drag, or space+drag). Scroll or pinch to zoom, Escape to deselect.
+                Ctrl-drag to pan (or middle-drag, or space+drag). Scroll or pinch to zoom, Escape to deselect.
               </Typography>
             </Stack>
           </Paper>
