@@ -281,6 +281,38 @@ This is load-bearing further down: the mesh batcher decides whether to re-upload
 comparing its model matrix **by reference**. On a static scene every node hands back last
 frame's instance, so the whole per-frame CPU cost collapses into pointer comparisons.
 
+### What an input event costs
+
+There is no spatial index. `pickNode()` collects the visible shapes, sorts them by `zIndex`
+and walks front to back testing each one — exact, against the same triangles the mesh lane
+renders, and **O(n)**. Measured on the 100k stress scene: **~82 ms per pick**, of which the
+walk is ~130 ms against ~19 ms for building the sorted list at raw scale, so caching that list
+would recover little. Bringing the walk itself down means indexing space, which the engine
+does not do.
+
+So the design principle is that the cheapest hit-test is the one not performed, and there are
+two questions asked before any of them:
+
+1. **Does anyone listen at all?** `events/listenerCensus.ts` keeps a global tally per event
+   type, so a scene with no hover handler pays nothing for hover.
+2. **Does anyone listen *below the root*?** Every event bubbles to the root, so a listener
+   there is called whatever was under the pointer. The hit can then only change what
+   `event.target` says — nothing about who runs.
+
+The second one matters because of how camera zoom is normally driven: `root.on('wheel')`,
+reading the delta, never asking what it was over. Naming that node used to cost a full pick on
+every wheel event. `SceneInputDispatcher.dispatchReported` now compares the census tally
+against `Node.ownListenerCount`, and when nothing below the root is listening it fires from
+the root with `target` left as a **thunk** (`NodeEventInit.targetResolver`) — resolved on
+first read, cached, and never computed if nobody asks.
+
+Semantics are unchanged either way: a handler that reads `event.target` gets exactly what it
+always got, and a listener further down the tree still gets an eager pick, because there the
+dispatch path genuinely depends on the answer. The tally reads high rather than low, so a
+wrong answer is always "pick anyway".
+
+On the 100k scene that took a wheel event from **82 ms to 0.1 ms**.
+
 ---
 
 ## Geometry construction

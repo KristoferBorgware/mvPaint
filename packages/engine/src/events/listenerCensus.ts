@@ -14,12 +14,24 @@
 //   Shapes & gradients            35   0 hit-tests         0.06 ms
 //   MSDF text stress test         67   0 hit-tests         0.69 ms
 //   Shadow stress test          1377   0 hit-tests         1.20 ms
+//   Shape stress test         100000   0 hit-tests         82 ms
 //
-// So an ordinary scene spends well under a tenth of a frame on this, and only when asked.
+// So an ordinary scene spends well under a tenth of a frame on this, and only when asked -
+// and a very large one spends five frames, which is why the question the census answers is
+// worth asking before every hit-test and not only before the hover ones.
+//
 // Of the per-pick cost, the front-to-back hit-test walk is around 90% and assembling the
-// sorted candidate list the remaining 10% (1.37 ms against 0.14 ms at 1377 shapes), so
-// caching that list would recover little - it is the walk itself that sets the ceiling, and
-// bringing that down means indexing space rather than avoiding repeated work.
+// sorted candidate list the remaining 10% (1.37 ms against 0.14 ms at 1377 shapes; 130 ms
+// against 19 ms at 100k, so the split holds at scale), so caching that list would recover
+// little - it is the walk itself that sets the ceiling, and bringing that down means
+// indexing space rather than avoiding repeated work.
+//
+// Which is why the cheapest hit-test is the one not performed. Beyond "does anyone listen at
+// all", there is a second question with the same shape: does anyone listen BELOW THE ROOT?
+// Every event bubbles to the root, so a listener there is called whatever was hit, and the
+// hit can only affect what `event.target` says. SceneInputDispatcher.dispatchReported asks
+// that (via listenerCount against Node.ownListenerCount) and defers the pick behind a getter,
+// which is what takes a wheel over a hundred thousand shapes from 82 ms to 0.1 ms.
 //
 // The tally is global rather than per-scene. Listeners are routinely attached to nodes
 // before those nodes join a scene, so scoping the count would mean re-attributing it on

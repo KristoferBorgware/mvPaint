@@ -39,6 +39,18 @@ export interface NodeEventInit<E = unknown> {
   world?: Vector2
   /** Overrides the origin node - defaults to whichever node fire() was called on. */
   target?: Node
+  /**
+   * A `target` to work out only if somebody asks for it.
+   *
+   * For a dispatch where finding the origin node is expensive and usually unwanted: a wheel
+   * over a hundred thousand shapes has to hit-test all of them to name what it was over, and
+   * a handler that only wants the scroll delta never looks. Supplied instead of `target`, the
+   * event exposes `target` as a getter that runs this on first read and remembers the answer.
+   *
+   * Only sound when the dispatch PATH does not depend on the answer - i.e. the event is fired
+   * from a node that would receive it whatever was hit. See SceneInputDispatcher.
+   */
+  targetResolver?: () => Node
   /** Payload specific to the event kind, e.g. `child` on 'add', `oldVal`/`newVal` on a change. */
   [key: string]: unknown
 }
@@ -71,7 +83,27 @@ export function createNodeEvent<E>(type: string, node: Node, init: NodeEventInit
       this.cancelBubble = true
     },
   }
-  return Object.assign(event, init, { type, target: init.target ?? node, currentTarget: node })
+  const { targetResolver, ...rest } = init
+  Object.assign(event, rest, { type, target: init.target ?? node, currentTarget: node })
+
+  // A deferred origin - see NodeEventInit.targetResolver. Defined over the plain value
+  // assigned above, and only when no explicit target was given, so an event that names its
+  // own origin keeps naming it.
+  if (targetResolver && init.target === undefined) {
+    let resolved: Node | null = null
+    Object.defineProperty(event, 'target', {
+      configurable: true,
+      enumerable: true,
+      get: () => (resolved ??= targetResolver()),
+      // Assignable, because the property it replaces was: nothing in the engine writes to
+      // target, but an event object is handed to application code and should not start
+      // throwing on a write that used to work.
+      set: (value: Node) => {
+        resolved = value
+      },
+    })
+  }
+  return event
 }
 
 /** A shallow copy, so one handler's mutations can't reach another's view of the event. */

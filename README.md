@@ -132,7 +132,10 @@ zooming a shadowed shape re-bakes nothing and every shadow in the scene draws in
 **Scene graph and interaction**
 Nodes carry the transform (position, rotation, scale, skew, offset); shapes add the paint.
 Events bubble, so one listener on the root covers a whole subtree. Hit-testing is against real
-tessellated triangles, not bounding boxes. Included: node dragging, marquee selection, and a
+tessellated triangles, not bounding boxes — and is skipped wherever its answer cannot matter:
+a scene with no hover handler never hit-tests a pointer move, and an event whose only listeners
+are on the root resolves `event.target` lazily, since everything bubbles there regardless. On a
+100k-shape scene that is the difference between 82 ms and 0.1 ms per wheel event. Included: node dragging, marquee selection, and a
 `Transformer` for resize/rotate with angle snapping.
 
 **Screenshots**
@@ -264,7 +267,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,855 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,863 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 

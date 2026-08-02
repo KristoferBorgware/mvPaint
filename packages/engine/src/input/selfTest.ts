@@ -382,4 +382,85 @@ const centredRect = (options: RectOptions = {}): Rect =>
   resetListenerCensus()
 }
 
+// --- a wheel does not hit-test the scene to find out nobody asked ---------------------------
+//
+// The dispatch this is about is the ordinary one: an application drives camera zoom from
+// root.on('wheel'), reads the delta, and never asks what the pointer was over. Naming that
+// node means walking every shape in the scene front to back, which at a hundred thousand of
+// them is the whole frame - spent on an answer that is thrown away.
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const shape = root.addChild(new Rect({ name: 'under-the-pointer', width: 10, height: 10 }))
+
+  let picks = 0
+  const dispatcher = new SceneInputDispatcher(null, {
+    root,
+    pick: () => {
+      picks++
+      return shape
+    },
+  })
+
+  // A listener on the root: everything bubbles there, so what was hit cannot change who is
+  // called. The only thing it could change is what `target` says - and this one never looks.
+  let seen = 0
+  root.on('wheel', () => {
+    seen++
+  })
+  dispatcher.wheel({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
+  assert(seen === 1, 'the handler still runs')
+  assert(picks === 0, 'and the scene was never hit-tested to get there')
+
+  // Reading target is what the hit-test was ever for, so asking still answers - the work is
+  // deferred, not dropped.
+  let target: unknown = null
+  root.on('wheel', (e) => {
+    target = e.target
+  })
+  dispatcher.wheel({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
+  assert(target === shape, 'a handler that asks for target gets exactly what it always got')
+  assert(picks === 1, 'which costs the one hit-test, and only when asked')
+
+  // ...once per event, however many handlers ask.
+  picks = 0
+  root.on('wheel', (e) => {
+    target = e.target
+  })
+  dispatcher.wheel({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
+  assert(picks === 1, 'and once per event however many handlers read it')
+}
+
+// --- ...but a listener further down the tree is picked for eagerly, as it must be ------------
+{
+  resetListenerCensus()
+  const root = new Container('root')
+  const shape = root.addChild(new Rect({ name: 'listening', width: 10, height: 10 }))
+
+  let picks = 0
+  const dispatcher = new SceneInputDispatcher(null, {
+    root,
+    pick: () => {
+      picks++
+      return shape
+    },
+  })
+
+  // Now the hit DOES decide who is called: this handler runs only if the pointer was over
+  // this node. There is nothing to defer - the dispatch path is the answer.
+  let reached = 0
+  shape.on('wheel', () => {
+    reached++
+  })
+  dispatcher.wheel({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
+  assert(reached === 1, 'a wheel listener on a shape hears the event')
+  assert(picks === 1, 'and the hit-test that routed it ran up front, because the route depends on it')
+
+  // A type nobody listens for still costs nothing at all, which is the older guard and stays.
+  picks = 0
+  dispatcher.contextMenu({ pointerId: -1, pointerType: 'mouse' }, { x: 5, y: 5 })
+  assert(picks === 0, 'and a type with no listeners anywhere is not dispatched or picked')
+  resetListenerCensus()
+}
+
 console.log(`[input] self-test passed (${count} assertions)`)

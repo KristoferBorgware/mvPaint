@@ -56,7 +56,7 @@ import { draggedPosition } from './nodeDrag'
 import { MarqueeTool } from './MarqueeTool'
 import { hasListener } from '../events/listenerCensus'
 import { deviceFor, eventNamesFor, type PointerAction, type PointerDevice } from '../events/eventNames'
-import { hasAnyListener, hasHoverListeners } from '../events/listenerCensus'
+import { hasAnyListener, hasHoverListeners, listenerCount } from '../events/listenerCensus'
 import { createNodeEvent, type NodeEventInit } from '../events/NodeEvent'
 
 /** The parts of a raw pointer event this reads. A DOM PointerEvent satisfies it. */
@@ -797,14 +797,11 @@ export class SceneInputDispatcher {
   }
 
   wheel(input: PointerInput, screen: ScreenPoint, raw?: unknown): void {
-    this.dispatchNamed('wheel', this.hitTarget(screen, ['wheel']), { ...this.initFor(input, screen), evt: raw })
+    this.dispatchReported('wheel', screen, { ...this.initFor(input, screen), evt: raw })
   }
 
   contextMenu(input: PointerInput, screen: ScreenPoint, raw?: unknown): void {
-    this.dispatchNamed('contextmenu', this.hitTarget(screen, ['contextmenu']), {
-      ...this.initFor(input, screen),
-      evt: raw,
-    })
+    this.dispatchReported('contextmenu', screen, { ...this.initFor(input, screen), evt: raw })
   }
 
   // --- pointer capture ---
@@ -859,6 +856,49 @@ export class SceneInputDispatcher {
   private hitTarget(screen: ScreenPoint, names: readonly string[]): Node {
     if (!hasAnyListener(names)) return this.root
     return this.effectiveTarget(this.pick(screen.x, screen.y))
+  }
+
+  /**
+   * Whether the ONLY listeners for a type are on the root - in which case the hit-test that
+   * would name the target cannot change who hears the event, because everything bubbles to
+   * the root anyway.
+   *
+   * The census's tally is global and reads high rather than low (a node dropped while still
+   * holding listeners leaves its count behind), so a wrong answer here is always "no", and a
+   * wrong "no" costs a hit-test that turns out not to have been needed. Nothing is ever
+   * skipped that should have run.
+   */
+  private onlyRootListens(name: string): boolean {
+    return listenerCount(name) === this.root.ownListenerCount(name)
+  }
+
+  /**
+   * Dispatch for an event that is REPORTED rather than acted on - wheel and contextmenu,
+   * which the dispatcher forwards and takes no gesture from.
+   *
+   * These are the two dispatches where naming the target is usually pure cost. A wheel
+   * handler on the root - the ordinary way to drive camera zoom - reads the delta and the
+   * screen point and never asks what it was over; naming it means hit-testing the scene,
+   * front to back, on every wheel event, which at a hundred thousand shapes is the whole
+   * frame. And a listener on the ROOT would receive the event whatever was under the cursor,
+   * so the answer cannot change who gets called - only what `event.target` says.
+   *
+   * So when nothing below the root is listening, the event is fired from the root with the
+   * target left as a thunk (see NodeEventInit.targetResolver): a handler that reads
+   * `event.target` gets exactly what it always got, and one that does not pays nothing. With
+   * a listener further down the tree the path genuinely depends on the hit, and this is the
+   * eager dispatch it has always been.
+   */
+  private dispatchReported(name: string, screen: ScreenPoint, init: NodeEventInit): void {
+    if (!hasAnyListener([name])) return
+    if (this.onlyRootListens(name)) {
+      this.dispatchNamed(name, this.root, {
+        ...init,
+        targetResolver: () => this.effectiveTarget(this.pick(screen.x, screen.y)),
+      })
+      return
+    }
+    this.dispatchNamed(name, this.hitTarget(screen, [name]), init)
   }
 
   /** What a release landed on - worth hit-testing for only if a release or click is wanted. */

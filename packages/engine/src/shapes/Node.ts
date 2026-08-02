@@ -712,6 +712,19 @@ export class Node {
     return this
   }
 
+  /**
+   * How many listeners THIS node has for a type - not the subtree, and not the census's
+   * global tally (events/listenerCensus.ts), which counts every node in every scene.
+   *
+   * The two together answer a question worth asking before a hit-test: if a type's global
+   * count equals the root's own, then nothing below the root is listening, and since every
+   * event bubbles to the root, working out which node was hit cannot change who gets called.
+   * See SceneInputDispatcher's dispatchReported.
+   */
+  ownListenerCount(type: string): number {
+    return this.listeners?.get(type)?.length ?? 0
+  }
+
   addEventListener(type: string, handler: NodeEventHandler): this {
     return this.on(type, handler)
   }
