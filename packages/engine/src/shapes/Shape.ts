@@ -82,7 +82,7 @@
 // shape - a blurred shadow cast from the letterforms themselves.
 
 import { AABB } from '../math/AABB'
-import { bumpMeshGeometryEpoch } from './contentEpoch'
+import { bumpMeshGeometryEpoch, bumpObjectRecordEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
 import type { ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
@@ -178,7 +178,15 @@ export abstract class Shape extends Node {
    * miniature - each run is its own object record, so overlapping runs at opacity 0.5 blend
    * against one another. Runs rarely overlap, which is why this is a note and not a blocker.
    */
-  opacity = 1
+  private _opacity = 1
+  get opacity(): number {
+    return this._opacity
+  }
+  set opacity(value: number) {
+    if (value === this._opacity) return
+    this._opacity = value
+    bumpObjectRecordEpoch()
+  }
 
   /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
   pickable = true
@@ -197,7 +205,15 @@ export abstract class Shape extends Node {
    * Set it directly to restack: `shape.zIndex = nextZIndex()` brings it to the front, and any
    * negative value puts it behind everything that took its number from the counter.
    */
-  zIndex = 0
+  private _zIndex = 0
+  get zIndex(): number {
+    return this._zIndex
+  }
+  set zIndex(value: number) {
+    if (value === this._zIndex) return
+    this._zIndex = value
+    bumpObjectRecordEpoch()
+  }
   /**
    * When true the shape is drawn in the overlay pass, after everything else and without
    * writing depth - for editor furniture (selection frames, handles, rubber bands) that
@@ -281,13 +297,38 @@ export abstract class Shape extends Node {
   }
   set fill(value: ColorInput) {
     this.fillValue = parseColor(value)
+    bumpObjectRecordEpoch()
   }
 
   /** Which fill mechanism this shape's fill triangles use. */
-  fillPriority: FillPriority = 'color'
+  private _fillPriority: FillPriority = 'color'
+  get fillPriority(): FillPriority {
+    return this._fillPriority
+  }
+  set fillPriority(value: FillPriority) {
+    if (value === this._fillPriority) return
+    this._fillPriority = value
+    bumpObjectRecordEpoch()
+  }
 
-  fillLinearGradientStartPoint: Point2 = { x: 0, y: 0 }
-  fillLinearGradientEndPoint: Point2 = { x: 0, y: 0 }
+  // Gradient geometry. Assigning a point announces itself; reaching through one to write .x
+  // does not - see contentEpoch.ts, and assign a new object instead.
+  private _fillLinearGradientStartPoint: Point2 = { x: 0, y: 0 }
+  get fillLinearGradientStartPoint(): Point2 {
+    return this._fillLinearGradientStartPoint
+  }
+  set fillLinearGradientStartPoint(value: Point2) {
+    this._fillLinearGradientStartPoint = value
+    bumpObjectRecordEpoch()
+  }
+  private _fillLinearGradientEndPoint: Point2 = { x: 0, y: 0 }
+  get fillLinearGradientEndPoint(): Point2 {
+    return this._fillLinearGradientEndPoint
+  }
+  set fillLinearGradientEndPoint(value: Point2) {
+    this._fillLinearGradientEndPoint = value
+    bumpObjectRecordEpoch()
+  }
   private linearStops: GradientStop[] = []
   /** Linear gradient stops. Each stop's `color` accepts a string as well as the tuple. */
   get fillLinearGradientColorStops(): GradientStop[] {
@@ -295,12 +336,43 @@ export abstract class Shape extends Node {
   }
   set fillLinearGradientColorStops(value: readonly ColorStopInput[]) {
     this.linearStops = parseStops(value)
+    bumpObjectRecordEpoch()
   }
 
-  fillRadialGradientStartPoint: Point2 = { x: 0, y: 0 }
-  fillRadialGradientStartRadius = 0
-  fillRadialGradientEndPoint: Point2 = { x: 0, y: 0 }
-  fillRadialGradientEndRadius = 0
+  private _fillRadialGradientStartPoint: Point2 = { x: 0, y: 0 }
+  get fillRadialGradientStartPoint(): Point2 {
+    return this._fillRadialGradientStartPoint
+  }
+  set fillRadialGradientStartPoint(value: Point2) {
+    this._fillRadialGradientStartPoint = value
+    bumpObjectRecordEpoch()
+  }
+  private _fillRadialGradientStartRadius = 0
+  get fillRadialGradientStartRadius(): number {
+    return this._fillRadialGradientStartRadius
+  }
+  set fillRadialGradientStartRadius(value: number) {
+    if (value === this._fillRadialGradientStartRadius) return
+    this._fillRadialGradientStartRadius = value
+    bumpObjectRecordEpoch()
+  }
+  private _fillRadialGradientEndPoint: Point2 = { x: 0, y: 0 }
+  get fillRadialGradientEndPoint(): Point2 {
+    return this._fillRadialGradientEndPoint
+  }
+  set fillRadialGradientEndPoint(value: Point2) {
+    this._fillRadialGradientEndPoint = value
+    bumpObjectRecordEpoch()
+  }
+  private _fillRadialGradientEndRadius = 0
+  get fillRadialGradientEndRadius(): number {
+    return this._fillRadialGradientEndRadius
+  }
+  set fillRadialGradientEndRadius(value: number) {
+    if (value === this._fillRadialGradientEndRadius) return
+    this._fillRadialGradientEndRadius = value
+    bumpObjectRecordEpoch()
+  }
   private radialStops: GradientStop[] = []
   /** Radial gradient stops. Each stop's `color` accepts a string as well as the tuple. */
   get fillRadialGradientColorStops(): GradientStop[] {
@@ -308,6 +380,7 @@ export abstract class Shape extends Node {
   }
   set fillRadialGradientColorStops(value: readonly ColorStopInput[]) {
     this.radialStops = parseStops(value)
+    bumpObjectRecordEpoch()
   }
 
   private strokeValue: RGBA = [0, 0, 0, 1]
@@ -317,6 +390,7 @@ export abstract class Shape extends Node {
   }
   set stroke(value: ColorInput) {
     this.strokeValue = parseColor(value)
+    bumpObjectRecordEpoch()
   }
   strokeWidth = 0
   lineJoin: LineJoin = 'miter'

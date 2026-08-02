@@ -6,6 +6,7 @@
 // bubbling, so an ancestor can watch a whole subtree with one listener.
 
 import { hasListener } from '../events/listenerCensus'
+import { bumpObjectRecordEpoch } from './contentEpoch'
 import { Node } from './Node'
 
 export class Container extends Node {
@@ -23,6 +24,9 @@ export class Container extends Node {
   addChild<T extends Node>(child: T): T {
     child.parent = this
     this.childNodes.push(child)
+    // A world matrix is a chain, so joining or leaving one changes the whole subtree's -
+    // without any of their own transform fields being touched. See contentEpoch.ts.
+    bumpObjectRecordEpoch()
     // Checked rather than fired unconditionally: populating a large scene is one call per
     // shape, and an event nothing listens for would still walk to the root on every one.
     if (hasListener('add')) this.fire('add', { child }, true)
@@ -34,6 +38,7 @@ export class Container extends Node {
     if (i < 0) return false
     this.childNodes.splice(i, 1)
     child.parent = null
+    bumpObjectRecordEpoch()
     // Fired from the container the child just left, so the event still has somewhere to
     // bubble - the child itself is detached by now and would reach nothing.
     if (hasListener('remove')) this.fire('remove', { child }, true)
@@ -54,6 +59,7 @@ export class Container extends Node {
     }
     for (const child of leaving) child.parent = null
     this.childNodes.length = 0
+    if (leaving.length > 0) bumpObjectRecordEpoch()
     return this
   }
 

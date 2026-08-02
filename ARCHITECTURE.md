@@ -775,6 +775,25 @@ anything.
 Nothing is rebuilt. `localMatrix()` misses its cache, produces a new matrix instance, and next
 frame `updateObjects()` sees a different `model` reference and rewrites that object's record.
 
+These are **accessors, not plain fields**, and that is what makes the previous paragraph
+affordable. Refreshing records used to be O(everything visible) whether or not anything had
+happened: two function calls and a couple of dozen property reads per object, to conclude every
+time that nothing had. At 100k objects that is ~40 ms of a frame spent asking. Each setter now
+bumps the object-record epoch — guarded on the value actually differing, so writing a node's own
+value back (which a `Transformer` does to its handles on every frame it is up) announces
+nothing — and `updateObjects` returns immediately when the epoch has not moved and the visible
+set is the same objects in the same order. Depths need no separate check: they are a function of
+rank and count.
+
+Measured at 100k static objects: **40 ms → 0.6 ms**, the remainder being the membership compare.
+The trade is a ~10% slower `worldMatrix()` (nine getter reads instead of nine field reads in the
+cache check, on a path that now runs far less often) and ~19 ns per changed field on assignment.
+
+**A value assigned is seen; a value edited in place is not.** Assigning
+`shape.fillLinearGradientStartPoint = { x, y }` announces itself; reaching through it to write
+`.x` does not, and neither does editing a colour tuple through a cast. That is the convention
+`Matrix4x4` and the colour tuples already relied on, now with a consequence attached.
+
 **With one exception**, and it is the only one in the engine: a shape with
 `strokeScaleEnabled = false` has its stroke width baked into geometry in a way that depends on
 the world scale, so a scale change *does* rebuild it. See below.
@@ -849,13 +868,22 @@ curve advanced its offset and sat still, with the text lane rebuilding 0 times i
 bump it; the renderer compares one integer per frame. A counter rather than a flag per node is
 what keeps it free when the visible set is in the tens of thousands.
 
+A **third** counter answers a different question: has any per-object *record* changed — a
+transform, a depth, an opacity, a colour? Those are refreshed every frame without touching
+geometry, and the batchers skip a slot whose values are unchanged; but they could only find
+that out by looking, and looking at 100k objects costs **~40 ms** to conclude there was
+nothing to do. So the record-relevant properties announce themselves instead (see below), and
+a frame where nothing announced skips the whole pass.
+
 It over-rebuilds rather than under-rebuilds: any node bumps the whole lane, and a node from
 another scene bumps it just the same. That is the right way round — a needless rebuild is only
 slow, a missed one is wrong — and it fires rarely. Measured across every example scene, the
 only rebuilds are in the one scene that animates its content; the other ten are at zero, with
 frame rates unchanged.
 
-Transforms deliberately bump nothing.
+Transforms bump neither of the two geometry counters — they are re-uploaded from the world
+matrix and never baked into a packed buffer — but they do bump the object-record one, because
+that is exactly what they change.
 
 ### The structure changes — shapes added or removed, or the visible set shifts
 

@@ -41,6 +41,7 @@
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
 import { decompose2D } from '../math/decompose2D'
+import { bumpObjectRecordEpoch } from './contentEpoch'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -143,18 +144,82 @@ export class Node {
 
   // --- transform (see the header for what localMatrix() composes them into) ------------
 
-  x = 0
-  y = 0
-  scaleX = 1
-  scaleY = 1
+  // Accessors rather than plain fields, so a moved node ANNOUNCES itself: the renderer
+  // refreshes per-object records from a counter these bump rather than by asking every
+  // visible object whether it moved (see contentEpoch.ts). Each guards on the value actually
+  // differing, so writing a node's own value back costs nothing - which the transformer does
+  // to its handles on every frame it is up.
+  private _x = 0
+  private _y = 0
+  private _scaleX = 1
+  private _scaleY = 1
+  private _rotation = 0
+  private _offsetX = 0
+  private _offsetY = 0
+  private _skewX = 0
+  private _skewY = 0
+
+  get x(): number {
+    return this._x
+  }
+  set x(value: number) {
+    if (value === this._x) return
+    this._x = value
+    bumpObjectRecordEpoch()
+  }
+  get y(): number {
+    return this._y
+  }
+  set y(value: number) {
+    if (value === this._y) return
+    this._y = value
+    bumpObjectRecordEpoch()
+  }
+  get scaleX(): number {
+    return this._scaleX
+  }
+  set scaleX(value: number) {
+    if (value === this._scaleX) return
+    this._scaleX = value
+    bumpObjectRecordEpoch()
+  }
+  get scaleY(): number {
+    return this._scaleY
+  }
+  set scaleY(value: number) {
+    if (value === this._scaleY) return
+    this._scaleY = value
+    bumpObjectRecordEpoch()
+  }
   /** Radians, about +Z. */
-  rotation = 0
+  get rotation(): number {
+    return this._rotation
+  }
+  set rotation(value: number) {
+    if (value === this._rotation) return
+    this._rotation = value
+    bumpObjectRecordEpoch()
+  }
   /**
    * The node's own pivot, in its local units. Applied FIRST, to the node's own contents,
    * so skew/scale/rotation then act about that point rather than about the local origin.
    */
-  offsetX = 0
-  offsetY = 0
+  get offsetX(): number {
+    return this._offsetX
+  }
+  set offsetX(value: number) {
+    if (value === this._offsetX) return
+    this._offsetX = value
+    bumpObjectRecordEpoch()
+  }
+  get offsetY(): number {
+    return this._offsetY
+  }
+  set offsetY(value: number) {
+    if (value === this._offsetY) return
+    this._offsetY = value
+    bumpObjectRecordEpoch()
+  }
   /**
    * Shear: skewX slides x by `skewX` per unit of y, and skewY slides y by `skewY` per unit
    * of x - so the matrix contributed is [[1, skewX], [skewY, 1]]. Applied between rotation
@@ -162,8 +227,22 @@ export class Node {
    * rotate+skew+scale spans every invertible 2x2, so a transformer can non-uniformly scale
    * a ROTATED node without the result having to be approximated.
    */
-  skewX = 0
-  skewY = 0
+  get skewX(): number {
+    return this._skewX
+  }
+  set skewX(value: number) {
+    if (value === this._skewX) return
+    this._skewX = value
+    bumpObjectRecordEpoch()
+  }
+  get skewY(): number {
+    return this._skewY
+  }
+  set skewY(value: number) {
+    if (value === this._skewY) return
+    this._skewY = value
+    bumpObjectRecordEpoch()
+  }
 
   // Set by destroy(), and never unset - see isDestroyed.
   private destroyed = false

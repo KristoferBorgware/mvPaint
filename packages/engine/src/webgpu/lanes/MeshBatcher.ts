@@ -10,6 +10,8 @@
 // and capacity pooling are a later optimization.
 
 import type { Shape } from '../../shapes/Shape'
+import { objectRecordEpoch } from '../../shapes/contentEpoch'
+import { sameMembers } from '../../render/gather'
 import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,
@@ -199,6 +201,9 @@ export class MeshBatcher {
   private objectF32: Float32Array | null = null
   private objectU32: Uint32Array | null = null
   private objectCache: ObjectCache[] = []
+  // What the last updateObjects() ran against - see the guard at the top of it.
+  private recordEpoch = -1
+  private lastShapes: readonly Shape[] = []
 
   // updateObjects()'s dirty-range upload: two adjacent changed slots within this many
   // objects of each other are merged into one writeBuffer call rather than split into two
@@ -311,6 +316,12 @@ export class MeshBatcher {
     this.objectF32 = new Float32Array(this.objectData)
     this.objectU32 = new Uint32Array(this.objectData)
     this.objectCache = Array.from({ length: this.objectCount }, () => new ObjectCache())
+    // The slot caches just went blank, so the next refresh must actually run however quiet the
+    // scene has been - a geometry-only change (a Circle's radius) rebuilds with the very same
+    // shapes in the very same order, which is exactly the case the fast path above would
+    // otherwise skip, leaving every record unwritten.
+    this.recordEpoch = -1
+    this.lastShapes = []
   }
 
   /**
@@ -327,6 +338,17 @@ export class MeshBatcher {
    * same order it's handing shapes over in.
    */
   updateObjects(shapes: readonly Shape[], depths: readonly number[]): void {
+    // Nothing that lands in a record has changed anywhere in the scene, and the visible set is
+    // the same objects in the same order - so every slot would be compared, matched and
+    // skipped, and the whole pass is provably a no-op. Skipping it is the difference between
+    // 40 ms and nothing at all on a static scene of a hundred thousand objects, which is what
+    // the announcing setters in contentEpoch.ts exist to make knowable. Depths need no
+    // separate check: they are a function of rank and count, so the same objects in the same
+    // order are the same depths.
+    if (this.recordEpoch === objectRecordEpoch() && sameMembers(shapes, this.lastShapes)) return
+    this.recordEpoch = objectRecordEpoch()
+    this.lastShapes = shapes
+
     if (!this.objectBuffer || this.objectCount === 0 || !this.objectData || !this.objectF32 || !this.objectU32) return
     const n = Math.min(this.objectCounts.length, shapes.length)
     const f32 = this.objectF32

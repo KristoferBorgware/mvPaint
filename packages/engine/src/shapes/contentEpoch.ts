@@ -44,3 +44,45 @@ export function meshGeometryEpoch(): number {
 export function textShapingEpoch(): number {
   return textEpochCounter
 }
+
+// --- object records: "did any object's per-frame data change?" ------------------------------
+//
+// The third counter, and the one that answers a different question from the two above. Those
+// say the packed GEOMETRY is stale. This one says a per-object RECORD is - the transform,
+// depth, opacity and paint the batchers refresh every frame without touching geometry at all.
+//
+// It exists because refreshing them was the last thing in the engine that was O(everything
+// visible) whether or not anything had happened. The batchers skip a slot whose values are
+// unchanged, but they could only find that out by looking, and looking at a hundred thousand
+// objects costs about 40 ms: two function calls and a couple of dozen property reads each, to
+// conclude every time that there was nothing to do.
+//
+// So the record-relevant properties announce themselves instead. Every setter that can change
+// what lands in a record bumps this - Node's nine transform fields (a world matrix is a chain,
+// so an ancestor moving is covered by the ancestor's own bump), reparenting, and Shape's
+// opacity, zIndex, fill, stroke, fillPriority and gradient parameters. When the counter has
+// not moved and the visible set is the same objects in the same order, a frame's whole
+// updateObjects pass is provably a no-op and is skipped.
+//
+// A counter rather than per-node flags, for the reason the two above are: the renderer
+// compares one integer instead of one per visible object, and a needless refresh is only slow
+// where a missed one is wrong. The setters guard on the value actually differing, so writing a
+// node's own value back - which the transformer does to its handles every frame - bumps
+// nothing.
+//
+// THE ONE THING TO KNOW: a value assigned is seen; a value edited in place is not.
+// `shape.fillLinearGradientStartPoint = { x, y }` announces itself, while reaching through the
+// property to write `.x` does not, and neither does editing a colour tuple through a cast.
+// That is the same convention Matrix4x4 and the colour tuples already rely on (both are
+// treated as immutable once handed out), now with a consequence attached.
+
+let objectEpochCounter = 0
+
+/** Announces that some object's transform, depth, opacity or paint has changed. */
+export function bumpObjectRecordEpoch(): void {
+  objectEpochCounter++
+}
+
+export function objectRecordEpoch(): number {
+  return objectEpochCounter
+}

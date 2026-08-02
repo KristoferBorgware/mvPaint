@@ -12,7 +12,7 @@ import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
 import { Node } from './Node'
 import { Circle } from './Circle'
-import { meshGeometryEpoch, textShapingEpoch } from './contentEpoch'
+import { meshGeometryEpoch, objectRecordEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
@@ -1410,6 +1410,91 @@ function TWO_PI_PLUS(a: number): number {
   root.addChild(fresh)
   t.update(boxForNodes([fresh], localBoundsOf), 1)
   assert(t.nodes.length === 1, 'and adding it afterwards does not drop it either')
+}
+
+// --- every property that lands in an object record announces itself ---------------------------
+//
+// This is the safety net for the whole per-frame fast path. The renderer skips refreshing
+// object records entirely when this counter has not moved (see contentEpoch.ts), so a
+// property that changes WITHOUT bumping it is not a slow frame - it is a wrong one, drawn
+// from stale data, and nothing else in the engine would ever notice.
+//
+// So: one case per property, each asserting the counter actually moved.
+{
+  const shape = new Rect({ width: 10, height: 10 })
+  const before = () => objectRecordEpoch()
+
+  const announces = (label: string, change: () => void): void => {
+    const was = before()
+    change()
+    assert(objectRecordEpoch() > was, `${label} announces itself`)
+  }
+
+  // The transform, every field of it - a moved node is the commonest reason a record changes.
+  announces('x', () => { shape.x = 5 })
+  announces('y', () => { shape.y = 5 })
+  announces('scaleX', () => { shape.scaleX = 2 })
+  announces('scaleY', () => { shape.scaleY = 2 })
+  announces('rotation', () => { shape.rotation = 1 })
+  announces('offsetX', () => { shape.offsetX = 3 })
+  announces('offsetY', () => { shape.offsetY = 3 })
+  announces('skewX', () => { shape.skewX = 0.2 })
+  announces('skewY', () => { shape.skewY = 0.2 })
+
+  // Depth and transparency.
+  announces('zIndex', () => { shape.zIndex = 1234 })
+  announces('opacity', () => { shape.opacity = 0.5 })
+
+  // Paint, including the forms that go through a parser on the way in.
+  announces('fill', () => { shape.fill = 'tomato' })
+  announces('stroke', () => { shape.stroke = [0, 1, 0, 1] })
+  announces('fillPriority', () => { shape.fillPriority = 'linear-gradient' })
+  announces('fillLinearGradientStartPoint', () => { shape.fillLinearGradientStartPoint = { x: 1, y: 2 } })
+  announces('fillLinearGradientEndPoint', () => { shape.fillLinearGradientEndPoint = { x: 3, y: 4 } })
+  announces('fillLinearGradientColorStops', () => { shape.fillLinearGradientColorStops = [{ offset: 0, color: 'red' }] })
+  announces('fillRadialGradientStartPoint', () => { shape.fillRadialGradientStartPoint = { x: 1, y: 2 } })
+  announces('fillRadialGradientStartRadius', () => { shape.fillRadialGradientStartRadius = 5 })
+  announces('fillRadialGradientEndPoint', () => { shape.fillRadialGradientEndPoint = { x: 3, y: 4 } })
+  announces('fillRadialGradientEndRadius', () => { shape.fillRadialGradientEndRadius = 9 })
+  announces('fillRadialGradientColorStops', () => { shape.fillRadialGradientColorStops = [{ offset: 1, color: 'blue' }] })
+
+  // A world matrix is a chain, so joining or leaving one changes a record without any of the
+  // node's own fields being touched.
+  const parent = new Container('holder')
+  announces('addChild', () => { parent.addChild(shape) })
+  announces('removeChild', () => { parent.removeChild(shape) })
+  announces('removeChildren', () => { parent.addChild(new Rect()); parent.removeChildren() })
+
+  // An ancestor moving reaches every descendant's world matrix - covered because the ancestor
+  // announces its own move, which is the whole reason this is one counter and not a flag per
+  // node.
+  const outer = new Group({ name: 'outer' })
+  outer.addChild(parent)
+  announces("an ancestor's transform", () => { outer.x = 40 })
+}
+
+// --- ...and writing the same value back announces nothing -------------------------------------
+//
+// The guard that makes this affordable. A Transformer rewrites its handles' positions on every
+// frame it is up, and an animation that has settled keeps assigning the value it settled on;
+// without this, either would bump the counter every frame and the fast path would never be
+// taken by any scene with something selected.
+{
+  const shape = new Rect({ x: 7, y: 8, width: 10, height: 10, fill: 'teal', opacity: 0.4 })
+  const was = objectRecordEpoch()
+  shape.x = 7
+  shape.y = 8
+  shape.scaleX = 1
+  shape.rotation = 0
+  shape.opacity = 0.4
+  shape.zIndex = shape.zIndex
+  shape.fillPriority = 'color'
+  assert(objectRecordEpoch() === was, 'writing a value back unchanged announces nothing')
+
+  // A colour goes through the parser, so it is a fresh tuple every time and cannot be compared
+  // that way - assigning one always announces, which is the safe direction.
+  shape.fill = 'teal'
+  assert(objectRecordEpoch() > was, 'a re-assigned colour announces, since a parsed tuple is always new')
 }
 
 console.log(`[shapes] self-test passed (${count} assertions)`)

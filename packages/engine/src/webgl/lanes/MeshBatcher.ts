@@ -17,6 +17,8 @@
 // would be two to keep correct.
 
 import type { Shape } from '../../shapes/Shape'
+import { objectRecordEpoch } from '../../shapes/contentEpoch'
+import { sameMembers } from '../../render/gather'
 import { ObjectCache } from '../../webgpu/lanes/MeshBatcher'
 import {
   FILL_TYPE_CODE,
@@ -64,6 +66,9 @@ export class GlMeshBatcher {
   /** Where each shape's indices end, so a contiguous run of shapes can be drawn alone. */
   private indexEnds: number[] = []
   private objectCache: ObjectCache[] = []
+  // What the last updateObjects() ran against - see the guard at the top of it.
+  private recordEpoch = -1
+  private lastShapes: readonly Shape[] = []
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
@@ -145,6 +150,12 @@ export class GlMeshBatcher {
     // anything - the cache is rebuilt from scratch alongside the texture.
     this.objects.allocate(this.objectCount)
     this.objectCache = Array.from({ length: this.objectCount }, () => new ObjectCache())
+    // The slot caches just went blank, so the next refresh must actually run however quiet the
+    // scene has been - a geometry-only change (a Circle's radius) rebuilds with the very same
+    // shapes in the very same order, which is exactly the case the fast path above would
+    // otherwise skip, leaving every record unwritten.
+    this.recordEpoch = -1
+    this.lastShapes = []
   }
 
   /**
@@ -153,6 +164,17 @@ export class GlMeshBatcher {
    * rows holding slots that did change are uploaded.
    */
   updateObjects(shapes: readonly Shape[], depths: readonly number[]): void {
+    // Nothing that lands in a record has changed anywhere in the scene, and the visible set is
+    // the same objects in the same order - so every slot would be compared, matched and
+    // skipped, and the whole pass is provably a no-op. Skipping it is the difference between
+    // 40 ms and nothing at all on a static scene of a hundred thousand objects, which is what
+    // the announcing setters in contentEpoch.ts exist to make knowable. Depths need no
+    // separate check: they are a function of rank and count, so the same objects in the same
+    // order are the same depths.
+    if (this.recordEpoch === objectRecordEpoch() && sameMembers(shapes, this.lastShapes)) return
+    this.recordEpoch = objectRecordEpoch()
+    this.lastShapes = shapes
+
     if (this.objectCount === 0) return
     const f32 = this.objects.data
     const n = Math.min(this.objectCounts.length, shapes.length)

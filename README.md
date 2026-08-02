@@ -54,7 +54,7 @@ at any zoom. The design targets three things that are awkward in a 2D canvas API
 
 - **Scale.** 100,000 shapes render in a single draw call. Geometry is tessellated once on the
   CPU into shared buffers; per-frame work is a transform refresh, uploaded only for the objects
-  that actually changed.
+  that actually changed — and skipped entirely, on one integer compare, when nothing did.
 - **Correct transparency.** Alpha blending is order-dependent and the depth test is not, so the
   frame is drawn in two passes — provably-opaque objects first, batched and writing depth, then
   everything translucent strictly back-to-front, testing depth but never writing it. A
@@ -267,7 +267,7 @@ packages/engine        the renderer - no demo content, no framework
 packages/example-app   a React host for the demo scenes; the engine needs neither
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,863 assertions
+Each engine subdirectory carries a `selfTest.ts` covering its pure half — 1,891 assertions
 across eleven suites, run under plain Node with no GPU. Anything needing a GPU or a DOM is
 verified in a browser instead.
 
