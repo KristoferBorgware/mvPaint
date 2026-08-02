@@ -9,6 +9,18 @@ is the drawing layer for a canvas-style application: a diagram editor, a design 
 whiteboard, a document viewer. It is not a game engine and not a React renderer; it owns
 pixels, and nothing above them.
 
+Starting one takes two arguments, both optional — where to draw, and what a pointer means:
+
+```ts
+// Selection, dragging, resize/rotate, marquee, pan, pinch, wheel and keyboard, wired up.
+const handle = await createSceneRenderer('#board', { input: 'editor' })
+handle.scene.root.addChild(new Rect({ width: 260, height: 140, cornerRadius: 12, fill: 'tomato' }))
+```
+
+That is the whole of the setup. Pass a canvas instead of a selector, or nothing at all;
+ask for `'view'` (camera only) or leave `input` out for a static render. See
+[Setup](#setup).
+
 **[Live examples →](https://kristoferborgware.github.io/mvPaint/)**
 
 ---
@@ -315,6 +327,8 @@ packages/engine        the renderer - no demo content, no framework
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
   src/text/            MSDF metrics + atlas, the shaper, outline glyph extraction
+  src/input/           the pointer dispatcher, and the 'view'/'editor' bindings over it
+  src/renderer/        choosing a render path, and finding or building the canvas
   src/webgpu/          SceneRenderer: the gather, the passes, createSceneRenderer()
   scripts/             offline font → MSDF atlas generation (npm run gen:fonts)
 packages/example-app   a React host for the demo scenes; the engine needs neither
