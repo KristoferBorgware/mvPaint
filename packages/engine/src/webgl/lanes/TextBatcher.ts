@@ -38,7 +38,7 @@ import {
   TEXT_VERTEX_FLOATS,
   TEXT_VERTEX_STRIDE,
 } from '../../render/textFormat'
-import { ObjectTexture } from '../ObjectTexture'
+import { GlObjectTexture } from '../ObjectTexture'
 import type { GlProgram } from '../programs'
 import type { GlFontBook } from '../FontBook'
 
@@ -49,7 +49,7 @@ interface ObjectRecord {
 
 export class GlTextBatcher {
   private readonly gl: WebGL2RenderingContext
-  private readonly objects: ObjectTexture
+  private readonly objects: GlObjectTexture
 
   private vao: WebGLVertexArrayObject | null = null
   private vertexBuffer: WebGLBuffer | null = null
@@ -61,7 +61,7 @@ export class GlTextBatcher {
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
-    this.objects = new ObjectTexture(gl, TEXT_OBJECT_STRIDE, 'text-objects')
+    this.objects = new GlObjectTexture(gl, TEXT_OBJECT_STRIDE, 'text-objects')
   }
 
   /** Shape all Text nodes into the shared buffers, one object record per run. */

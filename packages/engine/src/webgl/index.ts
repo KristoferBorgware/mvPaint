@@ -20,6 +20,15 @@
 //
 // All four lanes - mesh, text, image and shadow - are implemented, and nothing is missing
 // relative to WebGPU but headroom.
+//
+// NAMING. Every class in this directory is prefixed Gl - GlSceneRenderer, GlMeshBatcher,
+// GlShadowAtlas, GlObjectTexture - while its WebGPU counterpart wears the bare name. The two
+// paths are deliberate near-copies with the same file names and the same shapes, so a symbol
+// on its own in an import list, a stack trace or a profile has to say which half of the engine
+// it belongs to. The prefix is that, and it is also what lets a test import both at once. File
+// names are NOT prefixed: they mirror the WebGPU path's, which is what makes the two directory
+// listings comparable side by side. Module-private types (Entry, DrawRange) stay bare - they
+// cannot be confused with anything, because they cannot be reached.
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'

@@ -23,7 +23,7 @@ import {
   IMAGE_VERTEX_STRIDE,
 } from '../../render/imageFormat'
 import { GlImageTexture } from '../ImageTexture'
-import { ObjectTexture } from '../ObjectTexture'
+import { GlObjectTexture } from '../ObjectTexture'
 import type { GlProgram } from '../programs'
 
 /** A stretch of indices sharing one texture and one sampler state. */
@@ -57,7 +57,7 @@ function glTextureOf(image: Image): GlImageTexture {
 
 export class GlImageBatcher {
   private readonly gl: WebGL2RenderingContext
-  private readonly objects: ObjectTexture
+  private readonly objects: GlObjectTexture
 
   private vao: WebGLVertexArrayObject | null = null
   private vertexBuffer: WebGLBuffer | null = null
@@ -70,7 +70,7 @@ export class GlImageBatcher {
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
-    this.objects = new ObjectTexture(gl, IMAGE_OBJECT_STRIDE, 'image-objects')
+    this.objects = new GlObjectTexture(gl, IMAGE_OBJECT_STRIDE, 'image-objects')
   }
 
   /** Rebuild every quad. Only needed when the SET of images, or one's UVs, change. */

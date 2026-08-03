@@ -42,7 +42,7 @@ import {
   type GradientStop,
   type MeshSink,
 } from '../../render/meshFormat'
-import { ObjectTexture } from '../ObjectTexture'
+import { GlObjectTexture } from '../ObjectTexture'
 import type { GlProgram } from '../programs'
 
 const EMPTY_STOPS: readonly GradientStop[] = []
@@ -53,7 +53,7 @@ const MAX_DIRTY_RANGES = 512
 
 export class GlMeshBatcher {
   private readonly gl: WebGL2RenderingContext
-  private readonly objects: ObjectTexture
+  private readonly objects: GlObjectTexture
 
   private vao: WebGLVertexArrayObject | null = null
   private vertexBuffer: WebGLBuffer | null = null
@@ -72,7 +72,7 @@ export class GlMeshBatcher {
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
-    this.objects = new ObjectTexture(gl, OBJECT_STRIDE, 'mesh-objects')
+    this.objects = new GlObjectTexture(gl, OBJECT_STRIDE, 'mesh-objects')
   }
 
   /** Re-tessellate every shape into the shared buffers and upload. Rare, and expensive. */

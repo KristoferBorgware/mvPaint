@@ -20,7 +20,7 @@ import {
   SHADOW_VERTEX_FLOATS,
   SHADOW_VERTEX_STRIDE,
 } from '../../render/shadowFormat'
-import { ObjectTexture } from '../ObjectTexture'
+import { GlObjectTexture } from '../ObjectTexture'
 import type { GlProgram } from '../programs'
 import type { GlShadowAtlas } from '../ShadowAtlas'
 
@@ -33,7 +33,7 @@ const CORNERS: readonly [number, number][] = [
 
 export class GlShadowBatcher {
   private readonly gl: WebGL2RenderingContext
-  private readonly objects: ObjectTexture
+  private readonly objects: GlObjectTexture
 
   private vao: WebGLVertexArrayObject | null = null
   private vertexBuffer: WebGLBuffer | null = null
@@ -42,7 +42,7 @@ export class GlShadowBatcher {
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
-    this.objects = new ObjectTexture(gl, SHADOW_OBJECT_STRIDE, 'shadow-objects')
+    this.objects = new GlObjectTexture(gl, SHADOW_OBJECT_STRIDE, 'shadow-objects')
   }
 
   /** The casters currently packed - the renderer compares this to decide on a rebuild. */

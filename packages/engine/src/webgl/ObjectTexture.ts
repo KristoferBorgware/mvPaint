@@ -31,7 +31,7 @@
 /** Texels per record - every record stride in this engine is a multiple of 16 bytes. */
 export function recordTexels(strideBytes: number): number {
   if (strideBytes % 16 !== 0) {
-    throw new Error(`ObjectTexture: a ${strideBytes}-byte record is not a whole number of RGBA32F texels`)
+    throw new Error(`GlObjectTexture: a ${strideBytes}-byte record is not a whole number of RGBA32F texels`)
   }
   return strideBytes / 16
 }
@@ -67,7 +67,7 @@ export function rowRangeFor(start: number, end: number, texelsPerRecord: number)
  * One lane's object records on the GPU: the staging floats the lane writes into, and the
  * texture they upload to.
  */
-export class ObjectTexture {
+export class GlObjectTexture {
   readonly texelsPerRecord: number
   /** Row-major RGBA32F texels, padded to whole rows. The lane writes records into this. */
   data: Float32Array
