@@ -532,9 +532,9 @@ export abstract class Shape extends Node {
   }
 
   /**
-   * Whether this shape casts a shadow at all - the same test the canvas library uses:
-   * enabled, not fully transparent, and at least one shadow field actually set (a shadow
-   * with no blur and no offset would sit exactly behind the shape and never be seen).
+   * Whether this shape casts a shadow at all: enabled, not fully transparent, and at
+   * least one shadow field actually set (a shadow with no blur and no offset would sit
+   * exactly behind the shape and never be seen).
    */
   hasShadow(): boolean {
     return (
