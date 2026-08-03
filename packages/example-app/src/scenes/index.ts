@@ -30,49 +30,49 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'shapes',
     title: 'Shapes & gradients',
     description:
-      'Rects, a circle and an open polyline: linear and radial gradient fills in local space, stroke joins and caps, corner rounding (uniform, per-corner, and scaled down to fit), and two shapes spinning about their own centres.',
+      'Mesh-lane basics on Rect, Circle and Polyline: linear and radial gradient fills in local space, stroke joins and caps, corner rounding, and per-frame rotation about a pivot moved with offsetX/offsetY.',
     build: buildShapesScene,
   },
   {
     id: 'custom-shapes',
     title: 'Custom shapes',
     description:
-      'Five shapes the engine knows nothing about, each a class in the scene file that draws its own contour into a path-building context - moveTo/lineTo/curves/arcs, then fill and stroke. A star and a heart from a description and nothing else; one continuous route whose legs each carry their own colour and width; a gear with a bore through it, wearing a gradient and a shadow it never asks for; and a wave whose outline really does change, which is the one that has to say so. All of them are picked on the real outline and stacked with everything else.',
+      'CustomShape subclasses defined in the scene file: each describes its contour into a ShapeContext (moveTo/lineTo/curves/arcs) and gets fills, strokes, per-segment stroke styling, holes, gradients, shadows, outline-accurate picking and bounds from the base class. The wave rebuilds its outline per frame and calls markGeometryDirty(); the rest describe once.',
     build: buildCustomShapeScene,
   },
   {
     id: 'stroke-scale',
     title: 'Stroke and scale',
     description:
-      "Two readings of what a stroke width means, paired under the same transforms. By default a stroke is a local measurement like any other coordinate, so scaling a shape scales its outline and the whole thing zooms as one picture; strokeScaleEnabled: false holds the outline at the width it was given, which is what a keyline or a selection frame means. The same star at three scales, a pair inside a group scaled by 2.2 (neither was scaled itself - what is measured is the world transform), an animated pair showing what a live resize costs, and a shape stretched 4:1, where a fixed outline is even the whole way round because the ribbon is built through the transform rather than divided by a factor. Alongside them, the other question about a width: strokeAlign puts the same 16-wide stroke inside, across or outside the same outline, and the printed size under each is the node's own measurement changing with it.",
+      'strokeWidth under transforms. By default the width is a local-space measurement and scales with the node; strokeScaleEnabled: false builds the ribbon through the world transform instead, so the outline holds its width under group scale, animated scale and non-uniform scale alike. The right-hand row is the other axis: strokeAlign inside/center/outside, with the node bounds printed underneath, since moving the ribbon changes what the node measures.',
     build: buildStrokeScaleScene,
   },
   {
     id: 'groups',
     title: 'Groups',
     description:
-      'Containers that place themselves and are sized by what they hold: one assembly under three different group transforms, a group of groups, a group whose extent follows its orbiting contents, visibility governing a whole subtree, and a group whose parts are deliberately still grabbed on their own. Click any part to select the whole assembly.',
+      'Group: a transform container whose extent is derived from its children. Covers the group transform reaching a subtree, nesting, extent tracking animated contents, visible gating a subtree, and draggable: false opting a group out so its parts are grabbed individually. Otherwise, click any part to select the whole assembly.',
     build: buildGroupScene,
   },
   {
     id: 'layers',
     title: 'Layers',
     description:
-      "Optional containers with one enabled switch - and none of a group's other opinions. Three layers of one picture, each switching its slice off in one assignment; two layers whose cards interleave by zIndex, because a layer is not a canvas and contributes no ordering; the same four blocks in a group and in a layer, so a click shows the difference; and a layer sliding its contents while a shape inside keeps its own visible through the switch.",
+      "Layer: a transform container with an enabled switch, without the picking and bounds aggregation a Group adds. It is not a render target and contributes no ordering - the scene draws in one pass and zIndex sorts scene-wide, so two layers interleave. enabled gates the subtree without touching a node's own visible. Click the paired group/layer blocks to compare hit testing.",
     build: buildLayerScene,
   },
   {
     id: 'text',
     title: 'MSDF text',
     description:
-      'Four Inter styles, mixed sizes, per-letter outlines, decorations, gradient and highlighted runs, wrapping and justification, RTL and vertical flow.',
+      'Text lane: four vertices per glyph sampling a shared MSDF atlas. Four Inter styles from one atlas array, per-run styling within a single node (size, colour, gradient, outline, highlight, decorations, baseline shift), wrapping, alignment and justification, RTL and vertical flow.',
     build: buildTextScene,
   },
   {
     id: 'vector-text',
     title: 'Outline text',
     description:
-      'The same runs and shaping drawn as tessellated glyph outlines through the mesh lane instead of an MSDF atlas - with real blurred shadows and per-glyph picking. Outlines come from the polygon atlases, generated offline; the engine needs no font parser to read them. Fetches them on first open.',
+      'VectorText: glyph outlines tessellated into the mesh lane rather than sampled from an MSDF atlas. Same shaper as the Text lane, so runs and block layout match; what only this path gives you is a real blurred shadow cast from the letterforms and glyph-accurate hit testing. Outlines come from polygon atlases generated offline (~200 kB, fetched on first open), which is why the engine ships no font parser.',
     prepare: prepareVectorTextScene,
     build: buildVectorTextScene,
   },
@@ -80,7 +80,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'runtime-ttf',
     title: 'Runtime TTF',
     description:
-      'The same outline text, from a font file parsed in the browser instead of a generated atlas - the opt-in @mvpaint/ttf package, which lives outside the engine so only an application that needs an unknown font downloads a parser. Characters outside the atlases\u2019 charset draw here and nowhere else.',
+      'The same VectorText nodes, outlines parsed from a TTF at runtime by @mvpaint/ttf. The package sits outside the engine and satisfies the VectorFonts interface, so nothing downstream of the shaper knows the source and an app that never imports it never ships a parser. Use this path for glyphs outside the prebuilt atlases\u2019 charset.',
     prepare: prepareRuntimeTtfScene,
     build: buildRuntimeTtfScene,
   },
@@ -88,7 +88,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'text-path',
     title: 'Text on a path',
     description:
-      'A curve drives the layout: text around a badge, along an arc, and following SVG path data, with rules and highlights bending too, more than one line becoming concentric rings, and the same curve applied to outline glyphs.',
+      'Path-driven layout: the curve supplies each glyph a position and a rotation. Circles, arcs and raw SVG path data as the driving curve, decorations and highlights following it, multi-line runs becoming concentric rings. It is a shaping option, so it applies to Text and VectorText alike.',
     prepare: prepareTextPathScene,
     build: buildTextPathScene,
   },
@@ -96,7 +96,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'images',
     title: 'Images',
     description:
-      'Textured quads through the image lane: cropping a sprite out of a sheet, cover-fitting a frame, tiling with a repeating or mirrored wrap, flipping, tinting, nearest-neighbour pixel art, a cast shadow, stacking against ordinary shapes, and an inline SVG rasterized at two different resolutions.',
+      'Image lane: one textured quad per node. Source-rect cropping, cover fit, repeat and mirrored wrap, flips, tint, nearest-neighbour filtering, a cast shadow, and zIndex interleaving with mesh and text. Textures are built in the scene through images.fromPixels() and images.fromSvg(); the scene owns them and releases them in dispose().',
     prepare: prepareImageScene,
     build: buildImageScene,
   },
@@ -104,49 +104,49 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'transparency',
     title: 'Transparency across lanes',
     description:
-      'Translucent objects stacked within one lane and across two. The top row is the control - overlapping translucent mesh shapes, text and images, each blending against its own kind. The middle row puts the same pair in two lanes and stacks it both ways round, so any difference between the two halves is the lanes\' doing - and there should be none. The bottom row is shadows, including one under an image with real holes in it. In every cell the back object is opaque and the front one is translucent, so the back object should show through.',
+      'Straight-alpha blending within a lane and across lanes. Top row is the control (mesh, text, image blending against their own kind); the middle row mirrors each cross-lane pair by zIndex, so any difference between halves is lane-dependent and there should be none; the bottom row is shadows. Back object opaque, front translucent in every cell. The failure mode being checked for is a translucent fragment writing depth and rejecting what is behind it.',
     build: buildTransparencyScene,
   },
   {
     id: 'colors',
     title: 'Colour forms',
     description:
-      'Every way a colour can be written, each one paired with the same colour as the [r, g, b, a] tuple it should parse to - hex in all four lengths, rgb()/rgba() and hsl()/hsla() in both syntaxes with numbers or percentages, hues in turns/degrees/radians, the keywords, and transparent. A parser that got a form wrong would show as a visible seam between a pair. Below them, a colour string in each of the other places one goes: a stroke, a shadow, gradient stops, and text with a highlight and shadow.',
+      'Colour parsing, each accepted string form drawn next to the [r, g, b, a] tuple it should resolve to: hex in all four lengths, rgb()/rgba() and hsl()/hsla() in legacy and space-separated syntax, numbers or percentages, hue in deg/rad/turn, keywords, transparent. A parse error shows as a seam between two touching swatches rather than a number in a log. Below, the same strings in the other ColorInput positions - stroke, shadow, gradient stop, text fill and highlight.',
     build: buildColorScene,
   },
   {
     id: 'opacity',
     title: 'Object opacity',
     description:
-      "One number that fades a whole object, kept out of its colours - what an editor's opacity slider drives and what an animation fades, rather than something baked into every fill and stroke. The ramp, how it multiplies with a colour that is already translucent, mesh/text/shadow all obeying the same property, and a row animating it. Everything sits over bars, because transparency you cannot see through is just a paler colour.",
+      'node.opacity: a per-object multiplier applied at draw time rather than baked into fill and stroke colours, so a fade never has to read back and restore the colours it touched. The ramp, composition with an already-translucent colour, mesh/text/shadow all honouring the same property, and an animated row. Drawn over bars so the compositing is actually visible.',
     build: buildOpacityScene,
   },
   {
     id: 'shadows',
     title: 'Shadows',
     description:
-      'Canvas-style blur, offset and spread, fill-only shadows, and overlapping cards showing shadows stack against other shapes rather than flattening into one layer.',
+      'Canvas-style shadow parameters walked one at a time - blur, offset, spread, fill-only - plus stacking. Silhouettes are baked into a shared atlas and drawn as quads, so a shadow resolves against surrounding geometry per-pixel through the depth test instead of flattening into one layer behind everything.',
     build: buildShadowScene,
   },
   {
     id: 'svg',
     title: 'SVG document',
     description:
-      'A whole SVG parsed into Path nodes: a gradient-filled ring with a hole, a radial-filled stroked circle, and a stroked open curve.',
+      'loadSvgDocument() turning a document into Path nodes under one container: an even-odd hole, linear and radial gradient fills, and a stroked open curve - so the loader and the tessellation/stroke geometry are exercised together. rootMatrix flips y, since SVG is y-down and the scene is y-up.',
     build: buildSvgScene,
   },
   {
     id: 'zindex',
     title: 'Stacking order',
     description:
-      'The rule - a shape made later is in front, because each takes the next number from a running counter as its zIndex - and every way there is to say otherwise. Six panels: the default with nothing set; a Text and a mesh shape obeying it despite drawing through different pipelines; one assignment lifting a shape over another; a card taking its turn on top through nextZIndex(); a panel made last and still behind everything on a negative; and one slotted between two others at their midpoint, since a zIndex is a number rather than an integer.',
+      'Default order is creation order: every node takes the next value off a running counter as its zIndex. Six panels - the default, the same rule holding across lanes (Text vs mesh), and the four overrides: assignment relative to another node, nextZIndex() to bring to front, a negative value the counter can never reach, and the midpoint of two neighbours, since zIndex is a float.',
     build: buildZIndexScene,
   },
   {
     id: 'shape-stress',
     title: 'Shape stress test',
     description:
-      '100000 rects, circles, polygons and stars scattered randomly - size, rotation and colour vary, but every shape is a solid opaque fill with no stroke, and deliberately no shadows. Viewport culling is off, so every shape draws regardless of zoom/pan, and the zIndex depth-sort is off too (each shape is made and added in one step, so traversal order already is the stacking order). Reload scene for a fresh layout.',
+      'Mesh-lane throughput: 100000 rects, circles, polygons and stars, every one a flat opaque fill with no stroke, alpha or gradient, so what is measured is vertex and fill-rate cost without per-object material branching. The registry flags disableCulling, disableZSort and disableShadows are all set - traversal order already is stacking order here, and nothing casts. The layout is unseeded, so Reload scene reshuffles it. Zoom out for the whole field.',
     disableCulling: true,
     disableZSort: true,
     disableShadows: true,
@@ -156,14 +156,14 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'stress',
     title: 'Shadow stress test',
     description:
-      'Over a thousand independently shadowed, drifting shapes - every shadow cached in the shared atlas and drawn in a single call. Zoom out to see the whole field.',
+      'Roughly 1300 drifting shapes, each with its own blur radius and therefore its own baked silhouette. The whole field draws from the shadow atlas in one call and re-bakes nothing while animating - the drift only moves quads. The silhouettes overflow a 4096-texel atlas, so loading also exercises grow-and-repack. Culling stays on; zoom out for the whole grid.',
     build: buildStressScene,
   },
   {
     id: 'msdf-text-stress',
     title: 'MSDF text stress test',
     description:
-      'Twenty A4 pages of randomly styled lorem ipsum, filled to the foot of each sheet, one Text node per paragraph. Regular, bold, italic and bold-italic share one atlas array, so the whole wall of text is a single draw call however finely the styles alternate. Same words and styling as the outline-text stress test, for a direct cost comparison. Viewport culling is off, so every paragraph draws regardless of zoom/pan - zoom out to see all twenty pages.',
+      'Twenty A4 pages of randomly styled lorem ipsum, one Text node per paragraph. Regular, bold, italic and bold-italic share one atlas array, so the wall batches into a single draw call however finely the styles alternate. Same words and styling as the outline-text stress test, for a like-for-like cost comparison. disableCulling is set, so every paragraph reaches the batcher - zoom out for all twenty pages.',
     disableCulling: true,
     build: buildMsdfStressScene,
   },
@@ -171,7 +171,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'vector-text-stress',
     title: 'Outline text stress test',
     description:
-      'The identical twenty pages as the MSDF stress test, rendered as tessellated glyph outlines instead - tens of thousands of real triangles per page rather than four vertices per glyph. Viewport culling is off, same as the MSDF version. Fetches the glyph atlases on first open.',
+      'The identical twenty pages through VectorText: tens of thousands of triangles per page instead of four vertices per glyph. First build is a CPU tessellation stress test as well as a GPU one; nothing re-tessellates while idle. disableCulling is set, same as the MSDF version. Fetches the glyph atlases on first open.',
     disableCulling: true,
     prepare: prepareVectorTextStressScene,
     build: buildVectorTextStressScene,
