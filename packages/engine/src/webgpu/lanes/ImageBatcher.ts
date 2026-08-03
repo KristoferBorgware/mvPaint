@@ -17,7 +17,7 @@
 
 import type { Image } from '../../shapes/Image'
 import type { ImageSampling } from '../../image/ImageTexture'
-import { WebGpuImageTexture } from '../ImageTexture'
+import { GpuImageTexture } from '../ImageTexture'
 import {
   IMAGE_OBJECT_DEPTH_OFFSET,
   IMAGE_OBJECT_OPACITY_OFFSET,
@@ -29,7 +29,7 @@ import {
 
 /** A stretch of indices sharing one texture + sampler bind group. */
 interface DrawRange {
-  texture: WebGpuImageTexture
+  texture: GpuImageTexture
   sampling: ImageSampling
   firstIndex: number
   indexCount: number
@@ -43,9 +43,9 @@ interface DrawRange {
  * path and draw it on the other, and "your image is blank" is a far worse way to find that
  * out than a sentence saying so.
  */
-function webGpuTextureOf(image: Image): WebGpuImageTexture {
+function gpuTextureOf(image: Image): GpuImageTexture {
   const texture = image.texture
-  if (!(texture instanceof WebGpuImageTexture)) {
+  if (!(texture instanceof GpuImageTexture)) {
     throw new Error(
       `ImageBatcher: "${image.name || image.nodeName}" carries an image texture built for a different render path`,
     )
@@ -121,7 +121,7 @@ export class ImageBatcher {
       vertexCount += 4
 
       const sampling: ImageSampling = { wrapX: image.wrapX, wrapY: image.wrapY, filter: image.filter }
-      const texture = webGpuTextureOf(image)
+      const texture = gpuTextureOf(image)
       const last = this.ranges[this.ranges.length - 1]
       if (last && last.texture === texture && sameSampling(last.sampling, sampling)) {
         last.indexCount += 6

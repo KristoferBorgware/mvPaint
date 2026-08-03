@@ -1,4 +1,4 @@
-// WebGpuImageTexture - one decoded image as a GPUTexture, plus the bind groups the WebGPU
+// GpuImageTexture - one decoded image as a GPUTexture, plus the bind groups the WebGPU
 // image lane binds it through.
 //
 // A texture drawn clamped and the same texture drawn tiled are two bind groups over one
@@ -33,11 +33,11 @@ const ADDRESS_MODE: Record<ImageWrap, GPUAddressMode> = {
 }
 
 /** WebGPU-only extra: reuse a bind group layout instead of creating one per texture. */
-export interface WebGpuSvgRasterOptions extends SvgRasterOptions {
+export interface GpuSvgRasterOptions extends SvgRasterOptions {
   layout?: GPUBindGroupLayout
 }
 
-export class WebGpuImageTexture implements ImageTexture {
+export class GpuImageTexture implements ImageTexture {
   readonly width: number
   readonly height: number
 
@@ -61,18 +61,18 @@ export class WebGpuImageTexture implements ImageTexture {
    * blob directly, and a document has no one right pixel size anyway. Call fromSvg() when
    * the size or scale should be yours to choose.
    */
-  static async load(device: GPUDevice, url: string, layout = createAtlasBindGroupLayout(device)): Promise<WebGpuImageTexture> {
+  static async load(device: GPUDevice, url: string, layout = createAtlasBindGroupLayout(device)): Promise<GpuImageTexture> {
     const response = await fetch(url)
-    if (!response.ok) throw new Error(`WebGpuImageTexture.load: ${url} responded ${response.status}`)
+    if (!response.ok) throw new Error(`GpuImageTexture.load: ${url} responded ${response.status}`)
 
     const contentType = response.headers.get('content-type') ?? ''
     if (isSvgSource(url, contentType)) {
-      return WebGpuImageTexture.fromSvg(device, await response.text(), { layout, label: url })
+      return GpuImageTexture.fromSvg(device, await response.text(), { layout, label: url })
     }
 
     const bitmap = await createImageBitmap(await response.blob())
     try {
-      return WebGpuImageTexture.fromSource(device, bitmap, layout, url)
+      return GpuImageTexture.fromSource(device, bitmap, layout, url)
     } finally {
       bitmap.close()
     }
@@ -92,7 +92,7 @@ export class WebGpuImageTexture implements ImageTexture {
     source: ImageBitmap | HTMLCanvasElement | OffscreenCanvas,
     layout = createAtlasBindGroupLayout(device),
     label = 'image',
-  ): WebGpuImageTexture {
+  ): GpuImageTexture {
     const width = source.width
     const height = source.height
     const texture = device.createTexture({
@@ -102,7 +102,7 @@ export class WebGpuImageTexture implements ImageTexture {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
     })
     device.queue.copyExternalImageToTexture({ source }, { texture }, [width, height])
-    return new WebGpuImageTexture(device, layout, texture, width, height)
+    return new GpuImageTexture(device, layout, texture, width, height)
   }
 
   /**
@@ -125,11 +125,11 @@ export class WebGpuImageTexture implements ImageTexture {
     height: number,
     layout = createAtlasBindGroupLayout(device),
     label = 'pixels',
-  ): WebGpuImageTexture {
-    if (width <= 0 || height <= 0) throw new Error(`WebGpuImageTexture.fromPixels: ${width}x${height} has no area`)
+  ): GpuImageTexture {
+    if (width <= 0 || height <= 0) throw new Error(`GpuImageTexture.fromPixels: ${width}x${height} has no area`)
     const needed = width * height * 4
     if (pixels.length < needed) {
-      throw new Error(`WebGpuImageTexture.fromPixels: ${pixels.length} bytes for a ${width}x${height} RGBA image, need ${needed}`)
+      throw new Error(`GpuImageTexture.fromPixels: ${pixels.length} bytes for a ${width}x${height} RGBA image, need ${needed}`)
     }
 
     const texture = device.createTexture({
@@ -149,7 +149,7 @@ export class WebGpuImageTexture implements ImageTexture {
     }
     device.queue.writeTexture({ texture }, data, { bytesPerRow: paddedRow, rowsPerImage: height }, [width, height])
 
-    return new WebGpuImageTexture(device, layout, texture, width, height)
+    return new GpuImageTexture(device, layout, texture, width, height)
   }
 
   /**
@@ -164,13 +164,13 @@ export class WebGpuImageTexture implements ImageTexture {
    * size or repeated many times; for something that must stay sharp at any zoom, load the
    * document as vectors instead (loadSvgDocument) and let it be geometry.
    */
-  static async fromSvg(device: GPUDevice, svgText: string, options: WebGpuSvgRasterOptions = {}): Promise<WebGpuImageTexture> {
+  static async fromSvg(device: GPUDevice, svgText: string, options: GpuSvgRasterOptions = {}): Promise<GpuImageTexture> {
     const { width, height } = resolveSvgPixelSize(svgText, options)
 
     assertSvgFits(width, height, device.limits?.maxTextureDimension2D)
 
     const pixels = await rasterizeSvgPixels(resizeSvgDocument(svgText, width, height), width, height)
-    return WebGpuImageTexture.fromPixels(
+    return GpuImageTexture.fromPixels(
       device,
       pixels,
       width,
@@ -219,12 +219,12 @@ export class WebGpuImageTexture implements ImageTexture {
  * a pipeline change. Building each texture with its own layout would work and cost a pipeline
  * per picture.
  */
-export function webGpuImageFactory(device: GPUDevice, layout: GPUBindGroupLayout): ImageTextureFactory {
+export function gpuImageFactory(device: GPUDevice, layout: GPUBindGroupLayout): ImageTextureFactory {
   return {
-    load: (url) => WebGpuImageTexture.load(device, url, layout),
-    fromSource: (source, label) => WebGpuImageTexture.fromSource(device, source, layout, label),
+    load: (url) => GpuImageTexture.load(device, url, layout),
+    fromSource: (source, label) => GpuImageTexture.fromSource(device, source, layout, label),
     fromPixels: (pixels, width, height, label) =>
-      WebGpuImageTexture.fromPixels(device, pixels, width, height, layout, label),
-    fromSvg: (svgText, options) => WebGpuImageTexture.fromSvg(device, svgText, { ...options, layout }),
+      GpuImageTexture.fromPixels(device, pixels, width, height, layout, label),
+    fromSvg: (svgText, options) => GpuImageTexture.fromSvg(device, svgText, { ...options, layout }),
   }
 }

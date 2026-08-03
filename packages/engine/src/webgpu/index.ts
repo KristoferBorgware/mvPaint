@@ -18,7 +18,7 @@ import { GpuCaptureTarget } from './CaptureTarget'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
 import { FontBook } from './FontBook'
 import { createGpuContext } from './GpuContext'
-import { webGpuImageFactory } from './ImageTexture'
+import { gpuImageFactory } from './ImageTexture'
 import { FrameRenderer, type FrameContext } from './FrameRenderer'
 import { SceneRenderer, SAMPLE_COUNT } from './SceneRenderer'
 
@@ -68,8 +68,8 @@ export async function createWebGpuSceneRenderer(
   })
 
   // One layout for every texture a scene builds, so the image lane can bind any of them
-  // without a pipeline change (see webGpuImageFactory).
-  const images = webGpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
+  // without a pipeline change (see gpuImageFactory).
+  const images = gpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
 
 
   const resizer = new CanvasResizer(canvas)
