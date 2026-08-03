@@ -78,8 +78,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
     pins.addChild(new Circle({ x, y, radius: 9, fill: CRIMSON, stroke: '#fff', strokeWidth: 3 }))
   }
 
-  root.addChild(caption(-470, 118, 'plate / routes / pins'))
-  root.addChild(label(-470, 96, 'three layers of one picture - each switches its slice off'))
+  root.addChild(caption(-470, 104, 'plate / routes / pins'))
+  root.addChild(label(-470, 84, 'three layers of one picture - each switches its slice off'))
 
   // --- two layers, one stack ------------------------------------------------------------
   //
@@ -113,8 +113,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
     )
   }
 
-  root.addChild(caption(90, 118, 'cool layer added first, warm second'))
-  root.addChild(label(90, 96, 'they alternate anyway - zIndex decides, not the layer'))
+  root.addChild(caption(90, 104, 'cool layer added first, warm second'))
+  root.addChild(label(90, 84, 'they alternate anyway - zIndex decides, not the layer'))
 
   // --- a group is a unit; a layer is not ------------------------------------------------
   //

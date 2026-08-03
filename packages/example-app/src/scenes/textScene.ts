@@ -236,7 +236,9 @@ export function buildTextScene(scene: Scene): SceneContent {
   root.addChild(
     new Text({
       name: 'text-vertical',
-      x: 470,
+      // Clear of the justified block's 360-wide measure, which reaches x 450: vertical columns
+      // run right to left, so this node's glyphs sit to the LEFT of where it is anchored.
+      x: 530,
       y: 340,
       orientation: 'vertical',
       lineHeight: 1.05,

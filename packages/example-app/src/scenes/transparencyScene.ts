@@ -108,7 +108,9 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       }),
     )
   }
-  root.addChild(label(-500, rowY - 160, 'mesh lane'))
+  // rowY - 180, not -160: the image cells hang 110 below their own y, so a caption any higher
+  // than this sits inside the pictures it is naming.
+  root.addChild(label(-500, rowY - 180, 'mesh lane'))
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
@@ -121,7 +123,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       }),
     )
   }
-  root.addChild(label(-230, rowY - 160, 'text lane'))
+  root.addChild(label(-230, rowY - 180, 'text lane'))
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
@@ -136,7 +138,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       }),
     )
   }
-  root.addChild(label(60, rowY - 160, 'image lane'))
+  root.addChild(label(60, rowY - 180, 'image lane'))
 
   // --- row 2: the same two objects in two lanes, stacked both ways ----------------------
   //
@@ -146,8 +148,8 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   // back object should show through. If one half of a pair looks different from the other,
   // that difference is the lane order, because nothing else about them differs - and the
   // point of the pairing is that it should not.
-  const midY = 90
-  root.addChild(heading(-540, midY + 110, 'Across two lanes - in every cell the back object should show through'))
+  const midY = 20
+  root.addChild(heading(-540, midY + 100, 'Across two lanes - in every cell the back object should show through'))
 
   type LaneKind = 'mesh' | 'text' | 'image'
 
@@ -195,7 +197,9 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
     root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1))
     root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA))
     root.addChild(label(cx - 96, cy - 96, `${front} over ${back}`, NAVY))
-    root.addChild(label(cx - 96, cy - 116, `back drawn in the ${passOf(back, 1)} pass`))
+    // Two words, not a sentence: the cells are 180 apart, and the fuller wording this used to
+    // carry ran ~230 wide and reached into the next cell's caption.
+    root.addChild(label(cx - 96, cy - 116, `back: ${passOf(back, 1)} pass`))
   }
 
   ;([
@@ -213,7 +217,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   //
   // A shadow is merged into the translucent pass half a depth step behind the shape casting
   // it, so it lands on whatever is below and its own caster paints over it.
-  const lowY = -190
+  const lowY = -236
   root.addChild(heading(-540, lowY + 96, 'Shadows'))
 
   // A shadow cast by one shape, with a translucent panel laid over where it falls.

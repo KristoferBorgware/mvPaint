@@ -12,8 +12,12 @@ import { Circle, Group, Rect, Text, type ColorInput, type Scene } from '@mvpaint
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 15, color: SLATE } })
+// `maxWidth` is what keeps the bottom row's three captions apart: each is anchored under its
+// own assembly, and left to run on one line the first two are wider than the gap to the next
+// anchor and reach into the column beside them. Wrapping each inside its own column is the
+// placement that survives the caption text changing.
+function label(x: number, y: number, text: string, maxWidth?: number): Text {
+  return new Text({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
 }
 
 /** A little robot: a body, a head, two eyes and two legs, built around its own origin. */
@@ -90,7 +94,7 @@ export function buildGroupScene(scene: Scene): SceneContent {
     // takes its zIndex from only ever counts up from zero.
     new Rect({ name: 'orbit-extent', width: 1, height: 1, fill: withAlpha(HIGHLIGHT, 0.18), zIndex: -2 }),
   )
-  root.addChild(label(-470, -300, 'the tinted patch is group.bounds() - a group is only ever as big as what it holds'))
+  root.addChild(label(-470, -300, 'the tinted patch is group.bounds() - a group is only ever as big as what it holds', 440))
 
   // --- visibility governs the whole subtree ---------------------------------------------
   const blinking = root.addChild(new Group({ name: 'blinking', x: 120, y: -180 }))
@@ -98,7 +102,7 @@ export function buildGroupScene(scene: Scene): SceneContent {
   blinking.addChild(new Circle({ x: -30, y: 0, radius: 18, fill: '#fff' }))
   blinking.addChild(new Circle({ x: 30, y: 0, radius: 18, fill: '#fff' }))
   blinking.addChild(new Rect({ x: -40, y: -40, width: 80, height: 14, fill: CRIMSON, cornerRadius: 7 }))
-  root.addChild(label(40, -300, 'group.visible = false hides everything inside it'))
+  root.addChild(label(40, -300, 'group.visible = false hides everything inside it', 230))
 
   // --- a group that is not what you grab ------------------------------------------------
   //
@@ -119,7 +123,7 @@ export function buildGroupScene(scene: Scene): SceneContent {
       }),
     )
   }
-  root.addChild(label(300, -300, 'draggable: false - the parts move on their own again'))
+  root.addChild(label(300, -300, 'draggable: false - the parts move on their own again', 250))
 
   let t = 0
   return {

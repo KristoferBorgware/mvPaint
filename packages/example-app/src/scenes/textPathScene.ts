@@ -55,8 +55,10 @@ function guide(path: TextPathGeometry, name: string): Path {
   })
 }
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 15, color: SLATE } })
+// `maxWidth` is for the top row, where four demos share the width and a caption long enough
+// to outrun its own column has to wrap inside it rather than reach under the demo next door.
+function label(x: number, y: number, text: string, maxWidth?: number): Text {
+  return new Text({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
 }
 
 export function buildTextPathScene(scene: Scene): SceneContent {
@@ -68,7 +70,10 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   // bottom run uses a counter-clockwise circle starting at the bottom, so it too reads left
   // to right with its letters the right way up - the same trick a real badge uses, and the
   // reason the direction of the curve is a property of the curve rather than of the text.
-  const badgeCenter = { x: -390, y: 190 }
+  // The top row is four demos across, so each one's centre is chosen to leave its neighbour
+  // clear of everything it draws - which for the badge and the marquee is wider than their
+  // rings, since both carry text that stands outside the curve.
+  const badgeCenter = { x: -410, y: 190 }
   const badgeRadius = 132
   const topRing = circlePath(badgeRadius, { center: badgeCenter })
   const bottomRing = circlePath(badgeRadius, { center: badgeCenter, startAngle: -Math.PI / 2, clockwise: false })
@@ -100,7 +105,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   root.addChild(label(badgeCenter.x - 60, badgeCenter.y - 175, 'circle, top and bottom'))
 
   // --- an arc: an open curve, so the text has ends to run off ---
-  const archCenter = { x: -40, y: 150 }
+  const archCenter = { x: -110, y: 150 }
   const arch = arcPath(150, Math.PI * 0.92, -Math.PI * 0.84, { center: archCenter })
   root.addChild(guide(arch, 'tp-arch-guide'))
   root.addChild(
@@ -114,7 +119,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   root.addChild(label(archCenter.x - 60, archCenter.y - 40, 'arc, centred on it'))
 
   // --- more text than curve: what does not fit is dropped at the end ---
-  const shortArc = arcPath(120, Math.PI, -Math.PI / 2, { center: { x: 300, y: 120 } })
+  const shortArc = arcPath(120, Math.PI, -Math.PI / 2, { center: { x: 200, y: 130 } })
   root.addChild(guide(shortArc, 'tp-clip-guide'))
   root.addChild(
     new Text({
@@ -124,13 +129,15 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: shortArc, offset: 6 },
     }),
   )
-  root.addChild(label(200, 10, 'text longer than its curve is cut off'))
+  root.addChild(label(50, 30, 'text longer than its curve is cut off', 200))
 
   // --- an arbitrary curve, straight out of SVG path data ---
   //
   // Anything an SVG path can describe can carry text: flattenPathData turns the data into
   // contours, which is exactly what the curve is built from.
-  const wave = TextPathGeometry.fromContours(flattenPathData('M -470 -80 C -330 40, -190 -190, -40 -70 S 210 60, 360 -60'))
+  // The same curve as before, forty lower: it runs the full width of the scene, so its crest
+  // is what the row of captions above it has to clear.
+  const wave = TextPathGeometry.fromContours(flattenPathData('M -470 -120 C -330 0, -190 -230, -40 -110 S 210 20, 360 -100'))
   root.addChild(guide(wave, 'tp-wave-guide'))
   root.addChild(
     new Text({
@@ -140,7 +147,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: wave, startOffset: 12, offset: 8 },
     }),
   )
-  root.addChild(label(-470, -130, 'any SVG path'))
+  root.addChild(label(-470, -155, 'any SVG path'))
 
   // --- decorations bend too ---
   //
@@ -200,7 +207,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   root.addChild(label(outlineCenter.x - 60, outlineCenter.y - 150, 'the same, as outlines'))
 
   // --- animation: sliding the text along its curve, which re-shapes each frame ---
-  const marqueeRing = circlePath(150, { center: { x: 370, y: 190 } })
+  const marqueeRing = circlePath(125, { center: { x: 370, y: 190 } })
   root.addChild(guide(marqueeRing, 'tp-marquee-guide'))
   const marquee = root.addChild(
     new Text({
@@ -210,7 +217,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: marqueeRing, offset: 8 },
     }),
   )
-  root.addChild(label(300, 10, 'startOffset animated'))
+  root.addChild(label(300, 30, 'startOffset animated'))
 
   let travelled = 0
   return {

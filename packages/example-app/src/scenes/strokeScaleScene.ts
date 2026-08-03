@@ -69,7 +69,9 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   root.addChild(
     new Text({ x: -520, y: 340, text: 'Stroke and scale', style: { fontStyle: 'bold', fontSize: 40, color: DARK } }),
   )
-  root.addChild(label(-520, 306, 'each pair is one shape twice, differing only in strokeScaleEnabled'))
+  // 56 below the title's own y, not 34: a 40px line reaches ~50 below where it is anchored,
+  // so anything closer than that lands in the title's descenders.
+  root.addChild(label(-520, 284, 'each pair is one shape twice, differing only in strokeScaleEnabled'))
 
   // --- growing and shrinking --------------------------------------------------------------
   //
