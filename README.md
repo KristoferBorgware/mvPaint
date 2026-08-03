@@ -83,6 +83,13 @@ plus linear and radial gradients evaluated analytically in the shape's own local
 gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
 /round/square caps and a miter limit.
 
+`strokeAlign` decides which side of the outline the width goes on — `'center'` (the default,
+and all Canvas2D or SVG offer), `'inside'` or `'outside'`. It moves geometry, so it moves the
+*measurement*: a 100×60 rect with a 20-wide stroke measures 120×80 centred, 140×100 outside and
+exactly 100×60 inside — which is what makes an inside stroke the one for a border that must not
+change what a box takes up. Everything that reads bounds follows: the transformer's frame,
+marquee selection, the shadow silhouette, culling.
+
 `strokeScaleEnabled: false` holds a stroke at the width it was given however the shape (or an
 ancestor) is scaled — a keyline, a selection frame, a hairline on a drawing. It stays even under
 non-uniform scale and skew, not just uniform: the ribbon is built through the transform rather
@@ -344,7 +351,7 @@ packages/example-app   a React host for the demo scenes; the engine needs none o
 ```
 
 Each engine subdirectory carries a `selfTest.ts` covering its pure half, and the two satellite
-packages carry their own — 2,140 assertions across thirteen suites, run under plain Node with no
+packages carry their own — 2,170 assertions across thirteen suites, run under plain Node with no
 GPU. Anything needing a GPU or a DOM is verified in a browser instead.
 
 ### Demo scenes

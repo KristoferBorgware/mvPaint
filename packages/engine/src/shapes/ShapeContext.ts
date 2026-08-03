@@ -67,7 +67,7 @@ import type {
   Point2,
 } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
-import { classifyContours } from '../svg/contours'
+import { classifyContours } from '../render/contours'
 import { flattenCubic, flattenPathData, flattenQuadratic } from '../svg/flattenPath'
 import { triangulateGroup, type Triangulation } from '../svg/triangulate'
 import type { Shape } from './Shape'

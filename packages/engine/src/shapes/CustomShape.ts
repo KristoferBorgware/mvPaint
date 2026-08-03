@@ -109,6 +109,7 @@ export abstract class CustomShape extends Shape {
       strokePolyline(op.points, materialSink(sink, op.material), {
         width: op.width,
         closed: op.closed,
+        align: this.strokeAlign,
         join: op.join,
         cap: op.cap,
         miterLimit: op.miterLimit,

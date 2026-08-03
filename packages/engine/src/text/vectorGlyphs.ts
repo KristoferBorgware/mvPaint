@@ -24,7 +24,7 @@
 
 import type { Point2 } from '../render/meshFormat'
 import type { Contour } from '../render/stroke'
-import { classifyContours } from '../svg/contours'
+import { classifyContours } from '../render/contours'
 import { triangulateGroup } from '../svg/triangulate'
 import type { FontStyle } from './msdfProvider'
 import type { FontMetrics } from './msdfMetrics'

@@ -4,7 +4,7 @@
 
 import earcut from 'earcut'
 import type { Point2 } from '../render/meshFormat'
-import type { ContourGroup } from './contours'
+import type { ContourGroup } from '../render/contours'
 
 export interface Triangulation {
   /** Outer ring vertices followed by every hole ring's vertices, in order. */

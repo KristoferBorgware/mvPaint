@@ -7,7 +7,7 @@ import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
-import { classifyContours, type ContourGroup } from '../svg/contours'
+import { classifyContours, type ContourGroup } from '../render/contours'
 import { triangulateGroup } from '../svg/triangulate'
 
 export interface PathOptions extends ShapeOptions {
@@ -61,6 +61,7 @@ export class Path extends Shape {
     if (this.strokeWidth > 0 && this.contours.length > 0) {
       strokeContours(this.contours, sink, {
         width: this.strokeWidth,
+        align: this.strokeAlign,
         join: this.lineJoin,
         cap: this.lineCap,
         miterLimit: this.miterLimit,

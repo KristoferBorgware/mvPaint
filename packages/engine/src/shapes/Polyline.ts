@@ -44,6 +44,7 @@ export class Polyline extends Shape {
     strokePolyline(this.points, sink, {
       width: this.strokeWidth,
       closed: this.closed,
+      align: this.strokeAlign,
       join: this.lineJoin,
       cap: this.lineCap,
       miterLimit: this.miterLimit,

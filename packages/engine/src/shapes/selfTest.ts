@@ -14,6 +14,8 @@ import { Node } from './Node'
 import { Circle } from './Circle'
 import { meshGeometryEpoch, objectRecordEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
+import { Polyline } from './Polyline'
+import type { StrokeAlign } from '../render/stroke'
 import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
 import { nextZIndex, peekZIndex, resetAutoZIndex } from './zOrder'
@@ -162,6 +164,56 @@ function corners(node: Shape): { x: number; y: number }[] {
   assert(near(stayed.x, 0) && near(stayed.y, 0), 'a centring offset puts the pivot back in the middle')
   const pb = pivoted.localBounds()
   assert(near(pb.min.x, 0) && near(pb.max.x, 40), 'and changes nothing about the geometry it emits')
+}
+
+// --- strokeAlign changes the geometry, and so changes what the node measures ------------
+//
+// This is the whole point of the option: bounds are the extent of the triangles a shape
+// actually emits, so which side its stroke expands onto decides how much room the node takes
+// up - and with it the selection frame, marquee hits, the shadow silhouette and culling. A
+// border that must not change a box's footprint is an inside stroke, and nothing else.
+{
+  const boxed = (align: StrokeAlign) => {
+    const rect = new Rect({ width: 100, height: 60, fill: [1, 1, 1, 1], strokeWidth: 20, strokeAlign: align })
+    const b = rect.localBounds()
+    return { width: b.max.x - b.min.x, height: b.max.y - b.min.y, minX: b.min.x, maxY: b.max.y }
+  }
+
+  const centred = boxed('center')
+  assert(near(centred.width, 120) && near(centred.height, 80), 'a centred stroke grows the node by half its width on each side')
+  assert(near(centred.minX, -10) && near(centred.maxY, 10), 'reaching out past the fill in both directions')
+
+  const outside = boxed('outside')
+  assert(near(outside.width, 140) && near(outside.height, 100), 'an outside stroke grows it by the full width')
+  assert(near(outside.minX, -20) && near(outside.maxY, 20), 'all of it beyond the outline')
+
+  const inside = boxed('inside')
+  assert(near(inside.width, 100) && near(inside.height, 60), 'an inside stroke leaves the node exactly the size of its fill')
+  assert(near(inside.minX, 0) && near(inside.maxY, 0), 'with the outline as the silhouette')
+
+  // Default: unchanged from before the option existed.
+  assert(new Rect({ width: 10, height: 10 }).strokeAlign === 'center', "a shape strokes about its outline unless told otherwise")
+
+  // It is baked into geometry, like strokeWidth - so it is invalidated the same way, and is
+  // an attribute like any other (setAttr fires a change event, and the transformer's
+  // capture/restore of a node's attributes carries it).
+  const rect = new Rect({ width: 100, height: 60, strokeWidth: 20 })
+  assert(near(rect.localBounds().max.x, 110), 'the rect measures with its centred stroke')
+  rect.strokeAlign = 'inside'
+  rect.markGeometryDirty()
+  assert(near(rect.localBounds().max.x, 100), 'and re-measures once the geometry is rebuilt')
+  assert(rect.getAttr('strokeAlign') === 'inside', 'strokeAlign reads back as an attribute')
+
+  // A circle is a ring like any other: an inside stroke keeps it at its radius.
+  const circle = (align: StrokeAlign) => new Circle({ radius: 50, strokeWidth: 20, strokeAlign: align }).localBounds()
+  assert(near(circle('inside').max.x, 50, 0.2), 'an inside stroke on a circle stays inside its radius')
+  assert(near(circle('outside').max.x, 70, 0.2), 'an outside one reaches a full width past it')
+  assert(near(circle('center').max.x, 60, 0.2), 'and a centred one, half a width')
+
+  // An open polyline has no inside, so its measurement cannot change with the alignment.
+  const line = (align: StrokeAlign) =>
+    new Polyline({ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], strokeWidth: 20, strokeAlign: align }).localBounds()
+  assert(near(line('inside').max.y, 10) && near(line('outside').max.y, 10), 'an open line is centred whatever the alignment')
 }
 
 // --- boxFromPoints: fits an oriented box in a turned frame ---

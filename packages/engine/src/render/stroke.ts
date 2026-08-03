@@ -1,12 +1,19 @@
-// General-purpose contour stroker. Offsets an ordered point list (open or closed) by
-// strokeWidth/2 to each side and meshes the resulting ribbon, with Canvas2D-style
-// joins (miter/round/bevel) and caps (butt/round/square). This is the one engine every
-// stroked shape should call into - a rectangle's 4 corners, a circle's rim samples, a
-// hand-authored polyline, or a loop extracted from a triangulated SVG path.
+// General-purpose contour stroker. Offsets an ordered point list (open or closed) to each
+// side and meshes the resulting ribbon, with Canvas2D-style joins (miter/round/bevel) and
+// caps (butt/round/square). This is the one engine every stroked shape should call into - a
+// rectangle's 4 corners, a circle's rim samples, a hand-authored polyline, or a loop
+// extracted from a triangulated SVG path.
 //
-// A mesh with holes is just several independent closed contours (the outer boundary
-// plus one loop per hole); strokeContours() strokes each one separately - stroking
-// doesn't care about winding or which loop is a "hole".
+// HOW FAR TO EACH SIDE is `align` (see StrokeAlign): half the width both ways for the
+// classic centred stroke, or the whole width on one side for an inside/outside one. The
+// two offsets are the only thing that differs - every join, miter, bevel and cap below
+// reads them rather than a single half-width, so there is one stroker rather than three.
+//
+// A mesh with holes is just several independent closed contours (the outer boundary plus
+// one loop per hole); strokeContours() strokes each one separately. A CENTRED stroke does
+// not care about winding or which loop is a hole - the two offsets are equal, so no side
+// has to be named. An inside/outside one cares about both, since it has to know where the
+// material is: see strokeContours.
 //
 // Known simplification: at a joint, the CONVEX side gets a proper join (miter/round/
 // bevel); the CONCAVE side is filled by a single triangle straight to the ORIGINAL path
@@ -21,9 +28,29 @@
 // joints - a bit of extra geometry traded for a simple, easy-to-verify algorithm.
 
 import type { MeshSink } from './meshFormat'
+import { nestingDepths, signedArea } from './contours'
 
 export type LineJoin = 'miter' | 'round' | 'bevel'
 export type LineCap = 'butt' | 'round' | 'square'
+
+/**
+ * Which way a stroke expands from the path it follows.
+ *
+ * 'center' (the default, and what every stroke did before this existed) straddles the path,
+ * half the width to each side - Canvas2D's only behaviour, and SVG's. The other two put the
+ * whole ribbon on one side: 'inside' eats into the shape, so the outer edge of the stroke is
+ * the shape's own outline and the node does not grow; 'outside' grows the shape by the full
+ * width, leaving the fill untouched.
+ *
+ * The distinction is only meaningful where there IS an inside - a closed contour. An open path
+ * strokes about its centre whatever this says, because "which side is the shape" has no answer
+ * for a line.
+ *
+ * It changes the geometry, so it changes what the node measures: a 100-wide rect with a 20-wide
+ * stroke is 120 across centred, 140 outside and 100 inside. That is the point of it - see
+ * Shape.strokeAlign.
+ */
+export type StrokeAlign = 'center' | 'inside' | 'outside'
 
 export interface Point2 {
   x: number
@@ -43,6 +70,15 @@ export interface StrokeOptions {
   miterLimit?: number
   /** Segments used to tessellate a round join or round cap. Default 8. */
   roundSegments?: number
+  /**
+   * Which side of the contour the ribbon expands onto. Default 'center'. Ignored on an open
+   * path, which has no inside - see StrokeAlign.
+   *
+   * Given to strokeContours(), this is read as "inside/outside THE SHAPE", not "inside this
+   * particular ring": a hole's ring is stroked the other way round, so the ribbon lands on the
+   * material either way (see strokeContours).
+   */
+  align?: StrokeAlign
   /**
    * The transform this ribbon will be seen through, when `width` is meant to survive it -
    * see StrokeGauge and Shape.strokeScaleEnabled. Omitted (the usual case), the ribbon is
@@ -199,13 +235,30 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     cap = 'butt',
     miterLimit = 10,
     roundSegments = 8,
+    align = 'center',
   } = options
-  const s = width / 2
+  const half = width / 2
   const n = points.length
-  if (n < 2 || s <= 0) return
+  if (n < 2 || width <= 0) return
 
   const segCount = closed ? n : n - 1
   if (segCount < 1) return
+
+  // How far the ribbon reaches along +normal and along -normal. Equal halves for a centred
+  // stroke; the whole width on one side for the other two, which is all "inside" and "outside"
+  // mean geometrically - every join, miter and cap below then falls out unchanged.
+  //
+  // Which side is which comes from the ring's own winding. perp() gives the RIGHT normal, so a
+  // counter-clockwise ring (positive shoelace area) encloses the -normal side and a clockwise
+  // one the +normal side. An open path has no enclosed side at all, so it stays centred.
+  let sPlus = half
+  let sMinus = half
+  if (align !== 'center' && closed) {
+    const enclosedOnMinus = signedArea(points) > 0
+    const onPlus = (align === 'outside') === enclosedOnMinus
+    sPlus = onPlus ? width : 0
+    sMinus = onPlus ? 0 : width
+  }
 
   // Per-edge unit direction and its perpendicular normal.
   const dirs: [number, number][] = []
@@ -223,10 +276,10 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const a = points[e]
     const b = points[(e + 1) % n]
     const [nx, ny] = norms[e]
-    const ia0 = sink.vertex(a.x + nx * s, a.y + ny * s, false)
-    const ia1 = sink.vertex(a.x - nx * s, a.y - ny * s, false)
-    const ib0 = sink.vertex(b.x + nx * s, b.y + ny * s, false)
-    const ib1 = sink.vertex(b.x - nx * s, b.y - ny * s, false)
+    const ia0 = sink.vertex(a.x + nx * sPlus, a.y + ny * sPlus, false)
+    const ia1 = sink.vertex(a.x - nx * sMinus, a.y - ny * sMinus, false)
+    const ib0 = sink.vertex(b.x + nx * sPlus, b.y + ny * sPlus, false)
+    const ib1 = sink.vertex(b.x - nx * sMinus, b.y - ny * sMinus, false)
     sink.triangle(ia0, ib0, ib1)
     sink.triangle(ia0, ib1, ia1)
   }
@@ -248,10 +301,15 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
     const p = points[vi]
     const [inNx, inNy] = norms[inEdge]
     const [outNx, outNy] = norms[outEdge]
-    const outerIn = { x: p.x + inNx * s * outerSign, y: p.y + inNy * s * outerSign }
-    const outerOut = { x: p.x + outNx * s * outerSign, y: p.y + outNy * s * outerSign }
-    const innerIn = { x: p.x - inNx * s * outerSign, y: p.y - inNy * s * outerSign }
-    const innerOut = { x: p.x - outNx * s * outerSign, y: p.y - outNy * s * outerSign }
+    // The turn decides which of the two offsets this joint's convex side reaches by: bulging
+    // toward +normal it is sPlus, toward -normal it is sMinus. For a centred stroke they are
+    // the same number and this is the arithmetic it always did.
+    const sConvex = outerSign > 0 ? sPlus : sMinus
+    const sConcave = outerSign > 0 ? sMinus : sPlus
+    const outerIn = { x: p.x + inNx * sConvex * outerSign, y: p.y + inNy * sConvex * outerSign }
+    const outerOut = { x: p.x + outNx * sConvex * outerSign, y: p.y + outNy * sConvex * outerSign }
+    const innerIn = { x: p.x - inNx * sConcave * outerSign, y: p.y - inNy * sConcave * outerSign }
+    const innerOut = { x: p.x - outNx * sConcave * outerSign, y: p.y - outNy * sConcave * outerSign }
 
     const pIdx = sink.vertex(p.x, p.y, false)
 
@@ -266,7 +324,7 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       const cosHalf = bisector[0] * inNx * outerSign + bisector[1] * inNy * outerSign
       const miterRatio = cosHalf > 1e-6 ? 1 / cosHalf : Infinity
       if (miterRatio <= miterLimit) {
-        const miterLen = s * miterRatio
+        const miterLen = sConvex * miterRatio
         const mIdx = sink.vertex(p.x + bisector[0] * miterLen, p.y + bisector[1] * miterLen, false)
         const oInIdx = sink.vertex(outerIn.x, outerIn.y, false)
         const oOutIdx = sink.vertex(outerOut.x, outerOut.y, false)
@@ -285,7 +343,7 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
       while (sweep < -Math.PI) sweep += TWO_PI
       const steps = Math.max(1, Math.ceil((Math.abs(sweep) / Math.PI) * roundSegments))
       const oInIdx = sink.vertex(outerIn.x, outerIn.y, false)
-      emitArc(sink, p, s, a0, sweep, steps, pIdx, oInIdx)
+      emitArc(sink, p, sConvex, a0, sweep, steps, pIdx, oInIdx)
       continue
     }
 
@@ -298,17 +356,57 @@ export function strokePolyline(points: readonly Point2[], sink: MeshSink, option
   // --- caps (open paths only) -------------------------------------------------------
   if (!closed) {
     // Start cap: outward = reverse of the first edge's direction, i.e. the negated normal.
-    strokeCap(sink, points[0], [-norms[0][0], -norms[0][1]], s, cap, roundSegments)
+    strokeCap(sink, points[0], [-norms[0][0], -norms[0][1]], half, cap, roundSegments)
     // End cap: outward = the last edge's own forward direction.
-    strokeCap(sink, points[n - 1], norms[segCount - 1], s, cap, roundSegments)
+    strokeCap(sink, points[n - 1], norms[segCount - 1], half, cap, roundSegments)
   }
 }
 
-/** Strokes several independent contours (e.g. an outer boundary plus hole loops). */
+/**
+ * Strokes several independent contours (e.g. an outer boundary plus hole loops).
+ *
+ * For a centred stroke that is simply a loop. For an inside/outside one it is not, because
+ * "inside" is a statement about the SHAPE and a hole is wound against the outline that
+ * contains it: the material a hole's stroke should eat into lies OUTSIDE the hole's own ring.
+ * So hole rings are stroked with the alignment flipped, and the ribbon lands on the fill in
+ * both cases - a donut with an inside stroke keeps both of its silhouettes exactly.
+ *
+ * Which rings are holes is the same even-odd nesting question the fill answers (see
+ * contours.ts), asked here only when the answer can matter.
+ */
 export function strokeContours(contours: readonly Contour[], sink: MeshSink, options: StrokeOptions): void {
-  for (const contour of contours) {
-    strokePolyline(contour.points, sink, { ...options, closed: contour.closed ?? options.closed })
+  const align = options.align ?? 'center'
+  const closedOf = (contour: Contour) => contour.closed ?? options.closed ?? true
+
+  let holes: Set<number> | null = null
+  if (align !== 'center' && contours.length > 1) {
+    // Only closed rings with area participate in nesting, exactly as they do in the fill.
+    const indices: number[] = []
+    const rings: (readonly Point2[])[] = []
+    contours.forEach((contour, i) => {
+      if (closedOf(contour) && contour.points.length >= 3) {
+        indices.push(i)
+        rings.push(contour.points)
+      }
+    })
+    holes = new Set<number>()
+    nestingDepths(rings).forEach((depth, k) => {
+      if (depth % 2 === 1) holes!.add(indices[k])
+    })
   }
+
+  contours.forEach((contour, i) => {
+    strokePolyline(contour.points, sink, {
+      ...options,
+      closed: closedOf(contour),
+      align: holes?.has(i) ? flipAlign(align) : align,
+    })
+  })
+}
+
+/** A hole's ring, seen from the shape: what is inside the shape is outside this ring. */
+function flipAlign(align: StrokeAlign): StrokeAlign {
+  return align === 'inside' ? 'outside' : align === 'outside' ? 'inside' : 'center'
 }
 
 /** x' = a·x + c·y, y' = b·x + d·y - see StrokeGauge for the convention. */

@@ -8,13 +8,18 @@
 // Every pair below is the SAME shape with the same strokeWidth, differing in that one flag,
 // so any difference between the halves is the flag's doing.
 //
+// The row on the right asks the other question about a stroke width: not what it measures
+// against, but which side of the outline it goes on. strokeAlign moves the ribbon rather than
+// resizing it, and because a node measures the triangles it emits, moving it changes how much
+// room the node takes up - which is what the printed sizes under each one are there to show.
+//
 // The bottom right is the case that decides how this had to be implemented. A 4:1 stretch
 // does not thicken a diagonal by 4 or by 1 but by something between, and by a different amount
 // for every direction around the shape - so a fixed-width stroke cannot be had by dividing the
 // width by a number. The ribbon is built through the transform instead, which gets every
 // direction right at once.
 
-import { Circle, Group, Path, Rect, Text, type Scene } from '@mvpaint/engine'
+import { Circle, Group, Path, Rect, Text, type Scene, type StrokeAlign } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -129,6 +134,55 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
     return root.addChild(circle)
   })
   root.addChild(caption(-520, -350, 'animated: the right outline is re-tessellated every frame - the only case here that is not free'))
+
+  // --- which side of the outline the width goes on --------------------------------------------
+  //
+  // One shape, one stroke width, three alignments. The hairline on top marks the outline all
+  // three are stroking - the fill's own edge - so it is easy to see the ribbon sitting inside
+  // it, straddling it, or entirely beyond it. The measured size under each is the node's own
+  // localBounds(), which is what the selection frame, marquee hits and culling all read.
+  const ALIGN_WIDTH = 120
+  const ALIGN_HEIGHT = 66
+  const ALIGNMENTS: readonly StrokeAlign[] = ['inside', 'center', 'outside']
+  root.addChild(label(60, -40, 'strokeAlign: the same 16-wide stroke, three ways'))
+  ALIGNMENTS.forEach((align, i) => {
+    const x = 60 + i * 160
+    const y = -80
+    const box = new Rect({
+      name: `align-${align}`,
+      x,
+      y,
+      width: ALIGN_WIDTH,
+      height: ALIGN_HEIGHT,
+      fill: '#dfe9f5',
+      stroke: NAVY,
+      strokeWidth: 16,
+      strokeAlign: align,
+    })
+    root.addChild(box)
+
+    // The path all three follow, drawn over the top as a hairline so it is not hidden by the
+    // ribbon it runs through.
+    root.addChild(
+      new Rect({
+        name: `align-${align}-guide`,
+        x,
+        y,
+        width: ALIGN_WIDTH,
+        height: ALIGN_HEIGHT,
+        fill: [0, 0, 0, 0],
+        stroke: CRIMSON,
+        strokeWidth: 1,
+        strokeScaleEnabled: false,
+        zIndex: box.zIndex + 1,
+      }),
+    )
+
+    const bounds = box.localBounds()
+    const size = `${Math.round(bounds.max.x - bounds.min.x)} x ${Math.round(bounds.max.y - bounds.min.y)}`
+    root.addChild(caption(x, y - ALIGN_HEIGHT - 30, `${align}`))
+    root.addChild(caption(x, y - ALIGN_HEIGHT - 48, `measures ${size}`))
+  })
 
   // --- the case a single number cannot fix ---------------------------------------------------
   //

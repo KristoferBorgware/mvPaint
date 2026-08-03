@@ -29,7 +29,8 @@ import {
   type RGBA,
 } from './meshFormat'
 import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayouts'
-import { strokeContours, strokePolyline, type LineCap, type Point2 } from './stroke'
+import { strokeContours, strokePolyline, type LineCap, type Point2, type StrokeAlign } from './stroke'
+import { signedArea } from './contours'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
 import { parseColor } from './color'
@@ -532,6 +533,109 @@ assert(
   // edge's own per-normal offset rather than a symmetric inner-miter intersection.
   assert(hasVertexNear(verts, -1.8, -1.0), 'engine: inner offset along one edge at (-hw,-hh)')
   assert(hasVertexNear(verts, -2.0, -0.8), 'engine: inner offset along the other edge at (-hw,-hh)')
+}
+
+// --- stroke alignment: which side of the contour the ribbon expands onto -------------------
+//
+// The three modes differ in exactly one thing - how far the ribbon reaches to each side - so
+// the checks are about extent. A 100-unit square stroked 20 wide reaches 10 past its outline
+// centred, 20 past it outside, and not at all inside.
+{
+  const square = (ccw: boolean): Point2[] => {
+    const ring: Point2[] = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ]
+    return ccw ? ring : [...ring].reverse()
+  }
+  const extent = (points: Point2[], align: StrokeAlign) => {
+    const { sink, verts } = capturingSink()
+    strokePolyline(points, sink, { width: 20, closed: true, join: 'miter', align })
+    return {
+      min: Math.min(...verts.map((v) => Math.min(v.x, v.y))),
+      max: Math.max(...verts.map((v) => Math.max(v.x, v.y))),
+    }
+  }
+
+  // The shoelace area of this ring is positive, so it is the counter-clockwise one; the other
+  // is the same ring walked backwards. Both must stroke identically - "inside" is a fact about
+  // the shape, not about which way the points happen to be listed.
+  assert(signedArea(square(true)) > 0 && signedArea(square(false)) < 0, 'the two rings wind opposite ways')
+
+  for (const ccw of [true, false]) {
+    const which = ccw ? 'ccw' : 'cw'
+    const centred = extent(square(ccw), 'center')
+    assert(near(centred.min, -10) && near(centred.max, 110), `${which}: a centred stroke straddles the outline`)
+
+    const outside = extent(square(ccw), 'outside')
+    assert(near(outside.min, -20) && near(outside.max, 120), `${which}: an outside stroke is entirely beyond it`)
+
+    const inside = extent(square(ccw), 'inside')
+    assert(near(inside.min, 0) && near(inside.max, 100), `${which}: an inside stroke never leaves the outline`)
+  }
+
+  // An open path has no inside to be on, so the alignment is ignored rather than guessed at.
+  const line: Point2[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ]
+  for (const align of ['center', 'inside', 'outside'] as StrokeAlign[]) {
+    const { sink, verts } = capturingSink()
+    strokePolyline(line, sink, { width: 20, closed: false, align })
+    const ys = verts.map((v) => v.y)
+    assert(near(Math.min(...ys), -10) && near(Math.max(...ys), 10), `an open path stays centred under align '${align}'`)
+  }
+
+  // Zero width emits nothing whatever the alignment says - the guard is on the width, not on
+  // the half-width it used to be computed from.
+  const { sink: emptySink, verts: emptyVerts } = capturingSink()
+  strokePolyline(square(true), emptySink, { width: 0, closed: true, align: 'outside' })
+  assert(emptyVerts.length === 0, 'a zero-width stroke emits nothing')
+}
+
+// --- a hole is stroked against its own winding, so the ribbon lands on the material ---------
+//
+// "Inside" means inside the SHAPE. On a donut's inner rim the material is outside the hole's
+// own ring, so stroking it by the ring's own reckoning would put the ribbon in the void - the
+// hole would appear to shrink while the outer edge grew inward.
+{
+  const outer: Point2[] = [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+    { x: 100, y: 100 },
+    { x: 0, y: 100 },
+  ]
+  // Wound the other way, as a hole is.
+  const hole: Point2[] = [
+    { x: 40, y: 40 },
+    { x: 40, y: 60 },
+    { x: 60, y: 60 },
+    { x: 60, y: 40 },
+  ]
+  const donut = [
+    { points: outer, closed: true },
+    { points: hole, closed: true },
+  ]
+  const strokeDonut = (align: StrokeAlign) => {
+    const { sink, verts } = capturingSink()
+    strokeContours(donut, sink, { width: 10, join: 'miter', align })
+    return verts
+  }
+
+  const inside = strokeDonut('inside')
+  assert(
+    inside.every((v) => v.x >= -1e-9 && v.x <= 100 + 1e-9 && v.y >= -1e-9 && v.y <= 100 + 1e-9),
+    'an inside stroke on a donut stays within the outer silhouette',
+  )
+  // The material side of the hole's rim: the ribbon covers 60..70, not 50..60.
+  assert(inside.some((v) => near(v.x, 70)), "and eats outward from the hole's rim into the material")
+  assert(!inside.some((v) => v.x > 40 && v.x < 60 && near(v.y, 50)), 'leaving the hole itself empty')
+
+  const outside = strokeDonut('outside')
+  assert(outside.some((v) => near(v.x, -10)), 'an outside stroke grows the outer edge')
+  assert(outside.some((v) => near(v.x, 50)), "and fills inward from the hole's rim, into the void")
 }
 
 // --- miter limit: a near-180° hairpin turn falls back to bevel below the limit ---

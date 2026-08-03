@@ -86,7 +86,7 @@ import { bumpMeshGeometryEpoch, bumpObjectRecordEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
 import type { ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
-import { sameGauge, type LineCap, type LineJoin, type StrokeGauge } from '../render/stroke'
+import { sameGauge, type LineCap, type LineJoin, type StrokeAlign, type StrokeGauge } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
 
@@ -145,6 +145,11 @@ export interface ShapeOptions extends NodeOptions {
   stroke?: ColorInput
   /** Stroke width in world units; 0 = no stroke. */
   strokeWidth?: number
+  /**
+   * Which side of the outline the stroke expands onto: 'center' (default), 'inside' or
+   * 'outside'. It changes the shape's measured size - see Shape.strokeAlign.
+   */
+  strokeAlign?: StrokeAlign
   lineJoin?: LineJoin
   /** Only applies to open contours (e.g. Polyline with `closed: false`). */
   lineCap?: LineCap
@@ -393,6 +398,30 @@ export abstract class Shape extends Node {
     bumpObjectRecordEpoch()
   }
   strokeWidth = 0
+  /**
+   * Which way the stroke expands from the outline it follows.
+   *
+   * 'center' is the classic behaviour and the default: the ribbon straddles the outline, half
+   * the width to each side, which is all Canvas2D and SVG offer. 'inside' puts the whole width
+   * on the fill's side, so the shape's silhouette is exactly its outline and a stroke can be
+   * thickened without the node growing; 'outside' puts it all on the other side, leaving the
+   * fill untouched and growing the node by the full width.
+   *
+   * BECAUSE IT MOVES GEOMETRY, IT MOVES THE MEASUREMENTS. localBounds() is the extent of the
+   * triangles this shape actually emits, so a 100x60 rect with a 20-wide stroke measures
+   * 120x80 centred, 140x100 outside, and exactly 100x60 inside - and everything that reads
+   * bounds follows: the transformer's frame, marquee selection, the shadow silhouette, and
+   * culling. That is what makes an inside stroke the one to reach for when a border must not
+   * change what a box takes up on screen.
+   *
+   * An OPEN path has no inside, so it is stroked about its centre whatever this says - the
+   * question has no answer for a line. On a shape with holes, this is read as a statement
+   * about the shape rather than about each ring: an inside stroke eats into the material on
+   * the hole's rim as well as on the outer edge (see strokeContours).
+   *
+   * Like strokeWidth, it is baked into geometry: assigning it needs markGeometryDirty().
+   */
+  strokeAlign: StrokeAlign = 'center'
   lineJoin: LineJoin = 'miter'
   lineCap: LineCap = 'butt'
   miterLimit = 10
@@ -455,6 +484,7 @@ export abstract class Shape extends Node {
     this.fill = options.fill ?? [0, 0, 0, 1]
     this.stroke = options.stroke ?? [0, 0, 0, 1]
     this.strokeWidth = options.strokeWidth ?? 0
+    this.strokeAlign = options.strokeAlign ?? 'center'
     this.lineJoin = options.lineJoin ?? 'miter'
     this.lineCap = options.lineCap ?? 'butt'
     this.miterLimit = options.miterLimit ?? 10
@@ -492,6 +522,7 @@ export abstract class Shape extends Node {
       'fillRadialGradientColorStops',
       'stroke',
       'strokeWidth',
+      'strokeAlign',
       'lineJoin',
       'lineCap',
       'miterLimit',

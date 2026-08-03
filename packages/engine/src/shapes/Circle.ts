@@ -104,6 +104,7 @@ export class Circle extends Shape {
       strokePolyline(rim, sink, {
         width: this.strokeWidth,
         closed: true,
+        align: this.strokeAlign,
         join: this.lineJoin,
         miterLimit: this.miterLimit,
         roundSegments: 4,

@@ -1,11 +1,15 @@
-// Classify a set of flattened contours into filled regions with holes, using even-odd
-// containment nesting: a contour nested inside an even number of others is a solid
-// (its own region), inside an odd number is a hole of its immediate (smallest)
-// containing solid. This robustly covers well-defined shapes with holes (donuts, nested
-// donuts). Nonzero-winding fill rule is a possible follow-up.
+// Polygon nesting: which of a set of flattened rings are solids and which are holes, by
+// even-odd containment - a contour nested inside an even number of others is a solid (its own
+// region), inside an odd number is a hole of its immediate (smallest) containing solid. This
+// robustly covers well-defined shapes with holes (donuts, nested donuts). Nonzero-winding fill
+// rule is a possible follow-up.
+//
+// It lives beside the mesh formats rather than under svg/ because three unrelated things need
+// it: filling an SVG path, filling a glyph outline, and deciding which side of a contour a
+// stroke should expand onto (see stroke.ts, strokeAlign). None of those is about SVG.
 
-import type { Point2 } from '../render/meshFormat'
-import type { Contour } from '../render/stroke'
+import type { Point2 } from './meshFormat'
+import type { Contour } from './stroke'
 
 export interface ContourGroup {
   outer: Point2[]
@@ -40,6 +44,26 @@ function sampleOnRing(ring: readonly Point2[]): Point2 {
   return { x: (ring[0].x + ring[1].x) / 2, y: (ring[0].y + ring[1].y) / 2 }
 }
 
+/**
+ * How many other rings each ring is nested inside - 0 for an outermost one, 1 for a hole in
+ * it, 2 for an island inside that hole, and so on. Even is a solid, odd is a hole.
+ *
+ * Split out from classifyContours because the stroker asks the same question for a different
+ * reason: an inside/outside stroke expands away from, or into, the FILL, and on a hole ring
+ * the fill is on the opposite side to the one the ring's own winding would suggest.
+ */
+export function nestingDepths(rings: readonly (readonly Point2[])[]): number[] {
+  const n = rings.length
+  const depth = new Array<number>(n).fill(0)
+  for (let i = 0; i < n; i++) {
+    const s = sampleOnRing(rings[i])
+    for (let j = 0; j < n; j++) {
+      if (i !== j && pointInPolygon(s.x, s.y, rings[j])) depth[i]++
+    }
+  }
+  return depth
+}
+
 export function classifyContours(contours: readonly Contour[]): ContourGroup[] {
   // Only closed contours with real area participate in fill.
   const rings = contours
@@ -49,16 +73,13 @@ export function classifyContours(contours: readonly Contour[]): ContourGroup[] {
   if (n === 0) return []
 
   const absArea = rings.map((r) => Math.abs(signedArea(r)))
-  const depth = new Array<number>(n).fill(0)
+  const depth = nestingDepths(rings)
   const containedBy: number[][] = rings.map(() => [])
 
   for (let i = 0; i < n; i++) {
     const s = sampleOnRing(rings[i])
     for (let j = 0; j < n; j++) {
-      if (i !== j && pointInPolygon(s.x, s.y, rings[j])) {
-        depth[i]++
-        containedBy[i].push(j)
-      }
+      if (i !== j && pointInPolygon(s.x, s.y, rings[j])) containedBy[i].push(j)
     }
   }
 

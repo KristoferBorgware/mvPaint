@@ -167,6 +167,10 @@ export class VectorText extends TextBlock {
       if (outline > 0) {
         strokeContours(contours, redirect(sink, material, false), {
           width: outline,
+          // A per-letter outline obeys strokeAlign like any other stroke: inside keeps the
+          // letterform's silhouette exactly, outside grows it. The counters of an 'o' or a 'B'
+          // are hole rings, and strokeContours puts their ribbon on the material either way.
+          align: this.strokeAlign,
           join: this.lineJoin,
           cap: this.lineCap,
           miterLimit: this.miterLimit,

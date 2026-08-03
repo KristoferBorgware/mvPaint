@@ -42,7 +42,7 @@ export * from './shapes/VectorText'
 
 export type { RGBA, Point2, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export { parseColor, type ColorInput, type ColorStopInput } from './render/color'
-export type { LineJoin, LineCap } from './render/stroke'
+export type { LineJoin, LineCap, StrokeAlign } from './render/stroke'
 
 export * from './svg/flattenPath'
 export * from './svg/loadSvg'

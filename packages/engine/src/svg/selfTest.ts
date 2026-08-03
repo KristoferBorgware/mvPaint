@@ -6,7 +6,7 @@
 // Run with: npx tsx src/svg/selfTest.ts
 
 import { flattenPathData } from './flattenPath'
-import { classifyContours, signedArea, pointInPolygon } from './contours'
+import { classifyContours, signedArea, pointInPolygon } from '../render/contours'
 import { triangulateGroup } from './triangulate'
 import { applyPoint, multiply, parseTransform, scaleFactor, transformContours, IDENTITY } from './matrix'
 import { parseColor } from './color'

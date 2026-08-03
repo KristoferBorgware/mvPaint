@@ -870,6 +870,30 @@ a frame's changes scatter into more than 512 ranges, it falls back to one whole-
 rather than issuing an unbounded number of small writes. At 100k objects that is the difference
 between a ~30 MB copy every frame and a few hundred bytes while dragging one shape.
 
+### Which side the stroke goes on — `strokeAlign`
+
+A stroke is a ribbon offset from the outline it follows, and `strokeAlign` decides how far it
+reaches to each side: `half, half` for `'center'`, `width, 0` for one of the other two and
+`0, width` for the last. Those two numbers are the *whole* implementation — every join, miter,
+bevel and cap in `render/stroke.ts` reads them rather than a single half-width, so there is one
+stroker rather than three, and a centred stroke is byte-for-byte the geometry it always was.
+
+Which side is which comes from the ring's own winding: `perp()` gives the right normal, so a
+counter-clockwise ring (positive shoelace area) encloses the −normal side. An **open** path has
+no enclosed side, so it stays centred whatever is asked for.
+
+A hole is the interesting case. "Inside" is a statement about the shape, and a hole's ring is
+wound against the outline containing it — the material lies *outside* the hole's own ring — so
+`strokeContours()` asks the same even-odd nesting question the fill asks (`render/contours.ts`,
+shared by the SVG fill, glyph fill and this) and strokes hole rings with the alignment flipped.
+A donut with an inside stroke therefore keeps both of its silhouettes exactly.
+
+Because the ribbon is geometry, this changes what the node measures: `localBounds()` is the
+extent of the triangles a shape emits, so an inside stroke leaves a node exactly the size of its
+fill and an outside one grows it by the full width. That is a feature, not a side effect — it is
+what everything downstream of bounds (the selection frame, marquee hits, the shadow silhouette,
+culling) needs in order to agree with the picture.
+
 ### A stroke that does not scale — `strokeScaleEnabled = false`
 
 The exception above, and the reason it is opt-in per shape.

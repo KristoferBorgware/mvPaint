@@ -173,6 +173,7 @@ export class Rect extends Shape {
       strokePolyline(outline, sink, {
         width: this.strokeWidth,
         closed: true,
+        align: this.strokeAlign,
         join: this.lineJoin,
         miterLimit: this.miterLimit,
         roundSegments: 4,
