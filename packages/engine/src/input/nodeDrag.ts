@@ -1,5 +1,5 @@
 // Pure drag math for moving a node with the pointer, split out of SceneInputDispatcher
-// so it can be checked without a canvas or a GPU (see input/selfTest.ts) - the same way
+// so it can be checked without a canvas or a GPU (see input/input.test.ts) - the same way
 // cameraControls.ts holds the pan/zoom math.
 
 import type { Vector2Like } from '../math/Vector2'

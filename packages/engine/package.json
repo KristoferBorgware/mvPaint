@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "tsx src/math/selfTest.ts && tsx src/camera/selfTest.ts && tsx src/events/selfTest.ts && tsx src/image/selfTest.ts && tsx src/input/selfTest.ts && tsx src/render/selfTest.ts && tsx src/scene/selfTest.ts && tsx src/shapes/selfTest.ts && tsx src/svg/selfTest.ts && tsx src/text/selfTest.ts && tsx src/webgl/selfTest.ts"
+    "test": "vitest run --root ../.. packages/engine"
   },
   "dependencies": {
     "earcut": "^3.2.3",
@@ -17,7 +17,6 @@
     "@types/earcut": "^3.0.0",
     "@types/node": "^26.1.1",
     "@webgpu/types": "^0.1.52",
-    "tsx": "^4.23.1",
     "typescript": "^5.6.3",
     "vite": "^6.0.5"
   }

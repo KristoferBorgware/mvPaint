@@ -8,7 +8,7 @@
     "gen:msdf": "tsx text/msdf/genMsdfAtlas.ts",
     "gen:polygons": "tsx text/polygon/genPolygonAtlas.ts",
     "gen:fonts": "npm run gen:msdf && npm run gen:polygons",
-    "test": "tsx text/polygon/selfTest.ts"
+    "test": "vitest run --root ../.. packages/scripts"
   },
   "dependencies": {
     "@mvpaint/engine": "*",

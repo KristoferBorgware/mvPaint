@@ -13,6 +13,10 @@
     "gen:fonts": "npm run gen:fonts -w @mvpaint/scripts",
     "gen:msdf": "npm run gen:msdf -w @mvpaint/scripts",
     "gen:polygons": "npm run gen:polygons -w @mvpaint/scripts",
-    "test": "npm run test -w @mvpaint/engine && npm run test -w @mvpaint/ttf && npm run test -w @mvpaint/scripts"
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
   }
 }

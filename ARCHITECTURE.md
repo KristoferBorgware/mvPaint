@@ -1218,9 +1218,9 @@ a compute shader because it never needed one: silhouette, separable morphology a
 Gaussian are already ordinary render passes into small textures. The one thing that genuinely
 diverges is render-to-texture orientation — WebGPU puts NDC y = +1 in a texture's *first*
 texel row and GL in its *last* — and it is corrected in exactly two places, pinned by
-`webgl/selfTest.ts` because getting one without the other gives upside-down shadows.
+`webgl/webgl.test.ts` because getting one without the other gives upside-down shadows.
 
-`npx tsx src/webgl/selfTest.ts` covers the pure half: the data texture's index maths, and
+`packages/engine/src/webgl/webgl.test.ts` covers the pure half: the data texture's index maths, and
 every generated shader's agreement with the record layout it was generated from.
 
 ### Choosing a GPU
@@ -1280,6 +1280,6 @@ renderer, which both paths also warn about once at startup.
 | Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts` |
 | The bindings themselves | `input/inputOptions.ts`, `input/sceneInput.ts`, `input/MarqueeOverlay.ts` |
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half, run with
-`npx tsx src/<dir>/selfTest.ts`. Everything needing a GPU or a DOM is verified in a browser
+Each engine subdirectory carries a Vitest suite covering its pure half - `src/<dir>/<dir>.test.ts`,
+run with `npm test` (or `npx vitest run <path>` for one of them). Everything needing a GPU or a DOM is verified in a browser
 instead.

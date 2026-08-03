@@ -330,7 +330,8 @@ has shipped it).
 ```bash
 npm install
 npm run dev          # the example app, with every demo scene
-npm test             # self-tests across every package (no GPU needed)
+npm test             # the Vitest suite across every package (no GPU needed)
+npm run test:watch   # the same, rerunning what a change touches
 npm run build        # typecheck + production build
 npm run gen:fonts    # regenerate the glyph atlases from the fonts in packages/scripts
 ```
@@ -350,9 +351,10 @@ packages/ttf           opt-in: parse a TTF in the browser, for fonts unknown unt
 packages/example-app   a React host for the demo scenes; the engine needs none of them
 ```
 
-Each engine subdirectory carries a `selfTest.ts` covering its pure half, and the two satellite
-packages carry their own — 2,173 assertions across thirteen suites, run under plain Node with no
-GPU. Anything needing a GPU or a DOM is verified in a browser instead.
+Each engine subdirectory carries a **Vitest** suite covering its pure half, and the two
+satellite packages carry their own — 237 tests, 2,173 assertions, thirteen files, ~2.5 seconds
+under plain Node with no GPU. `npm run test:watch` reruns what a change touches. Anything
+needing a GPU or a DOM is verified in a browser instead.
 
 ### Demo scenes
 

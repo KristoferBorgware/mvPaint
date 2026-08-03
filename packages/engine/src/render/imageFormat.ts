@@ -33,7 +33,7 @@ export const IMAGE_VERTEX_FLOATS = 5 // 32-bit slots per vertex (2 + 2 + 1)
 // where a pad had been without taking a pad away, and the image lane drew exactly that on the
 // WebGPU path for several commits. The WebGL path was unaffected throughout, since it reads
 // these records out of a data texture by texel arithmetic and never consults the WGSL at all -
-// which is precisely why it went unnoticed. render/selfTest.ts now computes every shader
+// which is precisely why it went unnoticed. render/render.test.ts now computes every shader
 // struct's size from its source and checks it against the stride here.
 export const IMAGE_OBJECT_TINT_OFFSET = 64
 export const IMAGE_OBJECT_DEPTH_OFFSET = 80

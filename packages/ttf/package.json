@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "test": "tsx src/selfTest.ts"
+    "test": "vitest run --root ../.. packages/ttf"
   },
   "dependencies": {
     "@mvpaint/engine": "*",
