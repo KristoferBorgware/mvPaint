@@ -287,15 +287,17 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   root.addChild(
     new Text({
       x: -500,
-      y: 330,
+      y: 344,
       text: 'Custom shapes',
       style: { fontStyle: 'bold', fontSize: 40, color: DARK },
     }),
   )
+  // 56 below the title's own y, not 34: a 40px line reaches ~50 below where it is anchored,
+  // so anything closer than that lands in the title's descenders.
   root.addChild(
     new Text({
       x: -500,
-      y: 296,
+      y: 288,
       text: 'five classes, each one a CustomShape that draws its own contour',
       style: { fontSize: 15, color: SLATE },
     }),

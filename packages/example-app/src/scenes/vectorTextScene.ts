@@ -38,8 +38,8 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   const book = fonts
   const root = scene.root
 
-  const label = (x: number, y: number, text: string) =>
-    new Text({ name: `label-${text.slice(0, 12)}`, x, y, text, style: { fontSize: 16, color: SLATE } })
+  const label = (x: number, y: number, text: string, maxWidth?: number) =>
+    new Text({ name: `label-${text.slice(0, 12)}`, x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 16, color: SLATE } })
 
   // --- title: a gradient run, filled by the mesh lane's own gradient rather than a second
   // implementation of one inside a text shader.
@@ -66,7 +66,9 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
     }),
   )
 
-  root.addChild(label(LEFT, 288, 'Every glyph below is real geometry, triangulated from an outline - not a sampled field.'))
+  // Wrapped inside the left column: run on one line this reaches x 180, which is past where
+  // the right column starts and straight through the top of the shadowed word there.
+  root.addChild(label(LEFT, 290, 'Every glyph below is real geometry, triangulated from an outline - not a sampled field.', 500))
 
   // --- the four styles, one node, one run each.
   root.addChild(

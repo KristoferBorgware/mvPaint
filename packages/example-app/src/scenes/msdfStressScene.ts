@@ -35,7 +35,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'msdf-stress-note',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 34,
+      y: layout.gridTop + 26,
       text: 'Every glyph is four vertices into one shared atlas, however many words are on the page.',
       style: { fontSize: 17, color: SLATE },
     }),

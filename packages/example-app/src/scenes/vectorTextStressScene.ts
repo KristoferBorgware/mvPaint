@@ -50,7 +50,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'vector-stress-note',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 34,
+      y: layout.gridTop + 26,
       text: 'Every glyph is a real triangulated outline - tessellated once, cached, and never re-blurred.',
       style: { fontSize: 17, color: SLATE },
     }),

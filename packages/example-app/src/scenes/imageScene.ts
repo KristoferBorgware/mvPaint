@@ -181,13 +181,13 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
   }
 
   // Row 2 continued: tiling, which needs a repeating wrap to show more than one tile.
-  root.addChild(label(-60, 60, 'tile 3x3, wrap repeat'))
+  root.addChild(label(-60, 74, 'tile 3x3, wrap repeat'))
   root.addChild(
     new Image({
       name: 'image-tiled',
       texture: checker,
       x: -60,
-      y: 70,
+      y: 50,
       width: 180,
       height: 180,
       tileX: 3,
@@ -197,13 +197,13 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
     }),
   )
 
-  root.addChild(label(160, 60, 'tile 3x3, wrap mirror'))
+  root.addChild(label(160, 74, 'tile 3x3, wrap mirror'))
   root.addChild(
     new Image({
       name: 'image-mirrored',
       texture: checker,
       x: 160,
-      y: 70,
+      y: 50,
       width: 180,
       height: 180,
       tileX: 3,
@@ -234,7 +234,7 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
   // and whichever is in front wins regardless of which lane drew it. Made back to front -
   // image, then rect over it, then circle over both - so the stack is just the order these
   // three lines are in.
-  root.addChild(label(280, -150, 'stacking vs shapes'))
+  root.addChild(label(280, -126, 'stacking vs shapes'))
   root.addChild(new Image({ name: 'image-z-under', texture: strip, x: 340, y: -150, width: 100, height: 100, crop: { x: 128, y: 0, width: 64, height: 64 } }))
   root.addChild(new Rect({ name: 'image-z-rect', x: 285, y: -165, width: 130, height: 130, fill: '#2ea65c' }))
   root.addChild(new Circle({ name: 'image-z-circle', x: 420, y: -270, radius: 34, fill: '#e64c80e6' }))
@@ -268,7 +268,7 @@ export function buildImageScene(scene: Scene, { images }: SceneResources): Scene
       }),
     )
 
-    root.addChild(label(60, -340, 'svg with a shadow'))
+    root.addChild(label(60, -322, 'svg with a shadow'))
     root.addChild(
       new Image({
         name: 'image-svg-shadow',

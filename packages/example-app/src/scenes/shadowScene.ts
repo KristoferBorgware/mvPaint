@@ -65,7 +65,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
 
   // --- one parameter at a time ----------------------------------------------------------
   const y = -140
-  label(scene, -430, y + 120, 'Offset only, then blur, then spread, then fill-only')
+  label(scene, -430, y + 106, 'Offset only, then blur, then spread, then fill-only')
 
   root.addChild(
     new Rect({
