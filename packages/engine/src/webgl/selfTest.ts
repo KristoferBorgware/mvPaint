@@ -4,7 +4,7 @@
 // arithmetic that stands between a correct record and a wrong colour:
 //
 //   - the data texture's index maths, which decides where a record lands and which rows an
-//     upload has to cover (ObjectTexture.ts);
+//     upload has to cover (GlObjectTexture.ts);
 //   - every generated shader's texel offsets, which have to agree with the render/*Format.ts
 //     module they were generated from by construction rather than by luck - and, for the
 //     shadow lane, the two halves of the render-to-texture flip, which only work together.
@@ -16,7 +16,7 @@ import {
   recordTexels,
   rowRangeFor,
   rowsFor,
-} from './ObjectTexture'
+} from './GlObjectTexture'
 import { componentOf, meshFragmentGlsl, meshVertexGlsl, texelOf } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
 import { imageFragmentGlsl, imageVertexGlsl } from './shaders/image.glsl'
@@ -189,7 +189,7 @@ function assert(cond: boolean, msg: string): void {
   // last, so a bake ported unchanged comes out mirrored - and mirrored again per filter pass.
   // It is corrected in exactly two places, and they only work together:
   //
-  //   1. the silhouette projection's y is negated (webgl/ShadowAtlas.ts passes -(2/quadH));
+  //   1. the silhouette projection's y is negated (webgl/GlShadowAtlas.ts passes -(2/quadH));
   //   2. the fullscreen vertex shader maps uv.y STRAIGHT THROUGH, where the WGSL flips it.
   //
   // Getting one without the other gives upside-down shadows, so both are pinned here.

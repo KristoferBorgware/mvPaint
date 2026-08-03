@@ -22,9 +22,9 @@ import {
   IMAGE_VERTEX_FLOATS,
   IMAGE_VERTEX_STRIDE,
 } from '../../render/imageFormat'
-import { GlImageTexture } from '../ImageTexture'
-import { GlObjectTexture } from '../ObjectTexture'
-import type { GlProgram } from '../programs'
+import { GlImageTexture } from '../GlImageTexture'
+import { GlObjectTexture } from '../GlObjectTexture'
+import type { GlProgram } from '../GlProgram'
 
 /** A stretch of indices sharing one texture and one sampler state. */
 interface DrawRange {

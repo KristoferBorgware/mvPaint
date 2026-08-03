@@ -38,9 +38,9 @@ import {
   TEXT_VERTEX_FLOATS,
   TEXT_VERTEX_STRIDE,
 } from '../../render/textFormat'
-import { GlObjectTexture } from '../ObjectTexture'
-import type { GlProgram } from '../programs'
-import type { GlFontBook } from '../FontBook'
+import { GlObjectTexture } from '../GlObjectTexture'
+import type { GlProgram } from '../GlProgram'
+import type { GlFontBook } from '../GlFontBook'
 
 interface ObjectRecord {
   node: Text
@@ -155,7 +155,7 @@ export class GlTextBatcher {
       f32.set(node.worldMatrix().toGPU(), base)
       f32[base + TEXT_OBJECT_DEPTH_OFFSET / 4] = depths.get(node) ?? 0.5
       f32[base + TEXT_OBJECT_OPACITY_OFFSET / 4] = node.opacity
-      // Floats, not reinterpreted integer bits - see ObjectTexture.ts's header.
+      // Floats, not reinterpreted integer bits - see GlObjectTexture.ts's header.
       f32[base + TEXT_OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[material.fillPriority]
 
       const stopCount = Math.min(material.stops.length, MAX_GRADIENT_STOPS)
@@ -197,7 +197,7 @@ export class GlTextBatcher {
   /**
    * Draw only nodes `[fromNode, toNode)` of the last rebuild - which is how the renderer
    * interleaves the lanes back to front. One draw, whatever styles the span mixes: every style
-   * is a layer of the one bound array texture (see FontBook.ts).
+   * is a layer of the one bound array texture (see GlFontBook.ts).
    */
   drawRange(program: GlProgram, fonts: GlFontBook, fromNode: number, toNode: number): void {
     if (!this.vao || this.indexCount === 0) return

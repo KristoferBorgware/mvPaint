@@ -22,13 +22,17 @@
 // relative to WebGPU but headroom.
 //
 // NAMING. Every class in this directory is prefixed Gl - GlSceneRenderer, GlMeshBatcher,
-// GlShadowAtlas, GlObjectTexture - while its WebGPU counterpart wears the bare name. The two
-// paths are deliberate near-copies with the same file names and the same shapes, so a symbol
-// on its own in an import list, a stack trace or a profile has to say which half of the engine
-// it belongs to. The prefix is that, and it is also what lets a test import both at once. File
-// names are NOT prefixed: they mirror the WebGPU path's, which is what makes the two directory
-// listings comparable side by side. Module-private types (Entry, DrawRange) stay bare - they
-// cannot be confused with anything, because they cannot be reached.
+// GlShadowAtlas, GlObjectTexture - while its WebGPU counterpart wears the bare name, and every
+// FILE is named for the class it holds. The two paths are deliberate near-copies with the same
+// shapes, so a symbol on its own - in an import list, a stack trace, a profile, an editor's
+// open-files list - has to say which half of the engine it belongs to. The prefix is that, and
+// it is also what lets a test import both at once.
+//
+// One file, one class, same name, is the rest of it: GlProgram.ts also holds GlStateCache,
+// which exists only to serve GlProgram.use() and would be a file of thirty lines on its own.
+// Module-private types (Entry, DrawRange) stay bare - they cannot be confused with anything,
+// because they cannot be reached. The shader modules are named for their lane and their
+// language (mesh.glsl.ts), which is what they are; there is no class in them to be named for.
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
@@ -40,11 +44,11 @@ import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
 import { describeAdapter } from '../renderer/adapter'
-import { GlFontBook } from './FontBook'
-import { glImageFactory } from './ImageTexture'
-import { GlSceneRenderer } from './SceneRenderer'
+import { GlFontBook } from './GlFontBook'
+import { glImageFactory } from './GlImageTexture'
+import { GlSceneRenderer } from './GlSceneRenderer'
 
-export { GlImageTexture } from './ImageTexture'
+export { GlImageTexture } from './GlImageTexture'
 
 const GL_ERRORS: Record<number, string> = {
   0x0500: 'INVALID_ENUM',

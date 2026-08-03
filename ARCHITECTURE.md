@@ -1205,7 +1205,7 @@ count (the implementation picks; `Gl2Context.sampleCount` reports what was grant
 does target is tens of thousands of objects rather than hundreds of thousands. WebGL2 has no
 storage buffers, so the per-object
 records that carry every transform and material become a float data texture read with
-`texelFetch` — the same architecture, reached a slower way. `webgl/ObjectTexture.ts` explains
+`texelFetch` — the same architecture, reached a slower way. `webgl/GlObjectTexture.ts` explains
 that substitution, including why integer fields are stored as floats rather than as
 reinterpreted bits.
 

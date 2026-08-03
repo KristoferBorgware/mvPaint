@@ -16,7 +16,7 @@ import type { Vector2Like } from '../math/Vector2'
 import type { Shape } from '../shapes/Shape'
 import { silhouetteOf, MAX_REGION, type ShadowSlot } from '../webgpu/ShadowAtlas'
 import { shadowQuadBounds, shadowRegion, shadowSigma, slotBucket, type ShadowRegion } from '../render/shadowMath'
-import { GlProgram, type GlStateCache } from './programs'
+import { GlProgram, type GlStateCache } from './GlProgram'
 import {
   shadowBlurFragmentGlsl,
   shadowFilterVertexGlsl,

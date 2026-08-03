@@ -8,7 +8,7 @@
 //
 // Same three departures from the WGSL as the mesh lane, plus one of its own:
 //
-//   - the object array is a texture (see ObjectTexture.ts), so every OBJ_* number below is
+//   - the object array is a texture (see GlObjectTexture.ts), so every OBJ_* number below is
 //     interpolated from render/textFormat.ts rather than written out;
 //   - clip z is remapped from WebGPU's [0,1] to GL's [-1,1];
 //   - integer fields are read as floats, never as reinterpreted bits;

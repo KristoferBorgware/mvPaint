@@ -4,10 +4,10 @@
 // 304-byte object records at the same byte offsets, because those are the format the geometry
 // and the shader agree on and neither path owns them. Three things differ, all of them forced:
 //
-//   - The object records go into a TEXTURE, not a storage buffer (see ObjectTexture.ts), so
+//   - The object records go into a TEXTURE, not a storage buffer (see GlObjectTexture.ts), so
 //     the dirty ranges the per-slot cache produces are rounded out to whole texel rows before
 //     upload rather than written as byte ranges.
-//   - Integer fields are written as floats, for the denormal reason in ObjectTexture.ts.
+//   - Integer fields are written as floats, for the denormal reason in GlObjectTexture.ts.
 //   - A vertex array object stands in for the pipeline's vertex layout. WebGL binds attribute
 //     state globally; a VAO is the only way to say "this buffer, this layout" once.
 //
@@ -42,8 +42,8 @@ import {
   type GradientStop,
   type MeshSink,
 } from '../../render/meshFormat'
-import { GlObjectTexture } from '../ObjectTexture'
-import type { GlProgram } from '../programs'
+import { GlObjectTexture } from '../GlObjectTexture'
+import type { GlProgram } from '../GlProgram'
 
 const EMPTY_STOPS: readonly GradientStop[] = []
 /** Slots this close together upload as one row range rather than two - see MeshBatcher's. */
@@ -218,7 +218,7 @@ export class GlMeshBatcher {
         f32.set(model, base)
         f32[base + OBJECT_DEPTH_OFFSET / 4] = depth
         f32[base + OBJECT_OPACITY_OFFSET / 4] = opacity
-        // Floats, not reinterpreted integer bits - see ObjectTexture.ts's header.
+        // Floats, not reinterpreted integer bits - see GlObjectTexture.ts's header.
         f32[base + OBJECT_FILL_TYPE_OFFSET / 4] = fillType
         f32[base + OBJECT_STOP_COUNT_OFFSET / 4] = stopCount
 

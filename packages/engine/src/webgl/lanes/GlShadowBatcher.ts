@@ -20,9 +20,9 @@ import {
   SHADOW_VERTEX_FLOATS,
   SHADOW_VERTEX_STRIDE,
 } from '../../render/shadowFormat'
-import { GlObjectTexture } from '../ObjectTexture'
-import type { GlProgram } from '../programs'
-import type { GlShadowAtlas } from '../ShadowAtlas'
+import { GlObjectTexture } from '../GlObjectTexture'
+import type { GlProgram } from '../GlProgram'
+import type { GlShadowAtlas } from '../GlShadowAtlas'
 
 const CORNERS: readonly [number, number][] = [
   [0, 1],

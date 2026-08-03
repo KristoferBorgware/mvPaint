@@ -2,7 +2,7 @@
 //
 // Same maths, same record, two differences that are both forced by the API:
 //
-//   1. THE OBJECT ARRAY IS A TEXTURE. No storage buffers in WebGL2 (see ObjectTexture.ts), so
+//   1. THE OBJECT ARRAY IS A TEXTURE. No storage buffers in WebGL2 (see GlObjectTexture.ts), so
 //      `objects[id].field` becomes a texelFetch at a computed coordinate. Everything below
 //      named OBJ_* is that arithmetic, and every one of those numbers is INTERPOLATED FROM
 //      render/meshFormat.ts rather than written out here. That is the whole reason this file
@@ -173,7 +173,7 @@ void main() {
   if (!isFill) {
     color = obj(id, ${OBJECT_STROKE_COLOR_OFFSET / 16});
   } else {
-    // Stored as a float rather than reinterpreted u32 bits - see ObjectTexture.ts.
+    // Stored as a float rather than reinterpreted u32 bits - see GlObjectTexture.ts.
     float fillType = ${field(OBJECT_FILL_TYPE_OFFSET)};
     if (fillType < 0.5) {
       color = obj(id, ${OBJECT_FILL_COLOR_OFFSET / 16});

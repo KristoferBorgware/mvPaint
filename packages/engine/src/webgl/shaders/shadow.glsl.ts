@@ -14,7 +14,7 @@
 //
 // It is corrected in exactly two places, and they have to agree:
 //
-//   1. The silhouette projection's y is negated (see webgl/ShadowAtlas.ts), so the shape's TOP
+//   1. The silhouette projection's y is negated (see webgl/GlShadowAtlas.ts), so the shape's TOP
 //      edge lands in the region's first texel row - what the WebGPU bake produces, and what
 //      the quad shader's uv mapping assumes.
 //   2. The fullscreen vertex shader below maps uv.y straight through instead of flipping it,
