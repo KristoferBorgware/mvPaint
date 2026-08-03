@@ -17,7 +17,7 @@ export function ScenePicker({ scenes, activeId, onSelect }: ScenePickerProps) {
       <Stack sx={{ px: 2, pt: 2, pb: 1 }}>
         <Typography variant="subtitle1">Examples</Typography>
         <Typography variant="caption" color="text.secondary">
-          Pick a scene to load. The current one is unloaded first.
+          Pick a scene to load. The current one is unloaded first, and the view returns to the origin at 1.00× - every scene is laid out to be seen from there.
         </Typography>
       </Stack>
 

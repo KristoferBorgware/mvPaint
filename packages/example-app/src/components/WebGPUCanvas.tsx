@@ -19,19 +19,26 @@ import type { ExampleScene, SceneContent } from '../scenes'
 // numeric readout but cuts the setState rate during a gesture by an order of magnitude.
 const ZOOM_REPORT_INTERVAL_MS = 100
 
+/** The zoom every scene is laid out to be seen at: one world unit per CSS pixel. */
+const DEFAULT_ZOOM = 1
+
 /**
- * Points the camera at the world origin, which is where every example scene is built
- * around. Called on startup and on every scene switch, so a pan left over from the previous
- * scene never strands the next one off-screen.
+ * Puts the view back where every example scene expects to be looked at from: the world origin
+ * in the middle of the viewport, upright, and - when a zoom is given - at that zoom.
  *
- * This is the application's framing choice, not the engine's. Left alone, a camera puts
- * world (0, 0) at the viewport's TOP-LEFT corner at one world unit per CSS pixel - which is
- * what a document-shaped application would want and what these scenes, laid out in all four
+ * This is the application's framing choice, not the engine's. Left alone, a camera puts world
+ * (0, 0) at the viewport's TOP-LEFT corner at one world unit per CSS pixel - which is what a
+ * document-shaped application would want and what these scenes, laid out in all four
  * quadrants, would not.
+ *
+ * Zoom is applied FIRST, because centring measures the world rectangle the viewport covers and
+ * that rectangle depends on the zoom - re-centring at the old scale and then changing it would
+ * leave the origin off by however much the two differed.
  */
-function frameSceneOrigin(camera: Camera2D, canvas: HTMLCanvasElement): void {
-  camera.rotation = 0
-  camera.centerOn(0, 0, canvas.clientWidth, canvas.clientHeight)
+function resetView(handle: SceneRendererHandle, canvas: HTMLCanvasElement, zoom?: number): void {
+  if (zoom !== undefined) handle.setZoom(zoom)
+  handle.camera.rotation = 0
+  handle.camera.centerOn(0, 0, canvas.clientWidth, canvas.clientHeight)
 }
 
 interface WebGPUCanvasProps {
@@ -129,6 +136,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const resourcesRef = useRef<SceneResources | null>(null)
   const contentRef = useRef<SceneContent>({})
   const sceneDefRef = useRef(scene)
+  // The scene the last apply was for. Comparing it with the incoming one is how the effect
+  // below tells a switch (reset the view AND the zoom) from a reload of the same scene (reset
+  // the view, keep the zoom - see the reload button's own promise in App.tsx).
+  const appliedSceneRef = useRef(scene)
   // The application owns the camera - the engine renders through whatever it is given, and
   // through a default one (world origin at the top-left, zoom 1) if given none. The example
   // scenes are all laid out AROUND the origin, so this application puts the origin in the
@@ -163,7 +174,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
    * waiting. The definition is re-checked afterwards so a fast switch away doesn't have a
    * slow scene land on top of the one the user actually chose.
    */
-  const applyScene = useCallback((def: ExampleScene, replace: boolean) => {
+  const applyScene = useCallback((def: ExampleScene, replace: boolean, resetZoom = false) => {
     const commit = () => {
       const sceneGraph = sceneGraphRef.current
       const handle = handleRef.current
@@ -194,7 +205,15 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
 
       // Re-frame: each scene lays itself out around the origin, so a pan left over from the
       // previous one would otherwise start the new scene half off-screen.
-      if (replace && handle && canvasRef.current) frameSceneOrigin(handle.camera, canvasRef.current)
+      //
+      // Switching to a DIFFERENT scene resets the zoom too, and says so to React, so the
+      // slider and the readout agree with what is on screen. Reloading the current one does
+      // not: the button beside it promises that the zoom is the reader's and not the scene's,
+      // and someone reloading a scene they have zoomed into is not asking to lose their place.
+      if (replace && handle && canvasRef.current) {
+        resetView(handle, canvasRef.current, resetZoom ? DEFAULT_ZOOM : undefined)
+        if (resetZoom) onZoomChangeRef.current?.(DEFAULT_ZOOM)
+      }
 
       // Every scene switch sets this from the new scene's own preference (default false, i.e.
       // culling on) - not just when disabling it - so leaving a scene that turned it off always
@@ -344,8 +363,7 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           stats.update()
         }
 
-        handle.setZoom(zoom)
-        frameSceneOrigin(handle.camera, canvas)
+        resetView(handle, canvas, zoom)
         handle.setCullMargin(cullMargin)
       })
       .catch((err: unknown) => {
@@ -376,11 +394,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // same one. The renderer, its pipelines, the font atlases and the input furniture all
   // survive; only the scene graph's content is replaced.
   useEffect(() => {
+    const switched = appliedSceneRef.current !== scene
     sceneDefRef.current = scene
+    appliedSceneRef.current = scene
     // The very first scene is built where the renderer is created, so before that there is
     // nothing to swap yet.
     if (!handleRef.current || !sceneGraphRef.current) return
-    applyScene(scene, true)
+    applyScene(scene, true, switched)
   }, [scene, reloadToken, applyScene])
 
   // Push speed changes to the running renderer.
