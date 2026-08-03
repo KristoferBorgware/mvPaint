@@ -25,10 +25,12 @@ import { attachSceneInput, type SceneInputHost } from './sceneInput'
 import { resolveInputOptions, type InputEventHost } from './inputOptions'
 import { engineOwnsCanvas, resolveCanvas } from '../renderer/canvasTarget'
 import { Transformer } from '../shapes/Transformer'
+import { MarqueeOverlay } from './MarqueeOverlay'
 import { boxForNodes } from '../shapes/transformerMath'
 import { Circle } from '../shapes/Circle'
 import { listenerCount, resetListenerCensus } from '../events/listenerCensus'
 import type { Shape } from '../shapes/Shape'
+import type { RGBA } from '../render/color'
 import type { TransformableNode } from '../shapes/Group'
 
 /**
@@ -804,3 +806,32 @@ it('destroying the input leaves nothing behind', () => {
     assert(scene.root.children.length === before - 2, 'a second destroy changes nothing')
     resetListenerCensus()
 })
+
+// The marquee and the frame are one gesture seen at two moments - a box is pulled out, and
+// what it covered is handed straight to the transformer. Drawn in two different colours they
+// read as two different tools, which is what a shared MV_GREEN is there to prevent. Checked
+// against the hex rather than against the constant, so a change to the house colour has to be
+// a deliberate edit here too.
+it('MarqueeOverlay: the selection box wears the same green as the frame it becomes', () => {
+    const marquee = new MarqueeOverlay()
+    const t = new Transformer()
+    const partNamed = (parent: Container, name: string) => {
+      let found: Shape | null = null
+      parent.traversePreOrder((n) => {
+        if ((n as Shape).name === name) found = n as Shape
+      })
+      return found! as Shape
+    }
+    const isGreen = (fill: RGBA) =>
+      near(fill[0], 0x54 / 255, 1e-3) && near(fill[1], 0xb4 / 255, 1e-3) && near(fill[2], 0x35 / 255, 1e-3)
+
+    const wash = partNamed(marquee, '__marquee-fill')
+    const border = partNamed(marquee, '__marquee-top')
+    assert(isGreen(wash.fill), 'the wash is the mv green')
+    assert(isGreen(border.fill), 'and so is the border')
+    assert(isGreen(partNamed(t, '__transformer-top').fill), 'the same green the frame is drawn in')
+
+    // Only the alpha differs between them - a wash you can see through, a border you cannot.
+    assert(wash.fill[3] < 0.5 && border.fill[3] > 0.5, 'the wash is translucent where the border is not')
+})
+

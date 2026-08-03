@@ -41,7 +41,7 @@ export * from './shapes/TextBlock'
 export * from './shapes/VectorText'
 
 export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
-export { parseColor, type ColorInput, type ColorStopInput } from './render/color'
+export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './render/color'
 export type { LineJoin, LineCap, StrokeAlign } from './render/stroke'
 
 export * from './svg/flattenPath'

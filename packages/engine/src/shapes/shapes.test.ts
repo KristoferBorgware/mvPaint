@@ -712,19 +712,41 @@ it('Transformer: the frame re-fits itself as the selection changes shape, and do
     fit()
     assert(near(edge('top').rotation, Math.PI / 6, 1e-3), 'the frame turns with the selection')
 
-    // Every part is a unit quad driven purely by transform - never resized or stroked, so
-    // the frame costs no geometry rebuilds however much the selection moves.
+    // Every part is a unit shape driven purely by transform - never resized or stroked, so
+    // the frame costs no geometry rebuilds however much the selection moves. That holds for
+    // the round handles as much as the square bars: a Circle bakes its radius into geometry
+    // exactly as a Rect bakes its width, so the handles are radius-0.5 circles scaled to
+    // size rather than circles whose radius is rewritten each frame.
     let parts = 0
+    let circles = 0
     t.traversePreOrder((n) => {
       const r = n as Rect
       if (r === (t as unknown as Rect) || typeof r.strokeWidth !== 'number') return
       parts++
-      assert(r.width === 1 && r.height === 1, 'every transformer part stays a unit quad')
+      if (r.nodeName === 'Circle') circles++
+      assert(r.width === 1 && r.height === 1, 'every transformer part stays a unit shape')
       assert(r.strokeWidth === 0, 'transformer parts are fill-only, so nothing re-tessellates')
       assert(r.overlay, 'transformer parts draw in the always-on-top overlay pass')
       assert(!r.pickable && !r.draggable, 'transformer parts are never picked or dragged as content')
     })
-    assert(parts === 4 + 9 * 2, 'four border edges plus two quads for each of the nine handles')
+    assert(parts === 4 + 9 * 2, 'four border edges plus two parts for each of the nine handles')
+    assert(circles === 9 * 2, 'the handles are circles - only the four border bars are quads')
+
+    // The white ring is the outer disc showing past the inner one, not a stroke, so the
+    // inner disc must actually be the smaller of the two. (`edge` is a lookup by part name;
+    // handles answer to it as readily as the bars do.)
+    assert(
+      edge('top-left').scaleX < edge('top-left-border').scaleX,
+      "a handle's fill sits inside its ring",
+    )
+
+    // The mv livery: #54B435 for the frame and the handles' insides, white for their rings.
+    const sameColor = (got: readonly number[], want: readonly number[]) =>
+      want.every((v, i) => near(got[i], v, 1e-3))
+    const mvGreen = [0x54 / 255, 0xb4 / 255, 0x35 / 255, 1]
+    assert(sameColor(edge('top').fill, mvGreen), 'the border is the mv green')
+    assert(sameColor(edge('top-left').fill, mvGreen), 'and so is the inside of a handle')
+    assert(sameColor(edge('top-left-border').fill, [1, 1, 1, 1]), 'while its ring is white')
 
     // Handles are found by proximity in world space, and corners beat the edges they touch.
     const box = boxForNodes(t.nodes, localBoundsOf)!

@@ -24,9 +24,12 @@ import type { Vector2Like } from '../math/Vector2'
 import { Container } from '../shapes/Container'
 import { Rect } from '../shapes/Rect'
 import type { RGBA } from '../render/meshFormat'
+import { MV_GREEN } from '../render/color'
 
-const FILL: RGBA = [0.16, 0.62, 1, 0.14]
-const STROKE: RGBA = [0.16, 0.62, 1, 0.9]
+// The same green the transformer's frame is drawn in - a marquee becomes that frame the
+// moment it is released, so anything else reads as two different tools.
+const FILL: RGBA = [MV_GREEN[0], MV_GREEN[1], MV_GREEN[2], 0.14]
+const STROKE: RGBA = [MV_GREEN[0], MV_GREEN[1], MV_GREEN[2], 0.9]
 const STROKE_WIDTH_PX = 1
 /** Above ordinary content, below the transformer's own handles. */
 const Z_INDEX = 999_000
@@ -35,9 +38,9 @@ type EdgeName = 'top' | 'bottom' | 'left' | 'right'
 const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
 
 export interface MarqueeOverlayOptions {
-  /** The rectangle's wash. Default a translucent blue. */
+  /** The rectangle's wash. Default a translucent mv green. */
   fill?: RGBA
-  /** Its border. Default the same blue, opaque. */
+  /** Its border. Default the same green, near-opaque. */
   stroke?: RGBA
   /** Border thickness in SCREEN pixels, held constant across zoom. Default 1. */
   strokeWidth?: number

@@ -16,14 +16,14 @@
 // live under different (possibly transformed) parents. The gestures themselves live in
 // transformerMath.ts; this file is the scene bookkeeping around them.
 //
-// Every part is a UNIT quad that is only ever moved, turned and scaled - never resized by
-// its width/height, and never stroked. That matters: width/height/strokeWidth are baked
-// into geometry, so changing them needs a buffer rebuild that only the renderer can
-// trigger, and the transformer has no handle on the renderer. Driving everything through
-// the transform instead means the frame tracks a set that is being dragged, scaled
-// or spun with no rebuild at all - which is also why the border is four edge quads and
-// each anchor is two stacked quads (an outer one showing through as its border) rather
-// than stroked rectangles.
+// Every part is a UNIT shape - a 1x1 quad for the border bars, a radius-0.5 circle for the
+// handles - that is only ever moved, turned and scaled, never resized by its width/height
+// and never stroked. That matters: width/height/radius/strokeWidth are baked into geometry,
+// so changing them needs a buffer rebuild that only the renderer can trigger, and the
+// transformer has no handle on the renderer. Driving everything through the transform
+// instead means the frame tracks a set that is being dragged, scaled or spun with no
+// rebuild at all - which is also why the border is four edge quads and each anchor is two
+// stacked circles (an outer one showing through as its ring) rather than stroked shapes.
 //
 // Anchors are held at a constant SCREEN size: their world size is divided by the camera
 // zoom, so a handle stays comfortably clickable whether the view is zoomed way in or out.
@@ -40,11 +40,14 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import { Container } from './Container'
+import { Circle } from './Circle'
 import { Rect } from './Rect'
+import type { Shape } from './Shape'
 import type { Node } from './Node'
 import type { TransformableNode } from './Group'
 import { hasListener } from '../events/listenerCensus'
 import type { RGBA } from '../render/meshFormat'
+import { MV_GREEN } from '../render/color'
 import {
   RESIZE_ANCHORS,
   anchorPosition,
@@ -55,7 +58,7 @@ import {
 } from './transformerMath'
 
 export interface TransformerOptions {
-  /** Anchor edge length in SCREEN pixels, held constant across zoom. Default 10. */
+  /** Anchor diameter in SCREEN pixels, held constant across zoom. Default 10. */
   anchorSize?: number
   /** How far past the top edge the rotate handle sits, in screen pixels. Default 24. */
   rotateAnchorOffset?: number
@@ -63,7 +66,7 @@ export interface TransformerOptions {
   padding?: number
   /** Border thickness in screen pixels. Default 1.5. */
   borderWidth?: number
-  /** Anchor border thickness in screen pixels. Default 1.5. */
+  /** Anchor ring thickness in screen pixels. Default 1.5. */
   anchorBorderWidth?: number
   /** Which resize anchors to show. Default: all eight. */
   enabledAnchors?: readonly ResizeAnchor[]
@@ -75,14 +78,25 @@ export interface TransformerOptions {
    * corners scale each axis freely; holding shift inverts whichever way this is set.
    */
   keepRatio?: boolean
+  /** The four border bars. Default the mv green. */
   borderColor?: RGBA
+  /** The inside of each handle. Default the mv green. */
   anchorFill?: RGBA
+  /**
+   * The ring around each handle. Default white. Named for what it looks like rather than
+   * how it is drawn - it is the outer disc showing past the inner one, not a real stroke
+   * (see makeAnchor on why a stroke could not follow the zoom).
+   */
   anchorStroke?: RGBA
 }
 
-const DEFAULT_BORDER: RGBA = [0.16, 0.62, 1, 1]
-const DEFAULT_ANCHOR_FILL: RGBA = [1, 1, 1, 1]
-const DEFAULT_ANCHOR_STROKE: RGBA = [0.16, 0.62, 1, 1]
+const WHITE: RGBA = [1, 1, 1, 1]
+const DEFAULT_BORDER: RGBA = MV_GREEN
+const DEFAULT_ANCHOR_FILL: RGBA = MV_GREEN
+/** Handles are green discs ringed in white, so they read against dark and light content alike. */
+const DEFAULT_ANCHOR_STROKE: RGBA = WHITE
+/** Enough sides that a handle reads as round at the size it is drawn (~10 screen px). */
+const ANCHOR_SEGMENTS = 24
 /** Anchors are picked within this many screen px of their center - forgiving on touch. */
 const ANCHOR_HIT_SLOP_PX = 6
 /** Sits above ordinary content; the overlay pass keeps it above the text lane too. */
@@ -92,8 +106,8 @@ type EdgeName = 'top' | 'bottom' | 'left' | 'right'
 const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
 
 interface AnchorVisual {
-  outer: Rect
-  inner: Rect
+  outer: Circle
+  inner: Circle
 }
 
 export class Transformer extends Container {
@@ -117,7 +131,7 @@ export class Transformer extends Container {
 
   private readonly edges = new Map<EdgeName, Rect>()
   private readonly anchors = new Map<TransformerAnchor, AnchorVisual>()
-  private readonly parts: Rect[] = []
+  private readonly parts: Shape[] = []
 
   constructor(options: TransformerOptions = {}) {
     super('__transformer')
@@ -135,7 +149,7 @@ export class Transformer extends Container {
     const anchorStroke = options.anchorStroke ?? DEFAULT_ANCHOR_STROKE
 
     for (const edge of EDGES) {
-      const rect = this.makePart(`__transformer-${edge}`, borderColor, TRANSFORMER_Z_INDEX)
+      const rect = this.makeEdge(`__transformer-${edge}`, borderColor)
       this.edges.set(edge, rect)
     }
 
@@ -143,8 +157,8 @@ export class Transformer extends Container {
     if (this.rotateEnabled) names.push('rotate')
     for (const name of names) {
       this.anchors.set(name, {
-        outer: this.makePart(`__transformer-${name}-border`, anchorStroke, TRANSFORMER_Z_INDEX + 1),
-        inner: this.makePart(`__transformer-${name}`, anchorFill, TRANSFORMER_Z_INDEX + 2),
+        outer: this.makeAnchor(`__transformer-${name}-border`, anchorStroke, TRANSFORMER_Z_INDEX + 1),
+        inner: this.makeAnchor(`__transformer-${name}`, anchorFill, TRANSFORMER_Z_INDEX + 2),
       })
     }
 
@@ -166,7 +180,8 @@ export class Transformer extends Container {
   }
 
   /**
-   * A unit quad: fill only, never stroked or resized, so it costs no geometry rebuilds.
+   * One border bar: a unit quad, fill only, never stroked or resized, so it costs no
+   * geometry rebuilds.
    *
    * Pivoted at its middle rather than its top-left corner, which is where a Rect's origin
    * otherwise is. Every part below is positioned by its CENTRE - an edge bar spans a side
@@ -174,18 +189,42 @@ export class Transformer extends Container {
    * placement talk about the middle of a bar directly. The offset is in unscaled local
    * units and the quad is 1x1, so it stays correct whatever scale the part is given.
    */
-  private makePart(name: string, fill: RGBA, zIndex: number): Rect {
-    const rect = new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 })
+  private makeEdge(name: string, fill: RGBA): Rect {
+    return this.adopt(
+      new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...fill], strokeWidth: 0, zIndex: TRANSFORMER_Z_INDEX, scaleX: 0, scaleY: 0 }),
+    )
+  }
+
+  /**
+   * One disc of a handle: a unit circle, radius 0.5, so scaling it by a size gives a circle
+   * of exactly that DIAMETER - the same arithmetic the square handles used, and what lets
+   * the ring thickness stay a plain subtraction in update().
+   *
+   * A Circle is centred on its own origin already, so unlike a Rect it needs no offset to
+   * be placed by its middle. Fill only for the same reason as the bars: the white ring is
+   * the outer disc showing past the inner one, not a stroke, since strokeWidth is baked
+   * into geometry and could not follow the zoom without a rebuild. The segment count is
+   * fixed rather than left to Circle's world-radius adaptivity, which would see radius 0.5
+   * and tessellate for a dot even though the handle is drawn ten pixels across.
+   */
+  private makeAnchor(name: string, fill: RGBA, zIndex: number): Circle {
+    return this.adopt(
+      new Circle({ name, radius: 0.5, segments: ANCHOR_SEGMENTS, fill: [...fill], strokeWidth: 0, zIndex, scaleX: 0, scaleY: 0 }),
+    )
+  }
+
+  /** The handling every part shares: never picked, always drawn on top, owned by the frame. */
+  private adopt<T extends Shape>(shape: T): T {
     // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
     // otherwise they would shadow the very shapes they are meant to manipulate.
-    rect.pickable = false
-    rect.draggable = false
+    shape.pickable = false
+    shape.draggable = false
     // Drawn in the always-on-top pass, so the frame never punches a depth hole through
     // the text lane the way an ordinary translucent shape would.
-    rect.overlay = true
-    this.parts.push(rect)
-    this.addChild(rect)
-    return rect
+    shape.overlay = true
+    this.parts.push(shape)
+    this.addChild(shape)
+    return shape
   }
 
   /** The nodes this frame currently wraps. */
@@ -243,7 +282,7 @@ export class Transformer extends Container {
 
   /** True if `node` is one of this transformer's own visuals. */
   owns(node: TransformableNode): boolean {
-    return this.parts.includes(node as Rect)
+    return this.parts.includes(node as Shape)
   }
 
   /**
@@ -331,15 +370,18 @@ export class Transformer extends Container {
     this.placeEdge('left', framed, -framed.halfW, 0, thickness, fullH + thickness)
     this.placeEdge('right', framed, framed.halfW, 0, thickness, fullH + thickness)
 
+    // Handle diameters: the outer disc at the full size, the inner one pulled in by the ring
+    // thickness on each side. The floor keeps a sliver of green showing when a thick ring is
+    // asked for on a small handle, rather than letting the inner disc invert.
     const size = this.anchorSize * perPixel
     const inner = Math.max(size - 2 * this.anchorBorderWidth * perPixel, size * 0.2)
     for (const name of this.enabledAnchors) {
       const at = anchorPosition(framed, name)
-      this.placeAnchor(name, at.x, at.y, framed.rotation, size, inner)
+      this.placeAnchor(name, at.x, at.y, size, inner)
     }
     if (this.anchors.has('rotate')) {
       const at = rotateAnchorPosition(framed, this.rotateAnchorOffset * perPixel)
-      this.placeAnchor('rotate', at.x, at.y, framed.rotation, size, inner)
+      this.placeAnchor('rotate', at.x, at.y, size, inner)
     }
   }
 
@@ -397,34 +439,32 @@ export class Transformer extends Container {
     rect.scaleY = height
   }
 
-  private placeAnchor(
-    name: TransformerAnchor,
-    x: number,
-    y: number,
-    rotation: number,
-    size: number,
-    innerSize: number,
-  ): void {
+  /**
+   * Both discs of one handle, concentric at a world point. The box's rotation is not passed
+   * in and not applied: a uniformly scaled circle looks the same at every angle, so turning
+   * it with the frame would be work with nothing to show for it. The POSITIONS still follow
+   * the rotation - anchorPosition() turns them - which is the part that is visible.
+   */
+  private placeAnchor(name: TransformerAnchor, x: number, y: number, size: number, innerSize: number): void {
     const visual = this.anchors.get(name)
     if (!visual) return
-    for (const [rect, scale] of [
+    for (const [circle, scale] of [
       [visual.outer, size],
       [visual.inner, innerSize],
     ] as const) {
-      rect.x = x
-      rect.y = y
-      rect.rotation = rotation
-      rect.scaleX = scale
-      rect.scaleY = scale
+      circle.x = x
+      circle.y = y
+      circle.scaleX = scale
+      circle.scaleY = scale
     }
   }
 
   /** Collapses every part to zero scale - invisible without dropping out of the mesh
    * batcher's shape set (see the class comment on why that distinction matters). */
   private hideAll(): void {
-    for (const rect of this.parts) {
-      rect.scaleX = 0
-      rect.scaleY = 0
+    for (const part of this.parts) {
+      part.scaleX = 0
+      part.scaleY = 0
     }
   }
 }

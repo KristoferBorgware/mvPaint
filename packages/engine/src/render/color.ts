@@ -36,6 +36,17 @@ export interface ColorStopInput {
   color: ColorInput
 }
 
+/**
+ * #54B435 - the mv green, and the default for every piece of editor furniture the engine
+ * draws itself: the transformer's frame and handles, the marquee box.
+ *
+ * It lives here, in the colours module, rather than in whichever of those happened to want
+ * it first, because the point of a house colour is that they all agree on it - two copies
+ * of the tuple is exactly how the frame and the marquee come to be different greens. An
+ * application building furniture of its own can reach for it for the same reason.
+ */
+export const MV_GREEN: RGBA = [0x54 / 255, 0xb4 / 255, 0x35 / 255, 1]
+
 /** The colour keywords, as 0xRRGGBB. */
 const NAMED: Record<string, number> = {
   aliceblue: 0xf0f8ff, antiquewhite: 0xfaebd7, aqua: 0x00ffff, aquamarine: 0x7fffd4,
