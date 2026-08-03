@@ -11,8 +11,8 @@
 // to arrive there was a tax on starting, not a freedom.
 //
 // So this is the default policy, in the engine, switched on by name. It is built entirely out
-// of the public parts - the dispatcher's events, MarqueeTool, Transformer, panToAnchor,
-// zoomToward - so an application that wants different answers turns the preset off and writes
+// of the public parts - the dispatcher's events, MarqueeTool, Transformer, panToAnchor and
+// zoomAbout - so an application that wants different answers turns the preset off and writes
 // its own with exactly the same materials, which is what the example app did before this
 // existed and what a serious editor will do again the day its needs diverge.
 //
@@ -34,7 +34,7 @@
 // is why nothing in the engine calls the attached set "the selection" except this file, whose
 // whole job is to be the ordinary case.
 
-import type { Vector2Like } from '../math/Vector2'
+import type { Vector2, Vector2Like } from '../math/Vector2'
 import type { AABB } from '../math/AABB'
 import type { Camera2D } from '../camera/Camera2D'
 import type { Scene } from '../scene/Scene'
@@ -47,8 +47,8 @@ import { Transformer } from '../shapes/Transformer'
 import { boxForNodes } from '../shapes/transformerMath'
 import { MarqueeOverlay } from './MarqueeOverlay'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
-import { panToAnchor, zoomToward } from './cameraControls'
-import { screenToWorld } from './viewport'
+import { panToAnchor, zoomAbout } from './cameraControls'
+import { screenToWorld, type Viewport } from './viewport'
 import { resolveInputOptions, type InputOptions } from './inputOptions'
 
 /**
@@ -94,6 +94,68 @@ export interface SceneInput {
 
 /** One namespace for every scene listener here, so teardown is a single off(). */
 const NS = '.mvpaint-input'
+
+/**
+ * The world point a RUN of zoom inputs is aimed at, and everything that has to still be true
+ * for the next input to belong to that same run.
+ *
+ * A wheel notch is not a gesture the way a drag is: there is no press to start it and no
+ * release to end it, only a stream of events that either did or did not mean one continuous
+ * zoom. So the run is defined by what would make it a different one - see stillAimedAt.
+ */
+interface ZoomAnchor {
+  /**
+   * The pixel the anchor was READ at. Kept as the run goes on rather than moved to wherever
+   * each later input arrived, so a cursor drifting a pixel at a time cannot walk the anchor
+   * across the screen while every individual step stays inside the slack below.
+   */
+  readonly screenX: number
+  readonly screenY: number
+  readonly world: Vector2
+  /**
+   * The camera this binding left behind after the last step, and the viewport it was left in.
+   * Anything else that changes what sits under that pixel - a pan, an arrow key, the
+   * application's own animation, a fresh camera, a canvas that was resized under a turned
+   * view - means the world point above is no longer the one there, and holding it would be a
+   * jump rather than the absence of one.
+   */
+  x: number
+  y: number
+  zoom: number
+  rotation: number
+  width: number
+  height: number
+}
+
+/**
+ * How far (CSS px) the cursor may wander mid-run and still count as aimed at the same point.
+ * A hand resting on a wheel moves a pixel or two and means nothing by it; moving somewhere
+ * else and scrolling again is a new gesture, aimed at whatever is there now. The same figure
+ * as the dispatcher's tap threshold, and for the same reason: it is where "did not really
+ * move" ends.
+ */
+const ZOOM_ANCHOR_SLACK = 6
+
+/** Whether the next zoom input is still part of the run this anchor was read for. */
+function stillAimedAt(
+  held: ZoomAnchor,
+  camera: Camera2D,
+  view: Viewport,
+  screenX: number,
+  screenY: number,
+): boolean {
+  // Exactly equal, not nearly: the question is whether the view is in the state this binding
+  // left it in, and any other answer means something else has changed it since.
+  return (
+    camera.x === held.x &&
+    camera.y === held.y &&
+    camera.zoom === held.zoom &&
+    camera.rotation === held.rotation &&
+    view.width === held.width &&
+    view.height === held.height &&
+    Math.hypot(screenX - held.screenX, screenY - held.screenY) <= ZOOM_ANCHOR_SLACK
+  )
+}
 
 /**
  * Wires the requested bindings to a canvas and returns the handle to them, or null when the
@@ -149,8 +211,54 @@ export function attachSceneInput(
 
   const clampZoom = (zoom: number) =>
     cameraInput ? Math.min(cameraInput.maxZoom, Math.max(cameraInput.minZoom, zoom)) : zoom
+
+  // ONE ANCHOR PER RUN OF INPUTS, which is the whole of what makes a scroll feel steady.
+  //
+  // A wheel notch zooms about the world point under the cursor. The notches that follow it -
+  // and a trackpad delivers dozens a second - have to zoom about that SAME point, or the view
+  // is being re-aimed several times per frame at whatever the last step happened to leave
+  // under the cursor. Two things go wrong when each step reads its own anchor:
+  //
+  //   the arithmetic  each read unprojects through a camera the previous step just wrote, and
+  //                   each write is a correction measured from that read, so rounding that
+  //                   would have cancelled is fed back in as the next target instead. Over a
+  //                   long scroll the content creeps out from under the cursor. See zoomAbout.
+  //   the cursor      a hand on a wheel is not still. Re-reading turns every pixel of wobble
+  //                   into a re-aim, and at a deep zoom one pixel is a lot of world.
+  //
+  // So the anchor is read once and held, and every step of the run corrects back to it, at
+  // the pixel it was read at. It is dropped when the cursor really travels or when anything
+  // other than this zoom moved the view - see stillAimedAt for both.
+  //
+  // Held across the keyboard's +/- as well as the wheel, since a run of key presses is the
+  // same thing arriving through a different door.
+  let zoomAnchor: ZoomAnchor | null = null
   const applyZoom = (screenX: number, screenY: number, next: number) => {
-    zoomToward(host.camera, viewport(), screenX, screenY, next)
+    const camera = host.camera
+    const view = viewport()
+    const held = zoomAnchor
+    if (!held || !stillAimedAt(held, camera, view, screenX, screenY)) {
+      const world = screenToWorld(camera, screenX, screenY, view)
+      const { x, y, zoom, rotation } = camera
+      zoomAnchor = world
+        ? { screenX, screenY, world, x, y, zoom, rotation, width: view.width, height: view.height }
+        : null
+    }
+
+    const anchor = zoomAnchor
+    if (!anchor) {
+      // Nothing under that pixel to hold on to - a camera looking edge-on at the Z=0 plane,
+      // which a Camera2D never is. The zoom still applies, about nothing in particular.
+      camera.zoom = next > 0 ? next : camera.zoom
+      return
+    }
+    zoomAbout(camera, view, anchor.screenX, anchor.screenY, anchor.world, next)
+    anchor.x = camera.x
+    anchor.y = camera.y
+    anchor.zoom = camera.zoom
+    anchor.rotation = camera.rotation
+    anchor.width = view.width
+    anchor.height = view.height
   }
 
   if (cameraInput?.pan) {
@@ -168,10 +276,20 @@ export function attachSceneInput(
     })
     root.on(`pinchmove${NS}`, (event) => {
       const gesture = event as CameraGestureEvent
-      host.camera.zoom = clampZoom(pinchStartZoom * gesture.scale)
-      // A pinch pins the anchor the gesture started on, not whatever is under the midpoint
-      // now, so the content follows two fingers spreading apart.
-      panToAnchor(host.camera, viewport(), gesture.point.x, gesture.point.y, gesture.anchor)
+      // A pinch pins the anchor the gesture STARTED on - the dispatcher hands the same one out
+      // for every move - rather than whatever is under the midpoint now, so the content follows
+      // two fingers spreading apart. Same rule as the wheel above; the dispatcher just has a
+      // press and a release to bound the gesture with, so it can hold the anchor itself.
+      //
+      // Against the zoom the pinch began at, so a spread and a squeeze back cancel exactly.
+      zoomAbout(
+        host.camera,
+        viewport(),
+        gesture.point.x,
+        gesture.point.y,
+        gesture.anchor,
+        clampZoom(pinchStartZoom * gesture.scale),
+      )
     })
     root.on(`wheel${NS}`, (event) => {
       const raw = event.evt as WheelEvent | undefined

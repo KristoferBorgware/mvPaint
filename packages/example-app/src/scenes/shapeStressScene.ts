@@ -136,7 +136,10 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'shape-stress-title',
       x: -FIELD_HALF_WIDTH,
-      y: FIELD_HALF_HEIGHT + 90,
+      // Clear of the field, not of its centres: FIELD_HALF_HEIGHT bounds where a shape is
+      // PUT, and it then draws its own radius on top of that - up to another ~70 once the
+      // random per-axis scale is in. Both lines here start above that.
+      y: FIELD_HALF_HEIGHT + 154,
       text: `${COUNT} shapes, no shadows`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
@@ -145,7 +148,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'shape-stress-note',
       x: -FIELD_HALF_WIDTH,
-      y: FIELD_HALF_HEIGHT + 54,
+      y: FIELD_HALF_HEIGHT + 110,
       text: 'Random size, rotation and colour across rects, circles, polygons and stars - solid fill only, no stroke or alpha.',
       style: { fontSize: 17, color: SLATE },
     }),

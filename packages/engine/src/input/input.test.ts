@@ -20,6 +20,7 @@ import { Vector3 } from '../math/Vector3'
 import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
 import { draggedPosition } from './nodeDrag'
+import { screenToWorld } from './viewport'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
 import { attachSceneInput, type SceneInputHost } from './sceneInput'
 import { resolveInputOptions, type InputEventHost } from './inputOptions'
@@ -666,6 +667,62 @@ it('a view never asks what is under the pointer', () => {
     assert(shape.x === 0 && shape.y === 0, 'so nothing in the scene moved')
     assert(near(host.camera.x, -50), 'the view did - dragging right by 50 pulls the camera 50 left')
     assert(input?.selection.length === 0, 'and nothing is selected, because nothing can be')
+
+    input?.destroy()
+    resetListenerCensus()
+})
+
+//
+// A wheel notch aims the zoom at the world point under the cursor. A RUN of them - and a
+// trackpad sends dozens a second - has to go on aiming at that SAME point. Reading it afresh
+// per notch re-aims at wherever the previous notch happened to leave the content, so a hand
+// resting on a wheel, which moves a pixel or two and means nothing by it, walks the view out
+// from under itself. Asserted in PIXELS, because "does not visibly slide" is the claim.
+it('a run of wheel notches holds one anchor rather than re-reading it', () => {
+    resetListenerCensus()
+    const scene = new Scene()
+    const host = fakeHost(scene, () => null)
+    const canvas = stubCanvas()
+    const view = { width: 800, height: 600 }
+    const input = attachSceneInput(host, canvas.element, 'view')
+
+    const HAIR = 0.01 // pixels - a hundredth of one, far below anything visible
+    const heldPixel = (world: Vector2, msg: string) => {
+      const now = screenToWorld(host.camera, 200, 150, view)!
+      assert(Math.hypot(now.x - world.x, now.y - world.y) * host.camera.zoom < HAIR, msg)
+    }
+
+    // Twenty notches in and twenty back out, the cursor wobbling three pixels on some of them.
+    // Each pair is a zoom and its exact inverse, so a run that kept its aim comes back to
+    // where it started; one that re-aimed each notch drifts by about two thirds of a pixel
+    // per wobbled pair and never comes back.
+    const anchor = screenToWorld(host.camera, 200, 150, view)!
+    for (let i = 0; i < 40; i++) {
+      canvas.send('wheel', i % 4 === 1 ? 203 : 200, 150, { deltaY: i % 2 === 0 ? -100 : 100 })
+      heldPixel(anchor, 'the world point the run is aimed at stays under its pixel, notch by notch')
+    }
+    assert(near(host.camera.zoom, 1), 'and forty notches that cancel leave the zoom exactly where it began')
+
+    // A cursor that really travelled is a new gesture, aimed at whatever is under it now.
+    const elsewhere = screenToWorld(host.camera, 600, 400, view)!
+    canvas.send('wheel', 600, 400, { deltaY: -100 })
+    const reaimed = screenToWorld(host.camera, 600, 400, view)!
+    assert(
+      Math.hypot(reaimed.x - elsewhere.x, reaimed.y - elsewhere.y) * host.camera.zoom < HAIR,
+      'moving the cursor somewhere else re-reads the anchor rather than dragging the old one along',
+    )
+
+    // ...and so is a view that moved under the anchor. The same pixel as the notch before it,
+    // so nothing but the camera check can catch this: holding a world point across a pan
+    // nobody told the binding about is not the absence of a jump, it IS one.
+    host.camera.x += 250
+    const afterPan = screenToWorld(host.camera, 600, 400, view)!
+    canvas.send('wheel', 600, 400, { deltaY: -100 })
+    const afterZoom = screenToWorld(host.camera, 600, 400, view)!
+    assert(
+      Math.hypot(afterZoom.x - afterPan.x, afterZoom.y - afterPan.y) * host.camera.zoom < HAIR,
+      'a view moved by anything else drops the held anchor',
+    )
 
     input?.destroy()
     resetListenerCensus()

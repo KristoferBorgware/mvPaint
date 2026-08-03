@@ -56,7 +56,9 @@ export function buildStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'stress-title',
       x: originX,
-      y: originY + 70,
+      // The top row does not stop at originY: every shape carries its own radius and drifts
+      // another 12 on top of that, so the heading starts above all three.
+      y: originY + 106,
       text: `${COLUMNS * ROWS} shadows, one draw call`,
       style: { fontStyle: 'bold', fontSize: 34, color: DARK },
     }),
@@ -65,7 +67,7 @@ export function buildStressScene(scene: Scene): SceneContent {
     new Text({
       name: 'stress-note',
       x: originX,
-      y: originY + 30,
+      y: originY + 62,
       text: 'Each has its own baked silhouette; the drift re-bakes none of them.',
       style: { fontSize: 18, color: SLATE },
     }),
