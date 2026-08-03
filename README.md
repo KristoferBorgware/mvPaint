@@ -1,207 +1,301 @@
 # mvPaint
 
-A 2D scene-graph renderer for the browser, built directly on **WebGPU**, with a WebGL2
-fallback for machines that do not have it.
+A 2D scene-graph renderer for the browser, built natively for **WebGPU**, with a **WebGL2**
+fallback on unsupported devices.
 
-You build a tree of nodes — rectangles, circles, paths, images, text — set their transforms
-and paint, and the engine turns the whole thing into a handful of GPU draw calls per frame. It
-is the drawing layer for a canvas-style application: a diagram editor, a design tool, a
-whiteboard, a document viewer. It is not a game engine and not a React renderer; it owns
-pixels, and nothing above them.
+You build a tree of nodes — rectangles, circles, paths, images, text — set their transforms and
+paint. The engine tessellates the geometry once, keeps per-object state in GPU buffers, and
+draws the scene in a small, fixed number of draw calls per frame.
 
-Starting one takes two arguments, both optional — where to draw, and what a pointer means:
+It is the drawing layer for a canvas-style application: a diagram editor, a design tool, a
+whiteboard, a document viewer. It is not a game engine and not a React renderer. It owns the
+pixels of one canvas and nothing above them.
+
+**[Live examples →](https://kristoferborgware.github.io/mvPaint/)**
+
+## Who it is for
+
+Applications that draw large amounts of vector content, keep it interactive, and need it to
+stay sharp at any zoom level. Three properties make this different from a Canvas2D or SVG
+implementation:
+
+- **Batched drawing.** Geometry is tessellated on the CPU into shared vertex and index buffers.
+  Per-frame work is a transform refresh, uploaded only for objects that changed, and skipped
+  entirely when nothing did. Object count is not draw-call count.
+- **Order-correct transparency.** The frame is drawn in two passes: opaque objects first,
+  batched and writing depth, then translucent objects strictly back-to-front, testing depth but
+  not writing it. Translucency is correct regardless of which render lane an object belongs to.
+- **Resolution-independent text.** Glyphs are multi-channel signed distance fields from a
+  generated atlas, not `fillText` into a texture. Text stays crisp at any camera zoom, and all
+  four styles share one atlas array.
+
+## Requirements
+
+- Node 20+
+- A browser with WebGPU (Chrome/Edge 113+). Browsers without it take the WebGL2 path.
+
+## Setup
+
+```bash
+npm install
+npm run dev          # example app with every demo scene
+npm test             # Vitest suite across all packages (no GPU required)
+npm run test:watch   # rerun affected tests on change
+npm run build        # typecheck + production build
+npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/scripts
+```
+
+## Creating a renderer
+
+To instance the engine use the `createSceneRenderer` function:
 
 ```ts
-// Selection, dragging, resize/rotate, marquee, pan, pinch, wheel and keyboard, wired up.
+import { Rect, createSceneRenderer } from '@mvpaint/engine'
+
 const handle = await createSceneRenderer('#board', { input: 'editor' })
 handle.scene.root.addChild(new Rect({ width: 260, height: 140, cornerRadius: 12, fill: 'tomato' }))
 ```
 
-That is the whole of the setup. Pass a canvas instead of a selector, or nothing at all;
-ask for `'view'` (camera only) or leave `input` out for a static render. See
-[Setup](#setup).
+Both arguments are optional. The first is the render target, the second is the options object.
 
-**[Live examples →](https://kristoferborgware.github.io/mvPaint/)**
+### Render target
 
----
+| Argument | Result |
+| --- | --- |
+| omitted or `null` | a canvas is created over the viewport |
+| a canvas element | that canvas is used |
+| a selector naming a canvas | that canvas is used |
+| a selector naming any other element | a canvas is created inside it, sized by the page's CSS |
+
+### Options
+
+| Option | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `input` | preset, boolean, object or `null` | omitted | Which pointer and keyboard bindings to install. See below. |
+| `camera` | `Camera2D` | a default camera | The view the scene is drawn through. |
+| `backend` | `'auto' \| 'webgpu' \| 'webgl2'` | `'auto'` | Render path. `'webgl2'` forces the fallback. |
+| `powerPreference` | `'high-performance' \| 'low-power'` | `'high-performance'` | Which GPU to request on a multi-GPU machine. |
+| `onDeviceError` | `(message: string) => void` | none | Called on asynchronous device errors, which otherwise render as a blank canvas. |
+
+The default camera puts world (0, 0) at the viewport's top-left corner at one world unit per
+CSS pixel.
+
+### Input
+
+Input is opt-in and comes in three settings.
+
+| `input` | Listeners | Pointer behaviour |
+| --- | --- | --- |
+| omitted | none | Static render. Nothing is listened for and nothing is hit-tested. The camera is still movable from code. |
+| `'view'` | canvas + keyboard | Drag pans, wheel and pinch zoom about the cursor. Nothing is picked. |
+| `'editor'` | canvas + keyboard | Select, drag, resize and rotate through the transformer frame; marquee over empty space; ctrl/space-drag pans. |
+
+`'view'` never runs a hit test, so pointer moves cost nothing regardless of scene size.
+
+The long form turns individual behaviours off, and everything a preset installs stays reachable
+through `handle.input`:
+
+```ts
+const handle = await createSceneRenderer('#board', {
+  input: {
+    camera: { zoom: false },     // fixed-scale view that still pans
+    objects: { drag: false },    // select and frame, but never move anything
+    keyboardTarget: null,        // do not listen for keys on the window
+  },
+})
+
+handle.input?.select(node)
+handle.input?.dispatcher.grabContent = false
+```
+
+Applications needing different bindings omit `input` and compose their own from the same public
+parts: `SceneInputDispatcher`, `MarqueeTool`, `Transformer`, `panToAnchor`, `zoomToward`.
+
+## The handle
+
+`createSceneRenderer` resolves to a `SceneRendererHandle`. It is the only interface either
+render path implements, and it mentions no graphics API.
+
+| Member | Purpose |
+| --- | --- |
+| `scene` | The scene graph. Content is added after construction: `handle.scene.root.addChild(node)`. |
+| `camera`, `setCamera`, `setZoom`, `getZoom` | The view. |
+| `path` | `'webgpu'` or `'webgl2'` — which path was taken. |
+| `adapter` | Which GPU is drawing, and whether it is a software renderer. |
+| `input` | The installed `SceneInput`, or `null` for a static render. |
+| `onFrame`, `addFrameListener` | Per-frame callbacks, called with seconds elapsed. |
+| `pick`, `nodesInBox`, `localBoundsOf` | Hit testing against real tessellated triangles. |
+| `toCanvas`, `toDataURL`, `toBlob` | Offscreen capture. |
+| `setCullingEnabled`, `setZSortEnabled`, `setShadowsEnabled`, `setCullMargin` | Debug and profiling switches. |
+| `markGeometryDirty`, `markTextGeometryDirty`, `markImageGeometryDirty` | Invalidation. |
+| `destroy` | Tear down the renderer and its listeners. |
+
+### Dirty marking
+
+- Changing a transform, colour or gradient is free. These live in a per-object GPU buffer
+  refreshed every frame.
+- Changing what a shape *is* — a radius, a point list, a stroke width — requires
+  `shape.markGeometryDirty()`, because it invalidates the cached tessellation.
+- Adding or removing nodes needs no mark. The visible set is recomputed each frame.
+
+### Capture
+
+`toCanvas()`, `toDataURL()` and `toBlob()` render the scene again into an offscreen target and
+return the pixels. It is a second render, not a canvas copy, so the capture can cover any world
+region at any resolution, and the live view is unaffected. Captures use 4x MSAA on both paths.
+
+```ts
+const blob = await handle.toBlob({ x: 0, y: 0, width: 1200, height: 800, pixelRatio: 2 })
+```
+
+## Scene graph
+
+Nodes carry the transform: position, rotation, scale, skew and offset. Shapes add the paint.
+
+Two conventions:
+
+- The scene is **y-up**, so a shape extends downward from its origin.
+- A shape's origin is its top-left corner, except radius-defined shapes such as `Circle`, which
+  are centred. The origin is also the pivot for rotation and scale. To rotate a rect about its
+  own centre, set `offsetX: width / 2, offsetY: -height / 2`.
+
+### Nodes and containers
+
+`Node` → `Container` → `Group`, `Layer`, and `Shape`.
+
+- **`Group`** behaves as a single unit: it places its contents, sizes itself to them, hides them
+  together, and a drag inside it moves the whole group.
+- **`Layer`** names a slice of the scene and toggles it with one `enabled` flag. It is not a
+  separate canvas and not a draw-order boundary; shapes inside stay individually selectable.
+
+Lifecycle: `node.remove()` detaches a node and leaves it reusable. `node.destroy()` disposes it
+and its subtree, dropping listeners and caches. `node.moveTo(parent)` re-parents it, optionally
+preserving its on-screen position.
+
+### Events
+
+Events bubble, so a single listener on the root covers a subtree.
+
+```ts
+handle.scene.root.on('click', (event) => console.log(event.target.name))
+```
+
+Hit testing runs against tessellated triangles rather than bounding boxes, and is skipped when
+its result cannot matter — a scene with no hover handler does not hit-test pointer moves, and an
+event whose only listeners are on the root resolves `event.target` lazily.
+
+### Stacking order
+
+Every shape takes the next value from a running counter as its `zIndex`, so newly created shapes
+land on top with nothing to configure. Ordering is scene-wide and crosses render lanes: shapes,
+text and images interleave freely.
+
+```ts
+front.zIndex = back.zIndex + 1   // place one shape above another
+shape.zIndex = nextZIndex()      // bring an existing shape to the front
+shape.zIndex = -1                // send it behind everything
+```
+
+## Shapes and paint
+
+`Rect` (with per-corner rounding), `Circle`, `Polyline`, `Path`, `Image`, `CustomShape`,
+`Text`, `VectorText`.
+
+**Fills.** Solid colours, plus linear and radial gradients evaluated analytically in the shape's
+local space, so a gradient transforms with its shape.
+
+**Strokes.** Miter, round and bevel joins; butt, round and square caps; a miter limit.
+
+**`strokeAlign`** selects which side of the outline the width occupies: `'center'` (the default,
+and the only option Canvas2D and SVG offer), `'inside'` or `'outside'`. It moves geometry, so it
+also moves the measurement — a 100×60 rect with a 20-wide stroke measures 120×80 centred, 140×100
+outside and 100×60 inside. Everything reading bounds follows: the transformer frame, marquee
+selection, the shadow silhouette and culling.
+
+**`strokeScaleEnabled: false`** holds a stroke at its given width however the shape or an
+ancestor is scaled. The ribbon is built through the transform rather than divided by a factor,
+so it holds under non-uniform scale and skew.
+
+**`opacity`** fades a whole object — fill, stroke, gradient, glyph, texture and shadow — without
+modifying its colours. It multiplies with each colour's own alpha and excludes the shape from
+the opaque pass.
+
+**Shadows.** The Canvas2D model (colour, blur, offset, opacity) plus CSS `box-shadow`'s spread.
+Blurred silhouettes are baked into a shared atlas keyed on geometry, so moving, rotating or
+zooming a shadowed shape re-bakes nothing.
+
+**Colours** accept either form: the `[r, g, b, a]` tuple in 0..1, or a string — `'#f80'`,
+`'#ff8800cc'`, `'rgb(255 136 0)'`, `'rgba(255,136,0,0.5)'`, `'hsl(32 100% 50%)'`, `'tomato'`,
+`'transparent'`. Strings are converted on assignment and read back as tuples.
+
+### Custom shapes
+
+`CustomShape` is the base class for geometry the engine does not provide. Subclass it and
+implement `describe(ctx)`, drawing the outline into a path builder that accepts
+`moveTo`/`lineTo`/curves/arcs/`closePath` and produces mesh geometry rather than pixels. The
+result is a shape like any other: picked on its real outline, framed by its real bounds, casting
+a shadow from its own silhouette, and stacked with everything else. `ctx.style()` gives an
+individual run of segments its own colour and thickness.
+
+### Text
+
+Two implementations over one shaper:
+
+- **`Text`** draws through the MSDF atlas. Four vertices per glyph.
+- **`VectorText`** tessellates real glyph outlines through the mesh lane, which gives true
+  blurred shadows and per-glyph picking.
+
+The shared shaper handles wrapping, alignment including justified, kerning, letter spacing, line
+height, baseline shift, RTL and vertical flow, per-run colour or gradient,
+underline/strikethrough, highlight, per-letter outline, and text laid along an arbitrary path.
+
+Both read generated assets — a distance-field PNG for one, a polygon atlas of flattened outlines
+for the other — so the engine ships no font parser. Its full dependency list is `earcut` and
+`svgpath`. Where the font is not known until runtime, such as a user upload or a font picker,
+`@mvpaint/ttf` parses a TTF in the browser and provides the same interface. Applications that do
+not need it never download it.
+
+### SVG
+
+`loadSvg()` parses a document into `Path` nodes, flattening curves and carrying across fills,
+gradients and strokes.
 
 ## Render paths
 
-WebGPU is the engine. `createSceneRenderer()` uses it, and falls back to a second, separate
-WebGL2 implementation only when it is unavailable — `handle.path` says which one you got, and
-`backend: 'webgl2'` forces the fallback, which is how it gets tested on a machine that has
-WebGPU. The fallback is dynamic-imported, so a browser with WebGPU never downloads it.
+`createSceneRenderer()` uses WebGPU and falls back to a separate WebGL2 implementation only when
+WebGPU is unavailable. `handle.path` reports which one is active. `backend: 'webgl2'` forces the
+fallback, which is how it is tested on a machine that has WebGPU. The fallback is loaded through
+a dynamic import, so a browser with WebGPU never downloads it.
 
-Both draw every node type, through the same scene graph, the same picking, the same
-z-ordering and **4x MSAA**. What differs is scale: WebGL2 has no storage buffers, so per-object
-records travel through a float texture instead, and the fallback targets tens of thousands of
-objects rather than hundreds of thousands.
+Both paths draw every node type through the same scene graph, picking, z-ordering and 4x MSAA.
+They differ in scale: WebGL2 has no storage buffers, so per-object records travel through a
+float texture instead, and the fallback targets a lower object count.
 
-It is temporary, and built to be deleted: `src/webgl/` plus one branch in
-`renderer/createSceneRenderer.ts`. Nothing in the WebGPU path was reshaped to accommodate it.
+The fallback is contained in `src/webgl/` plus one branch in `renderer/createSceneRenderer.ts`,
+and is intended to be removable without touching the WebGPU path.
 
-### Which GPU
+### GPU selection
 
-On a machine with two — an integrated one and a discrete card — both paths ask for the
-**discrete** one, which is not what the platform does on its own: browsers left to choose pick
-the integrated GPU. `powerPreference: 'low-power'` asks for the other, for an application that
-would rather have the battery.
+Both paths request the discrete GPU by default, which is not the platform default — browsers
+left to choose pick the integrated GPU. `powerPreference: 'low-power'` requests the other.
 
-That is the whole of the control available. Neither WebGPU nor WebGL lets a page enumerate the
-GPUs in a machine or name one, deliberately — an exact hardware list is a strong fingerprint —
-so what there is is a two-setting hint, and a machine with one GPU ignores it. A browser
-already pinned elsewhere overrides it too: on Windows the GPU process follows the per-app
-setting in Windows Graphics Settings and in the vendor's control panel, and no page can undo
-that from inside. `chrome://gpu` says which adapter the browser itself is on.
+That is the full extent of the control available. Neither WebGPU nor WebGL lets a page enumerate
+or name GPUs, because an exact hardware list is a strong fingerprint. The hint has two settings,
+a single-GPU machine ignores it, and a browser already pinned elsewhere overrides it — on
+Windows the GPU process follows Windows Graphics Settings and the vendor control panel, and no
+page can change that. `chrome://gpu` reports which adapter the browser itself is using.
 
-Because a hint that was not honoured is otherwise invisible, `handle.adapter` reports what
-actually came back — vendor, family and the driver's own description, as far as the browser
-will disclose them — and flags a **software** renderer (SwiftShader, llvmpipe, WARP), which
-draws the right picture slowly and otherwise looks exactly like the engine being slow.
+`handle.adapter` reports what actually came back — vendor, family and the driver's description,
+as far as the browser discloses them — and flags a software renderer (SwiftShader, llvmpipe,
+WARP), which draws correctly but slowly and otherwise looks like the engine being slow.
 
-## What it is for
-
-Applications that draw a lot of vector content, keep it interactive, and need it to stay sharp
-at any zoom. The design targets three things that are awkward in a 2D canvas API:
-
-- **Scale.** 100,000 shapes render in a single draw call. Geometry is tessellated once on the
-  CPU into shared buffers; per-frame work is a transform refresh, uploaded only for the objects
-  that actually changed — and skipped entirely, on one integer compare, when nothing did.
-- **Correct transparency.** Alpha blending is order-dependent and the depth test is not, so the
-  frame is drawn in two passes — provably-opaque objects first, batched and writing depth, then
-  everything translucent strictly back-to-front, testing depth but never writing it. A
-  translucent shape shows what is behind it regardless of which lane that thing lives in.
-- **Real text.** Not `fillText` into a texture. Glyphs are multi-channel signed distance fields
-  from a generated atlas, so a paragraph is crisp at any camera zoom, and all four styles share
-  one atlas array — a page mixing regular, bold and italic is still one draw call.
-
-## Prime features
-
-**Shapes and paint**
-`Rect` (with per-corner rounding), `Circle`, `Polyline`, `Path`, `Image`, `Group`. Solid fills,
-plus linear and radial gradients evaluated analytically in the shape's own local space, so a
-gradient rotates and scales with its shape for free. Strokes with miter/round/bevel joins, butt
-/round/square caps and a miter limit.
-
-`strokeAlign` decides which side of the outline the width goes on — `'center'` (the default,
-and all Canvas2D or SVG offer), `'inside'` or `'outside'`. It moves geometry, so it moves the
-*measurement*: a 100×60 rect with a 20-wide stroke measures 120×80 centred, 140×100 outside and
-exactly 100×60 inside — which is what makes an inside stroke the one for a border that must not
-change what a box takes up. Everything that reads bounds follows: the transformer's frame,
-marquee selection, the shadow silhouette, culling.
-
-`strokeScaleEnabled: false` holds a stroke at the width it was given however the shape (or an
-ancestor) is scaled — a keyline, a selection frame, a hairline on a drawing. It stays even under
-non-uniform scale and skew, not just uniform: the ribbon is built through the transform rather
-than divided by a factor, because a 4:1 stretch thickens a diagonal by neither 4 nor 1.
-
-Every colour takes either form — the `[r, g, b, a]` tuple in 0..1, or a string: `'#f80'`,
-`'#ff8800cc'`, `'rgb(255 136 0)'`, `'rgba(255,136,0,0.5)'`, `'hsl(32 100% 50%)'`, `'tomato'`,
-`'transparent'`. Strings are converted on assignment and read back as the tuple, so nothing
-below the scene graph ever sees one.
-
-**Shapes you write yourself**
-`CustomShape` is the base for a shape the engine does not know about: subclass it, implement
-`describe(ctx)`, and draw the outline into a path builder that speaks `moveTo`/`lineTo`/curves/
-arcs/`closePath` and produces mesh geometry rather than pixels. It is then a shape like any
-other — picked on its real outline, framed by its real bounds, casting a blurred shadow from its
-own silhouette, wearing a gradient, and stacked with everything else. `ctx.style()` gives an
-individual run of segments its own colour and thickness, so one continuous outline can change
-partway along without becoming several nodes.
-
-**Object opacity**
-`shape.opacity` fades a whole object — fill, stroke, gradient, glyph, texture and its shadow
-alike — and is kept out of its colours, so a fade never has to know or restore what it touched.
-It multiplies with a colour's own alpha rather than replacing it, rides in padding the per-object
-records already had (so nothing grew), and keeps the shape out of the opaque pass automatically.
-
-**Stacking that just works**
-Things stack in the order you make them — every shape takes the next number from a running
-counter as its `zIndex`, so a new one lands on top with nothing to set, across lanes as much as
-within one. Override it when you mean to: `front.zIndex = back.zIndex + 1` to put one shape over
-another, `shape.zIndex = nextZIndex()` to bring an existing one to the front, and any negative
-value to send one behind everything.
-
-**Lifecycle**
-`node.remove()` takes something out of the scene and leaves it entirely reusable;
-`node.destroy()` finishes with it and its subtree, dropping listeners and caches;
-`node.moveTo(parent)` re-homes it, optionally keeping it exactly where it is on screen. Nothing
-needs telling either way — the renderer rebuilds its visible set from the tree every frame, so
-a removed node stops drawing on the next one and its shadow-atlas slot comes back on its own.
-
-**Grouping and layers**
-A `Group` is a *unit*: it places its contents, sizes itself to them, hides them together, and a
-drag inside one takes hold of the whole thing. A `Layer` is the opposite trade — optional (not a
-canvas, and not a draw-order boundary; `zIndex` still decides what is on top, scene-wide), it
-names a slice of the scene and switches it off with one `enabled`, while every shape inside stays
-independently selectable and draggable.
-
-**Text, two ways**
-`Text` draws through the MSDF atlas — cheap, four vertices per glyph. `VectorText` tessellates
-the real glyph outlines through the mesh lane, so letterforms get true blurred shadows and
-per-glyph picking. Both share one shaper: wrapping, alignment (including justified), kerning,
-letter spacing, line height, baseline shift, RTL and vertical flow, per-run colour or gradient,
-underline/strikethrough, highlight, per-letter outline, and text laid along an arbitrary path.
-
-Both read **generated assets** — a distance-field PNG for one, a polygon atlas of flattened
-outlines for the other — so the engine carries no font parser: its whole dependency list is
-`earcut` and `svgpath`. Outlines are flattened once, offline, rather than in every browser on
-every load, which is smaller *and* faster than shipping the font. Where the font genuinely
-isn't known until runtime — a user upload, a font picker — `@mvpaint/ttf` parses one and hands
-the engine the same interface; an application that doesn't need it never downloads a parser.
-
-**Shadows**
-The canvas 2D model — colour, blur, offset, opacity — plus CSS `box-shadow`'s spread. Blurred
-silhouettes are baked once into a shared atlas keyed on geometry, so moving, spinning or
-zooming a shadowed shape re-bakes nothing and every shadow in the scene draws in one call.
-
-**Scene graph and interaction**
-Nodes carry the transform (position, rotation, scale, skew, offset); shapes add the paint.
-Events bubble, so one listener on the root covers a whole subtree. Hit-testing is against real
-tessellated triangles, not bounding boxes — and is skipped wherever its answer cannot matter:
-a scene with no hover handler never hit-tests a pointer move, and an event whose only listeners
-are on the root resolves `event.target` lazily, since everything bubbles there regardless. On a
-100k-shape scene that is the difference between 82 ms and 0.1 ms per wheel event. Included: node dragging, marquee selection, and a
-`Transformer` for resize/rotate with angle snapping.
-
-**Input by name**
-`input: 'editor'` is the whole of it: selection, dragging, the resize/rotate frame, marquee,
-pan, pinch, wheel and keyboard, wired to the canvas by the engine. `input: 'view'` is the
-camera alone and never picks anything; leaving it out is a static render that still owns its
-camera. See [Setup](#setup) — the presets are built from the same public parts an application
-would use to write its own, and switch off a behaviour at a time.
-
-**Screenshots**
-`handle.toCanvas()` / `toDataURL()` / `toBlob()` render the scene again offscreen and hand back
-the pixels. A second render, not a copy of the canvas, so the image can be any region of world at
-any resolution — and the engine builds the camera from the rectangle you ask for, leaving the
-live view untouched. Captures are 4× MSAA on **both** paths, including the WebGL2 fallback whose
-live frames have none: that cost is per-frame and a screenshot is taken once.
-
-**Camera**
-`Camera2D` is a plain object the application owns and mutates — pan, zoom, rotate. Supplying
-none is a valid choice, not a missing one: the scene then renders with world (0, 0) at the
-viewport's top-left at one unit per CSS pixel. The `'view'` and `'editor'` input sets move that
-same object for you; a static render leaves it entirely yours, and it is still yours to move
-from code under either.
-
-**SVG**
-`loadSvg()` parses a document into `Path` nodes, flattening curves and carrying fills,
-gradients and strokes across.
-
----
-
-## A small example
+## Example
 
 ```ts
 import { Circle, Group, Rect, Text, createSceneRenderer } from '@mvpaint/engine'
 
-// Where to draw, and what a pointer means. Both are optional: a canvas element, a CSS
-// selector, an element to build one inside, or null for a canvas over the whole window.
-// 'editor' is the full interactive set - see Setup below for the other two.
 const handle = await createSceneRenderer('#board', { input: 'editor' })
 
-// A card: a rounded rect with a soft shadow, and a label sitting on top of it.
 const card = new Group({ x: 120, y: -80 })
 
 card.addChild(
@@ -228,7 +322,6 @@ card.addChild(
   }),
 )
 
-// A circle behind the card, with a gradient fill.
 const dot = new Circle({ name: 'dot', x: 90, y: -150, radius: 46, zIndex: -1 })
 dot.fillPriority = 'linear-gradient'
 dot.fillLinearGradientStartPoint = { x: -46, y: 0 }
@@ -238,142 +331,50 @@ dot.fillLinearGradientColorStops = [
   { offset: 1, color: [0.5, 0.3, 0.9, 1] },
 ]
 
-// Content appears on the next frame - no dirty mark, no rebuild call.
 handle.scene.root.addChild(dot)
 handle.scene.root.addChild(card)
 
-// Animation is attached the same way, so it can just close over what it animates.
 handle.onFrame = (dt) => {
   dot.rotation += dt
 }
 
-// Events bubble, so one listener on the root covers the whole subtree.
 handle.scene.root.on('click', (event) => {
   console.log('clicked', event.target.name)
 })
 
-// Everything the 'editor' set does is already live: pressing a shape selects and drags it,
-// a rectangle dragged over empty space selects what it covers, ctrl-drag and the wheel move
-// the view. What is selected is here, and is the application's to read or replace.
 handle.input?.transformer?.on('attachchange', () => {
   console.log('selected', handle.input?.selection.map((node) => node.name))
 })
 ```
 
-Two conventions worth knowing up front. The scene is **y-up**, so a shape hangs *downward* from
-its origin. And a shape's origin is its top-left corner, except for radius-defined shapes like
-`Circle`, which are centred — which is also the pivot rotation and scale turn about. To spin a
-rect around its own middle, give it `offsetX: width / 2, offsetY: -height / 2`.
-
-Changing a transform, a colour or a gradient is free — those live in a per-object GPU buffer
-refreshed every frame. Changing what a shape *is* (a radius, a point list, a stroke width) needs
-`shape.markGeometryDirty()`, because it invalidates cached tessellation. Adding or removing
-nodes needs `handle.markGeometryDirty()`.
-
----
-
-## Setup
-
-Two arguments, both optional: **where to draw**, and **what a pointer means**.
-
-```ts
-await createSceneRenderer()                              // a canvas over the whole window
-await createSceneRenderer('#board')                      // that canvas
-await createSceneRenderer('#stage', { input: 'view' })   // a canvas built inside that element
-await createSceneRenderer(canvasEl, { input: 'editor' }) // the element you already have
-```
-
-A **selector naming a canvas** uses it; one naming anything else treats that element as the
-container and builds a canvas filling it, so the page's own CSS decides the size. `null` (or
-nothing) builds one over the viewport — for a sketch or a test page, where writing the HTML
-first is the only thing between an idea and seeing it drawn.
-
-Input is **opt-in**, in three settings:
-
-| `input` | what listens | what a press does |
-| --- | --- | --- |
-| *omitted* | nothing at all | nothing — a **static** render. The camera is still yours to move from code |
-| `'view'` | canvas + keyboard | pans; wheel/pinch zoom about the cursor. Nothing is ever picked, so a press always lands on empty space |
-| `'editor'` | canvas + keyboard | selects, drags, resizes and rotates through the frame; a drag over empty space pulls out a marquee; ctrl/space-drag pans |
-
-`'view'` does not merely ignore what is under the pointer — it never asks. A pick walks every
-shape in the scene, so on a large one the difference between *picked and discarded* and *never
-picked* is the whole frame.
-
-Nothing is all-or-nothing: the long form turns individual behaviours off, and everything the
-preset built is reachable afterwards.
-
-```ts
-const handle = await createSceneRenderer('#board', {
-  input: {
-    camera: { zoom: false },            // a fixed-scale view that still pans
-    objects: { drag: false },           // select and frame, but never move anything
-    keyboardTarget: null,               // an embedded canvas that must not eat the space bar
-  },
-})
-
-handle.input?.select(node)              // the selection is an ordinary API too
-handle.input?.dispatcher.grabContent = false   // what a hand tool does
-```
-
-An application whose bindings genuinely differ leaves `input` out and builds its own on the
-same public parts — `SceneInputDispatcher`, `MarqueeTool`, `Transformer`, `panToAnchor`,
-`zoomToward`. The presets are the ordinary answers, not the only ones.
-
----
-
-## Getting started
-
-Requires **Node 20+** and a browser with WebGPU (Chrome and Edge 113+, and anything else that
-has shipped it).
-
-```bash
-npm install
-npm run dev          # the example app, with every demo scene
-npm test             # the Vitest suite across every package (no GPU needed)
-npm run test:watch   # the same, rerunning what a change touches
-npm run build        # typecheck + production build
-npm run gen:fonts    # regenerate the glyph atlases from the fonts in packages/scripts
-```
-
-### Repository layout
+## Repository layout
 
 ```
 packages/engine        the renderer - no demo content, no framework, no font parser
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
-  src/text/            the shaper, MSDF metrics, and the polygon atlas glyphs are read from
-  src/input/           the pointer dispatcher, and the 'view'/'editor' bindings over it
-  src/renderer/        choosing a render path, and finding or building the canvas
-  src/webgpu/          SceneRenderer: the gather, the passes, createSceneRenderer()
+  src/text/            the shaper, MSDF metrics, and the polygon atlas
+  src/input/           the pointer dispatcher and the 'view'/'editor' bindings over it
+  src/renderer/        render-path selection, canvas resolution, the handle interface
+  src/webgpu/          SceneRenderer: the gather, the passes
+  src/webgl/           the WebGL2 fallback
 packages/scripts       offline tools: MSDF and polygon atlas generation, and the font sources
 packages/ttf           opt-in: parse a TTF in the browser, for fonts unknown until runtime
-packages/example-app   a React host for the demo scenes; the engine needs none of them
+packages/example-app   a React host for the demo scenes; the engine depends on none of it
 ```
 
-Each engine subdirectory carries a **Vitest** suite covering its pure half, and the two
-satellite packages carry their own — 237 tests, 2,173 assertions, thirteen files, ~2.5 seconds
-under plain Node with no GPU. `npm run test:watch` reruns what a change touches. Anything
-needing a GPU or a DOM is verified in a browser instead.
+Each engine subdirectory carries a Vitest suite covering its pure logic, as do the two satellite
+packages. The suite runs under plain Node with no GPU and no DOM. Anything requiring either is
+verified in a browser.
 
-### Demo scenes
+## Architecture
 
-Shapes and gradients · Custom shapes · Stroke and scale · Groups · Layers · Colour forms · Object opacity · MSDF text · Outline text · Text on a path ·
-Runtime TTF · Images · Transparency across lanes · Shadows · SVG document · Stacking order · and four stress tests
-(100k shapes, 1k+ shadows, and twenty A4 pages of styled prose through each text implementation).
+**[ARCHITECTURE.md](ARCHITECTURE.md)** documents the internals: one frame end to end, the gather,
+the buffer formats byte by byte, the four render lanes and the two passes, what happens when each
+kind of property changes, and how shadows are baked. Read it before changing the engine.
 
----
-
-## How it works
-
-**[ARCHITECTURE.md](ARCHITECTURE.md)** is the real documentation: one frame end to end, the
-gather, the buffer formats byte by byte, the four render lanes and the two passes, what happens
-when each kind of property changes, and how shadows are baked. Start there before changing
-anything.
-
-The short version: every shape tessellates once into shared vertex/index buffers, with its
+In short: every shape is tessellated once into shared vertex and index buffers, with its
 transform and material in a storage buffer indexed by an id packed into each vertex. Stacking
-order comes from a `zIndex` rank injected as the depth value, so shapes, text and images
-interleave freely instead of one lane always winning. Four lanes (mesh, text, image, shadow)
-share the frame uniforms, the depth buffer and one render pass, and the frame is drawn as an
+order comes from a `zIndex` rank injected as the depth value. Four lanes — mesh, text, image and
+shadow — share the frame uniforms, the depth buffer and one render pass. The frame is drawn as an
 opaque batch, then a back-to-front translucent merge, then the always-on-top overlay.

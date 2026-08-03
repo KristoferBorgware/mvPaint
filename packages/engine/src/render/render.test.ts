@@ -359,8 +359,7 @@ it('offsetX/offsetY shift the pivot (applied before scale/rotation, translation-
     assert(near(p.x, 96) && near(p.y, 56), 'offset shifts the pivot: origin -> (x-offsetX, y-offsetY)')
 })
 
-//     translate(-offsetX,-offsetY), matching the composition order of an established
-//     2D canvas library's Node transform. Cross-checked against an independently
+//     translate(-offsetX,-offsetY). Cross-checked against an independently
 //     assembled equivalent using the same Matrix4x4 primitives, so this specifically
 //     verifies ORDER (rotation sign/trig itself is covered by the math self-test). ---
 it('localMatrix composes translate(x,y) * rotate(rotation) * scale(scaleX,scaleY) *', () => {

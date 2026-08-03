@@ -836,7 +836,7 @@ it('Transformer: the attached set, which the application drives one node at a ti
 it('Shadow: the canvas 2D property model, and the atlas cache key that drives re-baking', () => {
     const plain = centredRect({ width: 10, height: 10 })
     assert(!plain.hasShadow(), 'a shape with no shadow fields set casts nothing')
-    assert(plain.shadowEnabled && plain.shadowOpacity === 1 && plain.shadowForStrokeEnabled, 'shadow defaults match the canvas library (enabled, opaque, stroke included)')
+    assert(plain.shadowEnabled && plain.shadowOpacity === 1 && plain.shadowForStrokeEnabled, 'shadow defaults are enabled, opaque and stroke-inclusive')
 
     // A blur alone, or an offset alone, is enough - but a shadow with neither would sit
     // exactly behind the shape and never be visible, so it does not count.
