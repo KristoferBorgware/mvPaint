@@ -90,6 +90,26 @@ one is the only place grouping is mechanism rather than policy. Which node a cli
 an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
 that wants to ask.
 
+### Writing a point
+
+There is one 2D vector: `Vector2` (`math/Vector2.ts`), and one name for its storage,
+`Vector2Like` — declared as `Pick<Vector2, 'x' | 'y'>`, so it is that class's fields rather than
+a second description of them.
+
+Which to reach for follows from what the value is *for*. Use the **class** where the arithmetic
+is the point — a world position being offset, a pointer being projected, anything that reads
+better as `a.sub(b).normalized()` than as three lines of scalar math. Use the **type** for
+coordinates being described rather than computed with: public inputs, so a caller can hand over
+the object literal they already have (`points: [{ x: 0, y: 0 }]` stays legal, which a class type
+would reject — a literal has no methods), and geometry in bulk, where a tessellated outline or a
+glyph's rings are coordinates by the thousand and the literal is the honest way to write them.
+Every `Vector2` satisfies the type, so a class value flows into either.
+
+This used to be five things: `Point2` declared separately beside the mesh formats, in the
+stroker, in the transformer's math and in the drag math, plus the class. Four copies of `{ x, y }`
+cannot disagree, which is why nobody noticed; what they cost was a reader having to check that
+they were the same type, and a maintainer having to pick one when writing something new.
+
 ### Writing a colour
 
 Everything below the scene graph works in straight-alpha `RGBA` — a 4-tuple, each channel

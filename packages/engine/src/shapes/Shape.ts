@@ -81,11 +81,12 @@
 // rasterize a silhouette from. VectorText, which does, honours them like any other mesh
 // shape - a blurred shadow cast from the letterforms themselves.
 
+import type { Vector2Like } from '../math/Vector2'
 import { AABB } from '../math/AABB'
 import { bumpMeshGeometryEpoch, bumpObjectRecordEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
-import type { ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
+import type {ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { sameGauge, type LineCap, type LineJoin, type StrokeAlign, type StrokeGauge } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
@@ -318,19 +319,19 @@ export abstract class Shape extends Node {
 
   // Gradient geometry. Assigning a point announces itself; reaching through one to write .x
   // does not - see contentEpoch.ts, and assign a new object instead.
-  private _fillLinearGradientStartPoint: Point2 = { x: 0, y: 0 }
-  get fillLinearGradientStartPoint(): Point2 {
+  private _fillLinearGradientStartPoint: Vector2Like = { x: 0, y: 0 }
+  get fillLinearGradientStartPoint(): Vector2Like {
     return this._fillLinearGradientStartPoint
   }
-  set fillLinearGradientStartPoint(value: Point2) {
+  set fillLinearGradientStartPoint(value: Vector2Like) {
     this._fillLinearGradientStartPoint = value
     bumpObjectRecordEpoch()
   }
-  private _fillLinearGradientEndPoint: Point2 = { x: 0, y: 0 }
-  get fillLinearGradientEndPoint(): Point2 {
+  private _fillLinearGradientEndPoint: Vector2Like = { x: 0, y: 0 }
+  get fillLinearGradientEndPoint(): Vector2Like {
     return this._fillLinearGradientEndPoint
   }
-  set fillLinearGradientEndPoint(value: Point2) {
+  set fillLinearGradientEndPoint(value: Vector2Like) {
     this._fillLinearGradientEndPoint = value
     bumpObjectRecordEpoch()
   }
@@ -344,11 +345,11 @@ export abstract class Shape extends Node {
     bumpObjectRecordEpoch()
   }
 
-  private _fillRadialGradientStartPoint: Point2 = { x: 0, y: 0 }
-  get fillRadialGradientStartPoint(): Point2 {
+  private _fillRadialGradientStartPoint: Vector2Like = { x: 0, y: 0 }
+  get fillRadialGradientStartPoint(): Vector2Like {
     return this._fillRadialGradientStartPoint
   }
-  set fillRadialGradientStartPoint(value: Point2) {
+  set fillRadialGradientStartPoint(value: Vector2Like) {
     this._fillRadialGradientStartPoint = value
     bumpObjectRecordEpoch()
   }
@@ -361,11 +362,11 @@ export abstract class Shape extends Node {
     this._fillRadialGradientStartRadius = value
     bumpObjectRecordEpoch()
   }
-  private _fillRadialGradientEndPoint: Point2 = { x: 0, y: 0 }
-  get fillRadialGradientEndPoint(): Point2 {
+  private _fillRadialGradientEndPoint: Vector2Like = { x: 0, y: 0 }
+  get fillRadialGradientEndPoint(): Vector2Like {
     return this._fillRadialGradientEndPoint
   }
-  set fillRadialGradientEndPoint(value: Point2) {
+  set fillRadialGradientEndPoint(value: Vector2Like) {
     this._fillRadialGradientEndPoint = value
     bumpObjectRecordEpoch()
   }

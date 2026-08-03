@@ -41,7 +41,7 @@ import type { Node, NodeTransform } from '../shapes/Node'
 import type { Shape } from '../shapes/Shape'
 import { draggableGroup, type TransformableNode } from '../shapes/Group'
 import type { Transformer } from '../shapes/Transformer'
-import { Vector2 } from '../math/Vector2'
+import { Vector2, type Vector2Like } from '../math/Vector2'
 import {
   applyWorldTransform,
   resizeFactors,
@@ -65,11 +65,8 @@ export interface PointerInput {
   pointerType: string
 }
 
-/** A point in canvas-relative CSS pixels. */
-export interface ScreenPoint {
-  x: number
-  y: number
-}
+/** A point in canvas-relative CSS pixels - the units a pointer event arrives in. */
+export type ScreenPoint = Vector2Like
 
 export interface SceneInputDispatcherOptions {
   /** Where empty-space events fire and where bubbling ends - normally the scene root. */
@@ -116,7 +113,7 @@ interface NodeSnapshot {
 /** A one-pointer drag moving nodes. Each keeps its own start position. */
 interface NodeDragSession {
   nodes: TransformableNode[]
-  startPositions: { x: number; y: number }[]
+  startPositions: Vector2Like[]
   anchorWorld: Vector2
   active: boolean
 }
@@ -303,7 +300,7 @@ export class SceneInputDispatcher {
     this.root.fire(type, init, true)
   }
 
-  private toCanvasPoint(e: PointerEvent | WheelEvent | MouseEvent): { x: number; y: number } {
+  private toCanvasPoint(e: PointerEvent | WheelEvent | MouseEvent): Vector2Like {
     const rect = this.canvas?.getBoundingClientRect()
     return { x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) }
   }

@@ -5,6 +5,7 @@
 // (loadSvg.ts, needs a browser DOMParser) is exercised on-screen, not here.
 // Run with: npx tsx src/svg/selfTest.ts
 
+import type { Vector2Like } from '../math/Vector2'
 import { flattenPathData } from './flattenPath'
 import { classifyContours, signedArea, pointInPolygon } from '../render/contours'
 import { triangulateGroup } from './triangulate'
@@ -13,7 +14,7 @@ import { parseColor } from './color'
 import { elementToPathData } from './shapeToPath'
 import { gradientToFill, type SvgGradient } from './gradient'
 import { Path } from '../shapes/Path'
-import type { MeshSink, Point2 } from '../render/meshFormat'
+import type {MeshSink} from '../render/meshFormat'
 
 let count = 0
 function assert(cond: boolean, msg: string): void {
@@ -23,7 +24,7 @@ function assert(cond: boolean, msg: string): void {
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
 
 // Area covered by a triangle list over a shared vertex array (sum of |signed area|).
-function trianglesArea(vertices: Point2[], indices: number[]): number {
+function trianglesArea(vertices: Vector2Like[], indices: number[]): number {
   let area = 0
   for (let i = 0; i < indices.length; i += 3) {
     const a = vertices[indices[i]], b = vertices[indices[i + 1]], c = vertices[indices[i + 2]]

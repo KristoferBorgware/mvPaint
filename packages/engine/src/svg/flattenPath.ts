@@ -3,8 +3,8 @@
 // we adaptively flatten the resulting cubic/quadratic segments into line points, split
 // into one contour per subpath (closed when the subpath ends with Z).
 
+import type { Vector2Like } from '../math/Vector2'
 import svgpath from 'svgpath'
-import type { Point2 } from '../render/meshFormat'
 import type { Contour } from '../render/stroke'
 
 export interface FlattenOptions {
@@ -38,7 +38,7 @@ export function flattenCubic(
   x1: number, y1: number,
   x2: number, y2: number,
   x3: number, y3: number,
-  tol: number, out: Point2[], depth = 0,
+  tol: number, out: Vector2Like[], depth = 0,
 ): void {
   const d1 = pointLineDistance(x1, y1, x0, y0, x3, y3)
   const d2 = pointLineDistance(x2, y2, x0, y0, x3, y3)
@@ -61,7 +61,7 @@ export function flattenQuadratic(
   x0: number, y0: number,
   cx: number, cy: number,
   x1: number, y1: number,
-  tol: number, out: Point2[],
+  tol: number, out: Vector2Like[],
 ): void {
   // Degree-elevate the quadratic to a cubic and reuse the cubic flattener.
   const c1x = x0 + (2 / 3) * (cx - x0), c1y = y0 + (2 / 3) * (cy - y0)
@@ -77,7 +77,7 @@ export function flattenPathData(d: string, options: FlattenOptions = {}): Contou
   if (options.matrix) sp = sp.matrix(options.matrix).abs()
 
   const contours: Contour[] = []
-  let current: Point2[] | null = null
+  let current: Vector2Like[] | null = null
 
   const finish = (closed: boolean) => {
     if (current && current.length >= 2) contours.push({ points: current, closed })

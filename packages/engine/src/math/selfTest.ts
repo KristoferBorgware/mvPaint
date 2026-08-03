@@ -6,6 +6,7 @@ import { Matrix4x4 } from './Matrix4x4'
 import { Quaternion } from './Quaternion'
 import { Ray } from './Ray'
 import { Transform } from './Transform'
+import { Vector2, type Vector2Like } from './Vector2'
 import { Vector3 } from './Vector3'
 
 const PIDIV2 = Math.PI / 2
@@ -168,6 +169,24 @@ assert(Transform.identity().forward().nearEquals(Vector3.forward()), 'identity f
     r.mul(r.inverse()).rotateVector(Vector3.unitX()).nearEquals(Vector3.unitX(), 1e-4),
     'q * q^-1 = identity',
   )
+}
+
+// --- one 2D vector: the class and its data shape are the same two fields ------------------
+//
+// Vector2Like is `Pick<Vector2, 'x' | 'y'>`, so these assertions are really about what the file
+// COMPILES to: an object literal has to be accepted where the type is asked for (that is what
+// keeps `points: [{ x, y }]` legal in every public API), and a class instance has to be
+// accepted in the same place (that is what keeps the two from being alternatives). If either
+// stopped holding, this file would not typecheck - the assertions below are the receipt.
+{
+  const literal: Vector2Like = { x: 3, y: 4 }
+  const instance: Vector2Like = new Vector2(3, 4)
+  assert(literal.x === instance.x && literal.y === instance.y, 'a literal and an instance describe the same point')
+
+  // And a function written against the data shape takes either, with no conversion anywhere.
+  const lengthOf = (v: Vector2Like) => Math.hypot(v.x, v.y)
+  assert(near(lengthOf(literal), 5) && near(lengthOf(instance), 5), 'code written against the type accepts both')
+  assert(near(new Vector2(3, 4).length(), 5), 'and the class still carries the arithmetic')
 }
 
 console.log(`[math] self-test passed (${count} assertions)`)

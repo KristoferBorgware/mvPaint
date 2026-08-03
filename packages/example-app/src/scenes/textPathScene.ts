@@ -19,7 +19,7 @@ import {
   flattenPathData,
   loadDefaultVectorFonts,
   TextPathGeometry,
-  type Point2,
+  type Vector2Like,
   type Scene,
   type TextPathOptions,
   type VectorFonts,
@@ -35,8 +35,8 @@ export async function prepareTextPathScene(): Promise<void> {
 }
 
 /** Walks a curve end to end so it can be drawn as the polyline it already is. */
-function outline(path: TextPathGeometry, step = 4): Point2[] {
-  const points: Point2[] = []
+function outline(path: TextPathGeometry, step = 4): Vector2Like[] {
+  const points: Vector2Like[] = []
   for (let d = 0; d <= path.length; d += step) {
     const p = path.sampleAt(d)
     if (p) points.push({ x: p.x, y: p.y })

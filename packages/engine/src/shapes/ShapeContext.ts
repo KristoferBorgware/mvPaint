@@ -57,15 +57,9 @@
 // A FILL has no segments - it is a region, not a boundary - so fill() paints the whole
 // current path with the style current at the moment it is called.
 
+import type { Vector2Like } from '../math/Vector2'
 import { parseColor, parseStops } from '../render/color'
-import type {
-  ColorInput,
-  ColorStopInput,
-  FillPriority,
-  GradientStop,
-  MeshMaterial,
-  Point2,
-} from '../render/meshFormat'
+import type {ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { classifyContours } from '../render/contours'
 import { flattenCubic, flattenPathData, flattenQuadratic } from '../svg/flattenPath'
@@ -84,12 +78,12 @@ import type { Shape } from './Shape'
 export interface SegmentStyle {
   fill?: ColorInput
   fillPriority?: FillPriority
-  fillLinearGradientStartPoint?: Point2
-  fillLinearGradientEndPoint?: Point2
+  fillLinearGradientStartPoint?: Vector2Like
+  fillLinearGradientEndPoint?: Vector2Like
   fillLinearGradientColorStops?: readonly ColorStopInput[]
-  fillRadialGradientStartPoint?: Point2
+  fillRadialGradientStartPoint?: Vector2Like
   fillRadialGradientStartRadius?: number
-  fillRadialGradientEndPoint?: Point2
+  fillRadialGradientEndPoint?: Vector2Like
   fillRadialGradientEndRadius?: number
   fillRadialGradientColorStops?: readonly ColorStopInput[]
   stroke?: ColorInput
@@ -124,7 +118,7 @@ export type DrawOp =
   | {
       readonly kind: 'stroke'
       readonly material: number
-      readonly points: readonly Point2[]
+      readonly points: readonly Vector2Like[]
       readonly closed: boolean
       readonly width: number
       readonly join: LineJoin
@@ -149,7 +143,7 @@ interface ResolvedStyle {
 
 /** A run of points; `styles[i]` is the style of the segment ending at `points[i]`. */
 interface SubPath {
-  points: Point2[]
+  points: Vector2Like[]
   styles: ResolvedStyle[]
   closed: boolean
 }
@@ -168,7 +162,7 @@ function arcSteps(radius: number, sweep: number, tolerance: number): number {
   return Math.max(2, Math.ceil(Math.abs(sweep) / maxAngle))
 }
 
-function samePoint(a: Point2, b: Point2): boolean {
+function samePoint(a: Vector2Like, b: Vector2Like): boolean {
   return Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9
 }
 
@@ -180,7 +174,7 @@ export class ShapeContext {
   private readonly subpaths: SubPath[] = []
   private open: SubPath | null = null
   /** Where the next segment starts. Survives closePath(), like the current point does. */
-  private cursor: Point2 = { x: 0, y: 0 }
+  private cursor: Vector2Like = { x: 0, y: 0 }
 
   private style_: ResolvedStyle
 
@@ -292,7 +286,7 @@ export class ShapeContext {
   /** A quadratic Bézier from the current point, flattened to within `tolerance`. */
   quadraticCurveTo(cx: number, cy: number, x: number, y: number): this {
     const from = this.ensureOpen()
-    const out: Point2[] = []
+    const out: Vector2Like[] = []
     flattenQuadratic(from.x, from.y, cx, cy, x, y, this.tolerance, out)
     for (const p of out) this.push(p)
     return this
@@ -301,7 +295,7 @@ export class ShapeContext {
   /** A cubic Bézier from the current point, flattened to within `tolerance`. */
   bezierCurveTo(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): this {
     const from = this.ensureOpen()
-    const out: Point2[] = []
+    const out: Vector2Like[] = []
     flattenCubic(from.x, from.y, c1x, c1y, c2x, c2y, x, y, this.tolerance, out)
     for (const p of out) this.push(p)
     return this
@@ -420,12 +414,12 @@ export class ShapeContext {
     return this
   }
 
-  private ensureOpen(): Point2 {
+  private ensureOpen(): Vector2Like {
     if (!this.open) this.moveTo(this.cursor.x, this.cursor.y)
     return this.cursor
   }
 
-  private push(p: Point2): void {
+  private push(p: Vector2Like): void {
     if (!this.open) {
       // Drawing with no subpath open starts one. Where it starts depends on whether there
       // is a current point to start FROM: after a closePath there is (the point the closed
@@ -509,7 +503,7 @@ export class ShapeContext {
     return this.fill().stroke()
   }
 
-  private emitStroke(points: readonly Point2[], closed: boolean, style: ResolvedStyle): void {
+  private emitStroke(points: readonly Vector2Like[], closed: boolean, style: ResolvedStyle): void {
     if (points.length < 2 || style.strokeWidth <= 0) return
     this.ops.push({
       kind: 'stroke',
@@ -524,7 +518,7 @@ export class ShapeContext {
   }
 
   /** A subpath's points as a ring: no repeated closing point, which earcut would trip on. */
-  private ringOf(sub: SubPath): Point2[] {
+  private ringOf(sub: SubPath): Vector2Like[] {
     const points = sub.points
     const last = points.length - 1
     if (points.length > 1 && samePoint(points[last], points[0])) return points.slice(0, last)

@@ -18,9 +18,10 @@
 // zoom context). True screen-aware density (re-tessellate when the on-screen size
 // changes) is a follow-up once the batcher can pass pixels-per-unit into tessellation.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
-import { strokePolyline, type Point2 } from '../render/stroke'
+import {strokePolyline} from '../render/stroke'
 
 /**
  * Segments needed so the chord deviation (sagitta) stays within `tolerance` world units:
@@ -89,7 +90,7 @@ export class Circle extends Shape {
     // Fill: a triangle fan from the center to n perimeter points. Color is not part of
     // the geometry - the fragment shader reads the object's fillColor (solid) or
     // gradient parameters.
-    const rim: Point2[] = []
+    const rim: Vector2Like[] = []
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2
       rim.push({ x: Math.cos(a) * r, y: Math.sin(a) * r })

@@ -22,7 +22,7 @@
 // The distinction is deliberate: the parser is what got expensive, not the outlines, and only
 // the applications that need arbitrary fonts should pay for it.
 
-import type { Point2 } from '../render/meshFormat'
+import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
 import { classifyContours } from '../render/contours'
 import { triangulateGroup } from '../svg/triangulate'
@@ -35,7 +35,7 @@ export interface VectorGlyphMesh {
   /** Closed rings: what the contour stroker outlines, and what the fill was cut from. */
   contours: Contour[]
   /** Fill triangulation: vertices plus triangle indices into them. */
-  vertices: Point2[]
+  vertices: Vector2Like[]
   indices: number[]
 }
 
@@ -87,7 +87,7 @@ export const EMPTY_GLYPH_MESH: VectorGlyphMesh = { contours: [], vertices: [], i
  * show the overlaps punched out as holes.
  */
 export function meshFromContours(contours: Contour[]): VectorGlyphMesh {
-  const vertices: Point2[] = []
+  const vertices: Vector2Like[] = []
   const indices: number[] = []
   for (const group of classifyContours(contours)) {
     const triangulated = triangulateGroup(group)

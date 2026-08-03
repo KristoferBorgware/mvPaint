@@ -2,7 +2,7 @@
 // (a*x + c*y + e, b*x + d*y + f). Used to accumulate an element's CTM down the SVG tree
 // and to bake it into flattened contour points and gradient coordinates.
 
-import type { Point2 } from '../render/meshFormat'
+import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
 
 export type Mat2x3 = [number, number, number, number, number, number]
@@ -21,7 +21,7 @@ export function multiply(m1: Mat2x3, m2: Mat2x3): Mat2x3 {
   ]
 }
 
-export function applyPoint(m: Mat2x3, x: number, y: number): Point2 {
+export function applyPoint(m: Mat2x3, x: number, y: number): Vector2Like {
   return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] }
 }
 

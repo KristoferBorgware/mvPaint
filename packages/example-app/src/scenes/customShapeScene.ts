@@ -12,13 +12,7 @@
 // in the same scene-wide order as everything else - none of which is written below, because
 // none of it has to be.
 
-import {
-  CustomShape,
-  Text,
-  type CustomShapeOptions,
-  type Scene,
-  type ShapeContext,
-} from '@mvpaint/engine'
+import { CustomShape, Text, type CustomShapeOptions, type Scene, type ShapeContext, type Vector2Like } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -168,7 +162,7 @@ class Wave extends CustomShape {
 
   protected override describe(ctx: ShapeContext): void {
     const steps = 64
-    const at = (i: number): { x: number; y: number } => {
+    const at = (i: number): Vector2Like => {
       const t = i / steps
       return { x: t * this.span, y: Math.sin(t * Math.PI * 3 + this.phase) * this.amplitude }
     }

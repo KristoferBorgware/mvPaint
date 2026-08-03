@@ -23,7 +23,7 @@
 // carries bundler-only asset imports, and this package has to run under node too. flattenPath
 // is pure curve subdivision - and sharing it is what makes an outline flattened here identical
 // to one flattened by the offline atlas generator, or by the engine's own SVG loader.
-import type { Point2 } from '@mvpaint/engine/src/render/meshFormat'
+import type { Vector2Like } from '@mvpaint/engine/src/math/Vector2'
 import type { Contour } from '@mvpaint/engine/src/render/stroke'
 import { flattenCubic, flattenQuadratic } from '@mvpaint/engine/src/svg/flattenPath'
 import type { Glyph as OpenTypeGlyph, PathCommand } from 'opentype.js/dist/opentype.mjs'
@@ -44,7 +44,7 @@ export const DEFAULT_CURVE_TOLERANCE_EM = 1 / 400
 // edge lands exactly ON the ring, where point-in-polygon is undefined.
 const DUPLICATE_EPSILON = 1e-6
 
-function appendPoint(points: Point2[], x: number, y: number): void {
+function appendPoint(points: Vector2Like[], x: number, y: number): void {
   const last = points[points.length - 1]
   if (last && Math.abs(last.x - x) < DUPLICATE_EPSILON && Math.abs(last.y - y) < DUPLICATE_EPSILON) return
   points.push({ x, y })
@@ -58,7 +58,7 @@ function appendPoint(points: Point2[], x: number, y: number): void {
  */
 export function contoursFromCommands(commands: readonly PathCommand[], tolerance: number): Contour[] {
   const contours: Contour[] = []
-  let current: Point2[] | null = null
+  let current: Vector2Like[] | null = null
   let x = 0
   let y = 0
 
@@ -100,7 +100,7 @@ export function contoursFromCommands(commands: readonly PathCommand[], tolerance
         const cy = -(command.y1 ?? 0)
         const ex = command.x ?? 0
         const ey = -(command.y ?? 0)
-        const out: Point2[] = []
+        const out: Vector2Like[] = []
         flattenQuadratic(x, y, cx, cy, ex, ey, tolerance, out)
         for (const p of out) appendPoint(current, p.x, p.y)
         x = ex
@@ -115,7 +115,7 @@ export function contoursFromCommands(commands: readonly PathCommand[], tolerance
         const c2y = -(command.y2 ?? 0)
         const ex = command.x ?? 0
         const ey = -(command.y ?? 0)
-        const out: Point2[] = []
+        const out: Vector2Like[] = []
         flattenCubic(x, y, c1x, c1y, c2x, c2y, ex, ey, tolerance, out)
         for (const p of out) appendPoint(current, p.x, p.y)
         x = ex

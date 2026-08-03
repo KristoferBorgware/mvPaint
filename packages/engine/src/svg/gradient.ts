@@ -7,7 +7,8 @@
 // Non-uniform scale on a radial gradient is approximated (our shader draws circles, not
 // ellipses); linear gradients are exact under any affine transform.
 
-import type { GradientStop, Point2, RGBA } from '../render/meshFormat'
+import type { Vector2Like } from '../math/Vector2'
+import type {GradientStop, RGBA} from '../render/meshFormat'
 import { applyPoint, scaleFactor, type Mat2x3 } from './matrix'
 
 export type GradientUnits = 'userSpaceOnUse' | 'objectBoundingBox'
@@ -51,15 +52,15 @@ export interface Bounds {
 
 export interface LinearGradientFill {
   fillPriority: 'linear-gradient'
-  start: Point2
-  end: Point2
+  start: Vector2Like
+  end: Vector2Like
   stops: GradientStop[]
 }
 export interface RadialGradientFill {
   fillPriority: 'radial-gradient'
-  start: Point2
+  start: Vector2Like
   startRadius: number
-  end: Point2
+  end: Vector2Like
   endRadius: number
   stops: GradientStop[]
 }
@@ -69,7 +70,7 @@ export type GradientFill = LinearGradientFill | RadialGradientFill
 // coordinate is a fraction of the bounding box (gradientTransform applies in that
 // fractional space); for userSpaceOnUse it is a local length (gradientTransform applies
 // directly).
-function toLocal(gx: number, gy: number, g: SvgGradient, bbox: Bounds): Point2 {
+function toLocal(gx: number, gy: number, g: SvgGradient, bbox: Bounds): Vector2Like {
   if (g.units === 'objectBoundingBox') {
     const t = applyPoint(g.transform, gx, gy)
     return { x: bbox.x + t.x * bbox.width, y: bbox.y + t.y * bbox.height }

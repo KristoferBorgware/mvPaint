@@ -13,6 +13,8 @@
 // A positive shadowSpread grows the silhouette before that blur, so it needs its own room
 // on top; a negative one only ever shrinks it, so it needs none.
 
+import type { Vector2Like } from '../math/Vector2'
+
 /** Canvas 2D's shadowBlur -> Gaussian sigma: "half the value of shadowBlur". */
 export function shadowSigma(blur: number): number {
   return Math.max(0, blur) / 2
@@ -151,7 +153,7 @@ export function shadowWorldOffset(
   offsetY: number,
   scaleX: number,
   scaleY: number,
-): { x: number; y: number } {
+): Vector2Like {
   return { x: offsetX * scaleX, y: -offsetY * scaleY }
 }
 
@@ -165,7 +167,7 @@ export function shadowWorldOffset(
  * for free - the quad carries the world transform, so the baked blur is magnified by
  * exactly the shape's own scale.
  */
-export function worldAxisScale(m: ArrayLike<number>): { x: number; y: number } {
+export function worldAxisScale(m: ArrayLike<number>): Vector2Like {
   return {
     x: Math.hypot(m[0], m[1]),
     y: Math.hypot(m[4], m[5]),

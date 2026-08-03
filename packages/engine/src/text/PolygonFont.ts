@@ -23,7 +23,7 @@
 // curve tolerance the outline was flattened at - and it makes the file a fraction of the size
 // of the same numbers written as floats.
 
-import type { Point2 } from '../render/meshFormat'
+import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
 import type { BmDecoration, FontMetrics, Glyph } from './msdfMetrics'
 import { resolveStyle, STYLE_ORDER, type FontStyle } from './msdfProvider'
@@ -147,7 +147,7 @@ export class PolygonFont implements VectorGlyphFont {
 
 /** A flat [x, y, x, y, ...] ring as the closed Contour the stroker and earcut speak. */
 function toContour(flat: readonly number[]): Contour {
-  const points: Point2[] = []
+  const points: Vector2Like[] = []
   for (let i = 0; i + 1 < flat.length; i += 2) points.push({ x: flat[i], y: flat[i + 1] })
   return { points, closed: true }
 }

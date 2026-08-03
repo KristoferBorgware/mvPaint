@@ -13,16 +13,12 @@
 // (a shear term, applied between rotation and scale), so rotate+skew+scale spans every
 // invertible 2x2 and the decomposition below is EXACT rather than a best fit.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import type { AABB } from '../math/AABB'
 import type { Node } from './Node'
 import type { TransformableNode } from './Group'
-
-export interface Point2 {
-  x: number
-  y: number
-}
 
 /** The eight resize handles, named by edge/corner. 'top' is +y (the scene is y-up). */
 export type ResizeAnchor =
@@ -50,7 +46,7 @@ export const RESIZE_ANCHORS: readonly ResizeAnchor[] = [
 ]
 
 /** Which way each anchor sits from the box center, in box-local units of half-extent. */
-export const ANCHOR_DIRECTION: Record<ResizeAnchor, Point2> = {
+export const ANCHOR_DIRECTION: Record<ResizeAnchor, Vector2Like> = {
   'top-left': { x: -1, y: 1 },
   'top-center': { x: 0, y: 1 },
   'top-right': { x: 1, y: 1 },
@@ -79,7 +75,7 @@ export interface OrientedBox {
 const MIN_SCALE = 1e-4
 const TWO_PI = Math.PI * 2
 
-function rotate2(p: Point2, angle: number): Point2 {
+function rotate2(p: Vector2Like, angle: number): Vector2Like {
   const c = Math.cos(angle)
   const s = Math.sin(angle)
   return { x: p.x * c - p.y * s, y: p.x * s + p.y * c }
@@ -92,7 +88,7 @@ export function worldRotationOf(node: Node): number {
 }
 
 /** The world-space position of one of a box's anchors. */
-export function anchorPosition(box: OrientedBox, anchor: ResizeAnchor): Point2 {
+export function anchorPosition(box: OrientedBox, anchor: ResizeAnchor): Vector2Like {
   const dir = ANCHOR_DIRECTION[anchor]
   const local = { x: dir.x * box.halfW, y: dir.y * box.halfH }
   const world = rotate2(local, box.rotation)
@@ -103,7 +99,7 @@ export function anchorPosition(box: OrientedBox, anchor: ResizeAnchor): Point2 {
  * The rotate handle sits `distance` world units beyond the top edge, along the box's own
  * +y axis - so it stays clear of the top-center resize anchor and follows the rotation.
  */
-export function rotateAnchorPosition(box: OrientedBox, distance: number): Point2 {
+export function rotateAnchorPosition(box: OrientedBox, distance: number): Vector2Like {
   const world = rotate2({ x: 0, y: box.halfH + distance }, box.rotation)
   return { x: box.cx + world.x, y: box.cy + world.y }
 }
@@ -114,7 +110,7 @@ export function rotateAnchorPosition(box: OrientedBox, distance: number): Point2
  * is taken back out to world - so the box is tight around a rotated shape instead of
  * being the looser axis-aligned box around it.
  */
-export function boxFromPoints(points: readonly Point2[], rotation: number): OrientedBox | null {
+export function boxFromPoints(points: readonly Vector2Like[], rotation: number): OrientedBox | null {
   if (points.length === 0) return null
 
   let minX = Infinity
@@ -141,9 +137,9 @@ export function boxFromPoints(points: readonly Point2[], rotation: number): Orie
 }
 
 /** The four world-space corners of a node's local bounds. */
-export function worldCorners(node: Node, bounds: AABB): Point2[] {
+export function worldCorners(node: Node, bounds: AABB): Vector2Like[] {
   const world = node.worldMatrix()
-  const corners: Point2[] = []
+  const corners: Vector2Like[] = []
   for (const [x, y] of [
     [bounds.min.x, bounds.min.y],
     [bounds.max.x, bounds.min.y],
@@ -187,7 +183,7 @@ export function boxForNodes(
   })
   if (measurable.length === 0) return null
 
-  const points: Point2[] = []
+  const points: Vector2Like[] = []
   for (const node of measurable) {
     points.push(...worldCorners(node, boundsOf(node)!))
   }
@@ -206,7 +202,7 @@ export interface ResizeDelta {
   scaleX: number
   scaleY: number
   /** The world point held still by this resize (the opposite anchor, or the center). */
-  fixed: Point2
+  fixed: Vector2Like
   /** The frame the scaling happens in - the box's rotation. */
   rotation: number
 }
@@ -224,7 +220,7 @@ export interface ResizeDelta {
 export function resizeFactors(
   box: OrientedBox,
   anchor: ResizeAnchor,
-  pointer: Point2,
+  pointer: Vector2Like,
   options: ResizeOptions = {},
 ): ResizeDelta {
   const dir = ANCHOR_DIRECTION[anchor]
@@ -293,8 +289,8 @@ export function oppositeAnchor(anchor: ResizeAnchor): ResizeAnchor {
  */
 export function rotationDelta(
   box: OrientedBox,
-  start: Point2,
-  pointer: Point2,
+  start: Vector2Like,
+  pointer: Vector2Like,
   snaps?: readonly number[],
   tolerance = 0.12,
 ): number {
@@ -330,7 +326,7 @@ export function snapAngle(angle: number, snaps: readonly number[], tolerance: nu
 }
 
 /** A world-space matrix that scales about `fixed`, along axes turned by `rotation`. */
-export function scaleAbout(fixed: Point2, rotation: number, scaleX: number, scaleY: number): Matrix4x4 {
+export function scaleAbout(fixed: Vector2Like, rotation: number, scaleX: number, scaleY: number): Matrix4x4 {
   const toOrigin = Matrix4x4.translation(new Vector3(-fixed.x, -fixed.y, 0))
   const back = Matrix4x4.translation(new Vector3(fixed.x, fixed.y, 0))
   return back
@@ -341,7 +337,7 @@ export function scaleAbout(fixed: Point2, rotation: number, scaleX: number, scal
 }
 
 /** A world-space matrix that rotates by `angle` about `center`. */
-export function rotateAbout(center: Point2, angle: number): Matrix4x4 {
+export function rotateAbout(center: Vector2Like, angle: number): Matrix4x4 {
   return Matrix4x4.translation(new Vector3(center.x, center.y, 0))
     .mul(Matrix4x4.rotationZ(angle))
     .mul(Matrix4x4.translation(new Vector3(-center.x, -center.y, 0)))

@@ -31,6 +31,7 @@
 // size on a retina display as on an ordinary one - the device pixel ratio only decides how
 // many physical pixels render each logical one. Callers pass the viewport's CSS size.
 
+import type { Vector2Like } from '../math/Vector2'
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Ray } from '../math/Ray'
@@ -81,7 +82,7 @@ export class Camera2D {
    * The world point at the middle of the view - what rotation turns about, and what a
    * caller usually means by "where the camera is looking".
    */
-  center(viewportWidth: number, viewportHeight: number): { x: number; y: number } {
+  center(viewportWidth: number, viewportHeight: number): Vector2Like {
     const { width, height } = this.viewSize(viewportWidth, viewportHeight)
     return { x: this.x + width / 2, y: this.y - height / 2 }
   }

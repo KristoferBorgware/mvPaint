@@ -24,8 +24,9 @@
 // application's choice - a bundled polygon atlas, or a font file parsed at runtime through
 // @mvpaint/ttf - and this node cannot tell the difference (see text/vectorGlyphs.ts).
 
+import type { Vector2Like } from '../math/Vector2'
 import { TextBlock, type TextBlockOptions } from './TextBlock'
-import type { MeshMaterial, MeshSink, Point2, RGBA } from '../render/meshFormat'
+import type {MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import type { VectorFonts } from '../text/vectorGlyphs'
 import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
@@ -136,7 +137,7 @@ export class VectorText extends TextBlock {
       // Every outline point goes through the same corner transform the MSDF lane applies to
       // the glyph's quad - the faux-italic shear, then any curve rotation - so an outline
       // shears and bends exactly as its box does.
-      const place = (p: Point2): Point2 =>
+      const place = (p: Vector2Like): Vector2Like =>
         quadCorner(quad, quad.originX + p.x * quad.unitScale, quad.originY + p.y * quad.unitScale)
 
       // Fill: the cached triangulation, transformed into this instance's place on the line.

@@ -23,7 +23,7 @@
 // and never spills past its own edge. Word count per page is therefore an outcome, not a
 // setting - which is also why the layout reports the total it actually placed.
 
-import { layoutText, msdfFontProvider, Rect, Text, type Container, type ColorInput, type TextRun, type TextRunStyle } from '@mvpaint/engine'
+import { layoutText, msdfFontProvider, Rect, Text, type Container, type ColorInput, type TextRun, type TextRunStyle, type Vector2Like } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 
 // --- page grid ------------------------------------------------------------------------
@@ -93,7 +93,7 @@ export interface LoremLayout {
   /** Words actually placed across every page, which the fitting decides - see the file header. */
   wordCount: number
   /** The top-left corner of page `index` (0-based, row-major), in world space. */
-  pageOrigin: (index: number) => { x: number; y: number }
+  pageOrigin: (index: number) => Vector2Like
   /** The whole grid's bounds, for framing a title above it or a note below it. */
   gridTop: number
   gridBottom: number
@@ -251,7 +251,7 @@ function computeLayout(): LoremLayout {
   const totalWidth = GRID_COLS * PAGE_WIDTH + (GRID_COLS - 1) * PAGE_GAP
   const totalHeight = GRID_ROWS * pageHeight + (GRID_ROWS - 1) * PAGE_GAP
 
-  const pageOrigin = (index: number): { x: number; y: number } => {
+  const pageOrigin = (index: number): Vector2Like => {
     const col = index % GRID_COLS
     const row = Math.floor(index / GRID_COLS)
     return {
@@ -272,7 +272,7 @@ function computeLayout(): LoremLayout {
  * padding, below the caption); each later paragraph adds its own `y` from the layout to this
  * same point.
  */
-export function addPageFrame(root: Container, index: number, layout: LoremLayout): { x: number; y: number } {
+export function addPageFrame(root: Container, index: number, layout: LoremLayout): Vector2Like {
   const origin = layout.pageOrigin(index)
 
   // The page origin IS the sheet's top-left corner, which is where a Rect starts.

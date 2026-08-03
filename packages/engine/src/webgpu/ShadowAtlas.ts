@@ -25,6 +25,7 @@
 // Coverage is single-channel (r8unorm): a shadow is a stencil, and its colour lives in the
 // per-object record, so one byte per texel is all the atlas ever needs to store.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { createFilterTextureBindGroupLayout, createShadowBakeProjectLayout } from './layouts'
@@ -60,7 +61,7 @@ interface PlannedBake {
   shape: Shape
   silhouette: NonNullable<ReturnType<typeof silhouetteOf>>
   region: ShadowRegion
-  rect: { x: number; y: number }
+  rect: Vector2Like
   alloc: { width: number; height: number }
 }
 
@@ -262,7 +263,7 @@ export class ShadowAtlas {
   }
 
   /** Reserves a slot rectangle, or null when the atlas is full at its current size. */
-  private packSlot(width: number, height: number): { x: number; y: number } | null {
+  private packSlot(width: number, height: number): Vector2Like | null {
     const w = width + SLOT_GUTTER
     const h = height + SLOT_GUTTER
     if (this.cursorX + w > this.atlasSize) {
@@ -414,7 +415,7 @@ export class ShadowAtlas {
     shape: Shape,
     silhouette: { positions: number[]; indices: number[]; minX: number; minY: number },
     region: ShadowRegion,
-    rect: { x: number; y: number },
+    rect: Vector2Like,
     alloc: { width: number; height: number },
   ): void {
     const quad = shadowQuadBounds(silhouette.minX, silhouette.minY, region)
@@ -478,7 +479,7 @@ export class ShadowAtlas {
       params: GPUBuffer,
       source: GPUTextureView,
       target: GPUTextureView,
-      viewport: { x: number; y: number },
+      viewport: Vector2Like,
       load: GPULoadOp,
     ): void => {
       const paramsBindGroup = this.device.createBindGroup({

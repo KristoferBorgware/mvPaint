@@ -20,6 +20,7 @@
 // entirely: the mesh batcher's shape SET never changes, so pulling one out - or just starting
 // and releasing it - costs nothing beyond these five quads.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Container } from '../shapes/Container'
 import { Rect } from '../shapes/Rect'
 import type { RGBA } from '../render/meshFormat'
@@ -58,7 +59,7 @@ export class MarqueeOverlay extends Container {
 
   /** Draws (or moves) the box between two world-space corners, at the given camera zoom
    * (for a constant on-screen border weight); null hides it. */
-  update(corners: { from: { x: number; y: number }; to: { x: number; y: number } } | null, zoom: number): void {
+  update(corners: { from: Vector2Like; to: Vector2Like } | null, zoom: number): void {
     if (!corners) {
       this.hideAll()
       return

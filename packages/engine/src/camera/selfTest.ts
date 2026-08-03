@@ -3,6 +3,7 @@
 // No GPU - the camera is plain matrix math. Run with:
 //   npx tsx src/camera/selfTest.ts
 
+import type { Vector2Like } from '../math/Vector2'
 import { Camera2D } from './Camera2D'
 import { Vector3 } from '../math/Vector3'
 import { Vector4 } from '../math/Vector4'
@@ -27,7 +28,7 @@ const H = 600
 const viewport = { width: W, height: H }
 
 /** Where a world point lands in clip space, as NDC (x,y in [-1,1], y UP). */
-function toNdc(camera: Camera2D, wx: number, wy: number): { x: number; y: number } {
+function toNdc(camera: Camera2D, wx: number, wy: number): Vector2Like {
   const h = camera.viewProjection(W, H).transformVector4(new Vector4(wx, wy, 0, 1))
   return { x: h.x / h.w, y: h.y / h.w }
 }
@@ -158,7 +159,7 @@ function toNdc(camera: Camera2D, wx: number, wy: number): { x: number; y: number
 {
   const camera = new Camera2D({ x: 10, y: 20, zoom: 1.5 })
   const HAIR = 0.01 // pixels - a hundredth of one, far below anything visible
-  const samePixel = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+  const samePixel = (a: Vector2Like, b: Vector2Like) =>
     Math.hypot(a.x - b.x, a.y - b.y) * camera.zoom < HAIR
 
   const anchor = screenToWorld(camera, 200, 150, viewport)!

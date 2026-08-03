@@ -12,6 +12,7 @@
 // shaders/shadow.glsl.ts, which explains the two places it is corrected and why they have to
 // agree. The y negation below is the first of them.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { Shape } from '../shapes/Shape'
 import { silhouetteOf, MAX_REGION, type ShadowSlot } from '../webgpu/ShadowAtlas'
 import { shadowQuadBounds, shadowRegion, shadowSigma, slotBucket, type ShadowRegion } from '../render/shadowMath'
@@ -48,7 +49,7 @@ interface PlannedBake {
   shape: Shape
   silhouette: Silhouette
   region: ShadowRegion
-  rect: { x: number; y: number }
+  rect: Vector2Like
   alloc: { width: number; height: number }
 }
 
@@ -206,7 +207,7 @@ export class GlShadowAtlas {
   }
 
   /** Reserve a slot rectangle, or null when the atlas is full at its current size. */
-  private packSlot(width: number, height: number): { x: number; y: number } | null {
+  private packSlot(width: number, height: number): Vector2Like | null {
     const w = width + SLOT_GUTTER
     const h = height + SLOT_GUTTER
     if (this.cursorX + w > this.atlasSize) {
@@ -320,7 +321,7 @@ export class GlShadowAtlas {
       setParams: () => void,
       src: WebGLTexture,
       dst: WebGLTexture,
-      viewport: { x: number; y: number },
+      viewport: Vector2Like,
       clear: boolean,
     ): void => {
       this.beginPass(dst, viewport, region, clear)
@@ -398,7 +399,7 @@ export class GlShadowAtlas {
    */
   private beginPass(
     target: WebGLTexture,
-    viewport: { x: number; y: number },
+    viewport: Vector2Like,
     region: ShadowRegion,
     clear: boolean,
   ): void {

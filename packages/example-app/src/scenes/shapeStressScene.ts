@@ -20,7 +20,7 @@
 // mean only whatever the camera happens to be framing actually reaches the mesh batcher -
 // true even at the default zoom, since the field is larger than the default view.
 
-import { Circle, Path, Rect, Text, type Point2, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
+import { Circle, Path, Rect, Text, type Vector2Like, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -61,8 +61,8 @@ function randomFillColor(): RGBA {
   return hslColor(Math.random(), randomBetween(0.55, 0.85), randomBetween(0.4, 0.62))
 }
 
-function regularPolygonPoints(sides: number, radius: number): Point2[] {
-  const points: Point2[] = []
+function regularPolygonPoints(sides: number, radius: number): Vector2Like[] {
+  const points: Vector2Like[] = []
   for (let i = 0; i < sides; i++) {
     const a = (i / sides) * Math.PI * 2 - Math.PI / 2
     points.push({ x: Math.cos(a) * radius, y: Math.sin(a) * radius })
@@ -70,8 +70,8 @@ function regularPolygonPoints(sides: number, radius: number): Point2[] {
   return points
 }
 
-function starPoints(spikes: number, outerRadius: number, innerRadius: number): Point2[] {
-  const points: Point2[] = []
+function starPoints(spikes: number, outerRadius: number, innerRadius: number): Vector2Like[] {
+  const points: Vector2Like[] = []
   for (let i = 0; i < spikes * 2; i++) {
     const r = i % 2 === 0 ? outerRadius : innerRadius
     const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2

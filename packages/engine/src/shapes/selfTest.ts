@@ -4,6 +4,7 @@
 // thin layer of scene bookkeeping over these and isn't covered here. Run with:
 //   npx tsx src/shapes/selfTest.ts
 
+import type { Vector2Like } from '../math/Vector2'
 import { listenerCount, resetListenerCensus } from '../events/listenerCensus'
 import type { NodeEvent } from '../events/NodeEvent'
 import { AABB } from '../math/AABB'
@@ -61,7 +62,7 @@ const localBoundsOf = (node: TransformableNode): AABB | null =>
   node instanceof Group ? node.bounds() : node.localBounds()
 
 /** World-space corners of a node's local bounds, for checking a transform's effect. */
-function corners(node: Shape): { x: number; y: number }[] {
+function corners(node: Shape): Vector2Like[] {
   const b = node.localBounds()
   const w = node.worldMatrix()
   return [

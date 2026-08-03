@@ -17,6 +17,7 @@
 // the vector path draws through) are exercised on-screen, not here.
 // Run with: npx tsx src/text/selfTest.ts
 
+import type { Vector2Like } from '../math/Vector2'
 import { kerningFor, normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
 import { layoutText, type FontProvider, type TextRun } from './layout'
 import { arcPath, circlePath, TextPathGeometry } from './textPath'
@@ -677,7 +678,7 @@ type BentQuad = ReturnType<typeof layoutText>['quads'][number]
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
 const baselineMidpoint = (q: BentQuad) => quadCorner(q, (q.x0 + q.x1) / 2, q.originY)
 /** Distance from the origin, which the circle examples below put their centre at. */
-const radiusOf = (p: { x: number; y: number }) => Math.hypot(p.x, p.y)
+const radiusOf = (p: Vector2Like) => Math.hypot(p.x, p.y)
 
 // --- the curve itself: distance in, position and direction out ---
 {

@@ -10,12 +10,13 @@
 // and is out of scope here; Polyline is stroke-only. width/height are unused (its size
 // comes from its own point list, not a settable size parameter).
 
+import type { Vector2Like } from '../math/Vector2'
 import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
-import { strokePolyline, type Point2 } from '../render/stroke'
+import {strokePolyline} from '../render/stroke'
 
 export interface PolylineOptions extends ShapeOptions {
-  points: Point2[]
+  points: Vector2Like[]
   /** Loop back to the start (a closed contour) vs. an open path with caps. Default false. */
   closed?: boolean
 }
@@ -23,7 +24,7 @@ export interface PolylineOptions extends ShapeOptions {
 export class Polyline extends Shape {
   override readonly nodeName: string = 'Polyline'
 
-  points: Point2[]
+  points: Vector2Like[]
   closed: boolean
 
   constructor(options: PolylineOptions) {

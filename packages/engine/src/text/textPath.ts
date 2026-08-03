@@ -17,8 +17,8 @@
 // svg/flattenPath turns path data into contours, and arcPath/circlePath below build the two
 // cases that come up most - which is why nothing here evaluates a bezier.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
-import type { Point2 } from '../render/meshFormat'
 import type { ShapedText } from './layout'
 import { quadCorner, type TextQuad } from './textQuad'
 
@@ -112,7 +112,7 @@ export class TextPathGeometry {
    * Builds a curve from a run of points. Repeated points are dropped - a zero-length segment
    * has no direction to give a glyph - and a closed curve is completed back to its start.
    */
-  static fromPoints(points: readonly Point2[], closed = false): TextPathGeometry {
+  static fromPoints(points: readonly Vector2Like[], closed = false): TextPathGeometry {
     const xs: number[] = []
     const ys: number[] = []
     for (const p of points) {
@@ -154,7 +154,7 @@ export class TextPathGeometry {
 
   /** The same curve walked the other way. Distance 0 becomes what was the far end. */
   reversed(): TextPathGeometry {
-    const points: Point2[] = []
+    const points: Vector2Like[] = []
     for (let i = this.xs.length - 1; i >= 0; i--) points.push({ x: this.xs[i], y: this.ys[i] })
     return TextPathGeometry.fromPoints(points, this.closed)
   }
@@ -194,7 +194,7 @@ export class TextPathGeometry {
 
 export interface ArcPathOptions {
   /** Centre of the arc; default the origin. */
-  center?: Point2
+  center?: Vector2Like
   /** Flattening error in world units; smaller means more segments. Default 0.25. */
   tolerance?: number
   /** Fixed segment count, overriding what `tolerance` would choose. */
@@ -239,7 +239,7 @@ export function circlePath(radius: number, options: CirclePathOptions = {}): Tex
  * The corners of an arc, flattened to the requested tolerance. `includeEnd` is false for a
  * closed curve, whose final point is its first.
  */
-function arcPoints(radius: number, startAngle: number, sweep: number, options: ArcPathOptions, includeEnd: boolean): Point2[] {
+function arcPoints(radius: number, startAngle: number, sweep: number, options: ArcPathOptions, includeEnd: boolean): Vector2Like[] {
   if (!(radius > 0) || !Number.isFinite(radius)) throw new Error(`arcPath: radius must be positive, got ${radius}`)
   const cx = options.center?.x ?? 0
   const cy = options.center?.y ?? 0
@@ -249,7 +249,7 @@ function arcPoints(radius: number, startAngle: number, sweep: number, options: A
   const maxStep = 2 * Math.acos(Math.max(-1, 1 - tolerance / radius))
   const segments = options.segments ?? Math.max(2, Math.ceil(Math.abs(sweep) / maxStep))
 
-  const points: Point2[] = []
+  const points: Vector2Like[] = []
   const last = includeEnd ? segments : segments - 1
   for (let i = 0; i <= last; i++) {
     const a = startAngle + (sweep * i) / segments

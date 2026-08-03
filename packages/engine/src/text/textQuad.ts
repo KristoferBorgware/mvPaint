@@ -8,6 +8,7 @@
 // draw these (the text lane's batcher, the outline shape, and the bounds used for picking and
 // culling), so the transform lives here once instead of three times over.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { RGBA } from '../render/meshFormat'
 
 /**
@@ -65,7 +66,7 @@ export interface TextQuad extends QuadTransform {
  * corner for the quad's own outline, or any point in the glyph's frame - an outline consumer
  * puts every contour point through this, so glyph outlines bend with the box they belong to.
  */
-export function quadCorner(quad: QuadTransform, x: number, y: number): { x: number; y: number } {
+export function quadCorner(quad: QuadTransform, x: number, y: number): Vector2Like {
   const sheared = x + quad.skew * (y - quad.skewPivotY)
   if (quad.rotation === 0) return { x: sheared, y }
   const cos = Math.cos(quad.rotation)

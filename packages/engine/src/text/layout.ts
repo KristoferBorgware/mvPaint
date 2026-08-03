@@ -9,8 +9,9 @@
 // quads. Coordinates are the node's local space: +x right, +y up, the block's top-left at the
 // origin (horizontal lines descend to negative y; vertical columns extend to negative x).
 
+import type { Vector2Like } from '../math/Vector2'
 import { parseColor, parseStops } from '../render/color'
-import type { ColorInput, ColorStopInput, FillPriority, GradientStop, Point2, RGBA } from '../render/meshFormat'
+import type {ColorInput, ColorStopInput, FillPriority, GradientStop, RGBA} from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
 // From the metrics module, not from webgpu/FontBook which re-exports it: the shaper is pure
@@ -21,8 +22,8 @@ import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetric
 
 export interface TextGradient {
   type: 'linear' | 'radial'
-  start: Point2
-  end: Point2
+  start: Vector2Like
+  end: Vector2Like
   /** Radial only; ignored for linear. */
   startRadius?: number
   endRadius?: number
@@ -122,9 +123,9 @@ export interface FontProvider {
 /** Per-run material: transform-independent fill/gradient + per-letter stroke + coverage dilation. */
 export interface TextMaterial {
   fillPriority: FillPriority
-  gradientStart: Point2
+  gradientStart: Vector2Like
   gradientStartRadius: number
-  gradientEnd: Point2
+  gradientEnd: Vector2Like
   gradientEndRadius: number
   stops: GradientStop[]
   strokeColor: RGBA
@@ -155,7 +156,7 @@ export interface ShapedText {
 }
 
 const BLACK: RGBA = [0, 0, 0, 1]
-const ORIGIN: Point2 = { x: 0, y: 0 }
+const ORIGIN: Vector2Like = { x: 0, y: 0 }
 const FAUX_BOLD_DILATE = 0.03 // fraction of font size, in world px
 const FAUX_ITALIC_SKEW = 0.24 // tangent of the shear angle
 

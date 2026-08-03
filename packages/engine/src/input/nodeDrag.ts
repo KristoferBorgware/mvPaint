@@ -2,13 +2,9 @@
 // so it can be checked without a canvas or a GPU (see input/selfTest.ts) - the same way
 // cameraControls.ts holds the pan/zoom math.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { Node } from '../shapes/Node'
 import { Vector3 } from '../math/Vector3'
-
-export interface Point2 {
-  x: number
-  y: number
-}
 
 /**
  * Where a node's x/y must land so that the world point grabbed at drag start stays under
@@ -27,9 +23,9 @@ export function draggedPosition(
   node: Node,
   startX: number,
   startY: number,
-  anchorWorld: Point2,
-  currentWorld: Point2,
-): Point2 {
+  anchorWorld: Vector2Like,
+  currentWorld: Vector2Like,
+): Vector2Like {
   let dx = currentWorld.x - anchorWorld.x
   let dy = currentWorld.y - anchorWorld.y
 

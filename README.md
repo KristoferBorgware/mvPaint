@@ -351,7 +351,7 @@ packages/example-app   a React host for the demo scenes; the engine needs none o
 ```
 
 Each engine subdirectory carries a `selfTest.ts` covering its pure half, and the two satellite
-packages carry their own — 2,170 assertions across thirteen suites, run under plain Node with no
+packages carry their own — 2,173 assertions across thirteen suites, run under plain Node with no
 GPU. Anything needing a GPU or a DOM is verified in a browser instead.
 
 ### Demo scenes

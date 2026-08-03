@@ -11,6 +11,7 @@
 // true: the fallback can implement this interface without importing a single WebGPU symbol,
 // and deleting the fallback later takes nothing with it.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { AABB } from '../math/AABB'
 import type { Camera2D } from '../camera/Camera2D'
 import type { Scene } from '../scene/Scene'
@@ -84,7 +85,7 @@ export interface SceneRendererHandle extends SceneResources {
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
   localBoundsOf: (node: TransformableNode) => AABB
   /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
-  nodesInBox: (from: { x: number; y: number }, to: { x: number; y: number }, options?: MarqueeOptions) => Shape[]
+  nodesInBox: (from: Vector2Like, to: Vector2Like, options?: MarqueeOptions) => Shape[]
   /**
    * Called every frame, before the draw - animate scene content here.
    *

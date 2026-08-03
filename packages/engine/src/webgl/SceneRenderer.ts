@@ -19,6 +19,7 @@
 //
 // All four lanes are here. What is missing relative to WebGPU is MSAA, and nothing else.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Camera2D } from '../camera/Camera2D'
 import { flipRows, type CapturePlan, type CaptureView } from '../render/capture'
 import { GlCaptureTarget } from './CaptureTarget'
@@ -224,7 +225,7 @@ export class GlSceneRenderer {
     return localBoundsOf(node, this.fonts)
   }
 
-  nodesInBox(from: { x: number; y: number }, to: { x: number; y: number }, options: MarqueeOptions = {}): Shape[] {
+  nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
     return nodesInBox(this.scene, from, to, { fontBook: this.fonts, ...options })
   }
 

@@ -37,6 +37,7 @@
 // missing one: the scene then renders through a default camera, which puts world (0, 0) at
 // the viewport's top-left corner at one world unit per CSS pixel.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Shape } from '../shapes/Shape'
 import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
 import { Text } from '../shapes/Text'
@@ -287,7 +288,7 @@ export class SceneRenderer {
    * Every visible, pickable shape meeting a world-space rectangle - what a marquee
    * selects. Goes through the renderer so Text is measured against the loaded atlases.
    */
-  nodesInBox(from: { x: number; y: number }, to: { x: number; y: number }, options: MarqueeOptions = {}): Shape[] {
+  nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
     return nodesInBox(this.scene, from, to, { fontBook: this.fontBook, ...options })
   }
 

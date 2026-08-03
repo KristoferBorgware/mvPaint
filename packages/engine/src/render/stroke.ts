@@ -27,6 +27,7 @@
 // out of scope here. Vertices are also not deduplicated across adjacent segments/
 // joints - a bit of extra geometry traded for a simple, easy-to-verify algorithm.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { MeshSink } from './meshFormat'
 import { nestingDepths, signedArea } from './contours'
 
@@ -51,11 +52,6 @@ export type LineCap = 'butt' | 'round' | 'square'
  * Shape.strokeAlign.
  */
 export type StrokeAlign = 'center' | 'inside' | 'outside'
-
-export interface Point2 {
-  x: number
-  y: number
-}
 
 export interface StrokeOptions {
   width: number
@@ -115,7 +111,7 @@ export interface StrokeGauge {
 }
 
 export interface Contour {
-  points: readonly Point2[]
+  points: readonly Vector2Like[]
   closed?: boolean
 }
 
@@ -134,7 +130,7 @@ function perp(dx: number, dy: number): [number, number] {
 /** Emits a round fan from `center`, sweeping `sweep` radians starting at `startAngle`. */
 function emitArc(
   sink: MeshSink,
-  center: Point2,
+  center: Vector2Like,
   radius: number,
   startAngle: number,
   sweep: number,
@@ -156,7 +152,7 @@ function emitArc(
 /** Emits a round or square cap at `p`, given the OUTWARD-facing side normal there. */
 function strokeCap(
   sink: MeshSink,
-  p: Point2,
+  p: Vector2Like,
   normal: [number, number],
   s: number,
   cap: LineCap,
@@ -195,7 +191,7 @@ function strokeCap(
  * Strokes a single contour into `sink`. Points are consumed as given (already in the
  * space the shape wants to draw in - typically its own local space, pre-transform).
  */
-export function strokePolyline(points: readonly Point2[], sink: MeshSink, options: StrokeOptions): void {
+export function strokePolyline(points: readonly Vector2Like[], sink: MeshSink, options: StrokeOptions): void {
   // A gauged stroke is the ordinary one, done somewhere else and brought back. Push the path
   // through the transform, stroke it THERE - where the width is the width that was asked for,
   // and where the joins, the caps and the miter limit are all measured in the units they are
@@ -382,7 +378,7 @@ export function strokeContours(contours: readonly Contour[], sink: MeshSink, opt
   if (align !== 'center' && contours.length > 1) {
     // Only closed rings with area participate in nesting, exactly as they do in the fill.
     const indices: number[] = []
-    const rings: (readonly Point2[])[] = []
+    const rings: (readonly Vector2Like[])[] = []
     contours.forEach((contour, i) => {
       if (closedOf(contour) && contour.points.length >= 3) {
         indices.push(i)
@@ -410,7 +406,7 @@ function flipAlign(align: StrokeAlign): StrokeAlign {
 }
 
 /** x' = a·x + c·y, y' = b·x + d·y - see StrokeGauge for the convention. */
-function applyGauge(g: StrokeGauge, p: Point2): Point2 {
+function applyGauge(g: StrokeGauge, p: Vector2Like): Vector2Like {
   return { x: g.a * p.x + g.c * p.y, y: g.b * p.x + g.d * p.y }
 }
 

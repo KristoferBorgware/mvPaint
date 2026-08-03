@@ -8,16 +8,16 @@
 // it: filling an SVG path, filling a glyph outline, and deciding which side of a contour a
 // stroke should expand onto (see stroke.ts, strokeAlign). None of those is about SVG.
 
-import type { Point2 } from './meshFormat'
+import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from './stroke'
 
 export interface ContourGroup {
-  outer: Point2[]
-  holes: Point2[][]
+  outer: Vector2Like[]
+  holes: Vector2Like[][]
 }
 
 /** Shoelace signed area; positive = counter-clockwise. */
-export function signedArea(points: readonly Point2[]): number {
+export function signedArea(points: readonly Vector2Like[]): number {
   let sum = 0
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     sum += (points[j].x - points[i].x) * (points[j].y + points[i].y)
@@ -26,7 +26,7 @@ export function signedArea(points: readonly Point2[]): number {
 }
 
 /** Ray-casting point-in-polygon (handles concave); boundary cases are undefined. */
-export function pointInPolygon(px: number, py: number, poly: readonly Point2[]): boolean {
+export function pointInPolygon(px: number, py: number, poly: readonly Vector2Like[]): boolean {
   let inside = false
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x, yi = poly[i].y
@@ -40,7 +40,7 @@ export function pointInPolygon(px: number, py: number, poly: readonly Point2[]):
 
 // A point on the ring (first-edge midpoint) - for non-touching contours it lies inside
 // exactly the rings that contain this ring, which is all the nesting test needs.
-function sampleOnRing(ring: readonly Point2[]): Point2 {
+function sampleOnRing(ring: readonly Vector2Like[]): Vector2Like {
   return { x: (ring[0].x + ring[1].x) / 2, y: (ring[0].y + ring[1].y) / 2 }
 }
 
@@ -52,7 +52,7 @@ function sampleOnRing(ring: readonly Point2[]): Point2 {
  * reason: an inside/outside stroke expands away from, or into, the FILL, and on a hole ring
  * the fill is on the opposite side to the one the ring's own winding would suggest.
  */
-export function nestingDepths(rings: readonly (readonly Point2[])[]): number[] {
+export function nestingDepths(rings: readonly (readonly Vector2Like[])[]): number[] {
   const n = rings.length
   const depth = new Array<number>(n).fill(0)
   for (let i = 0; i < n; i++) {
@@ -68,7 +68,7 @@ export function classifyContours(contours: readonly Contour[]): ContourGroup[] {
   // Only closed contours with real area participate in fill.
   const rings = contours
     .filter((c) => c.closed && c.points.length >= 3)
-    .map((c) => c.points as Point2[])
+    .map((c) => c.points as Vector2Like[])
   const n = rings.length
   if (n === 0) return []
 

@@ -38,6 +38,7 @@
 // unit quads that actually needed it. A permanent, zero-scale slot avoids that entirely:
 // the set never changes, so selecting/deselecting costs nothing beyond these few quads.
 
+import type { Vector2Like } from '../math/Vector2'
 import { Container } from './Container'
 import { Rect } from './Rect'
 import type { Node } from './Node'
@@ -357,7 +358,7 @@ export class Transformer extends Container {
     let bestDistance = reach
     let bestIsCorner = false
 
-    const consider = (name: TransformerAnchor, at: { x: number; y: number }, isCorner: boolean): void => {
+    const consider = (name: TransformerAnchor, at: Vector2Like, isCorner: boolean): void => {
       const distance = Math.hypot(at.x - worldX, at.y - worldY)
       if (distance > reach) return
       // A corner wins over an edge it overlaps, even if the edge's center is nearer.

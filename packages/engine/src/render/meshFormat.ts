@@ -4,11 +4,11 @@
 // (rects, polygons, future paths) flows through this one layout so it can share a
 // single pipeline and buffer set.
 
+import type { Vector2Like } from '../math/Vector2'
 // Defined next to the parser that produces it, and re-exported here because this is where the
 // rest of the engine has always imported it from.
 import type { RGBA } from './color'
 export { isRGBA, parseColor, parseStops, type ColorInput, type ColorStopInput, type RGBA } from './color'
-export type Point2 = { x: number; y: number }
 
 /** Which fill mechanism a shape's fill triangles use. */
 export type FillPriority = 'color' | 'linear-gradient' | 'radial-gradient'
@@ -34,12 +34,12 @@ export interface MeshMaterial {
   fillPriority: FillPriority
   fill: RGBA
   stroke: RGBA
-  fillLinearGradientStartPoint: Point2
-  fillLinearGradientEndPoint: Point2
+  fillLinearGradientStartPoint: Vector2Like
+  fillLinearGradientEndPoint: Vector2Like
   fillLinearGradientColorStops: readonly GradientStop[]
-  fillRadialGradientStartPoint: Point2
+  fillRadialGradientStartPoint: Vector2Like
   fillRadialGradientStartRadius: number
-  fillRadialGradientEndPoint: Point2
+  fillRadialGradientEndPoint: Vector2Like
   fillRadialGradientEndRadius: number
   fillRadialGradientColorStops: readonly GradientStop[]
 }

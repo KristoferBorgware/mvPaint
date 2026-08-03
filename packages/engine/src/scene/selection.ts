@@ -4,6 +4,7 @@
 // this point", and so tests world-space bounds rather than exact triangles: a marquee is
 // a coarse gesture, and box-vs-box is what every editor uses for it.
 
+import type { Vector2Like } from '../math/Vector2'
 import { AABB } from '../math/AABB'
 import { Vector3 } from '../math/Vector3'
 import type { Scene } from './Scene'
@@ -59,8 +60,8 @@ function contains2D(outer: AABB, inner: AABB): boolean {
  */
 export function nodesInBox(
   scene: Scene,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
+  from: Vector2Like,
+  to: Vector2Like,
   options: MarqueeOptions = {},
 ): Shape[] {
   const mode = options.mode ?? 'intersect'

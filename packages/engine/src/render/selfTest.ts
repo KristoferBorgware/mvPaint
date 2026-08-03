@@ -6,6 +6,7 @@
 // covered is the CPU-side sizing and placement those passes are driven by.
 // Run with: npx tsx src/render/selfTest.ts
 
+import type { Vector2Like } from '../math/Vector2'
 import { Rect , type RectOptions } from '../shapes/Rect'
 import { Circle, circleSegments } from '../shapes/Circle'
 import { CustomShape } from '../shapes/CustomShape'
@@ -29,7 +30,7 @@ import {
   type RGBA,
 } from './meshFormat'
 import { MESH_VERTEX_LAYOUT, SHADOW_VERTEX_LAYOUT } from '../webgpu/vertexLayouts'
-import { strokeContours, strokePolyline, type LineCap, type Point2, type StrokeAlign } from './stroke'
+import {strokeContours, strokePolyline, type LineCap, type StrokeAlign} from './stroke'
 import { signedArea } from './contours'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
@@ -519,7 +520,7 @@ assert(
 
 // --- a 4-corner miter loop matches the closed-form 90° formula independent of Rect ---
 {
-  const corners: Point2[] = [
+  const corners: Vector2Like[] = [
     { x: -2, y: -1 },
     { x: 2, y: -1 },
     { x: 2, y: 1 },
@@ -541,8 +542,8 @@ assert(
 // the checks are about extent. A 100-unit square stroked 20 wide reaches 10 past its outline
 // centred, 20 past it outside, and not at all inside.
 {
-  const square = (ccw: boolean): Point2[] => {
-    const ring: Point2[] = [
+  const square = (ccw: boolean): Vector2Like[] => {
+    const ring: Vector2Like[] = [
       { x: 0, y: 0 },
       { x: 100, y: 0 },
       { x: 100, y: 100 },
@@ -550,7 +551,7 @@ assert(
     ]
     return ccw ? ring : [...ring].reverse()
   }
-  const extent = (points: Point2[], align: StrokeAlign) => {
+  const extent = (points: Vector2Like[], align: StrokeAlign) => {
     const { sink, verts } = capturingSink()
     strokePolyline(points, sink, { width: 20, closed: true, join: 'miter', align })
     return {
@@ -577,7 +578,7 @@ assert(
   }
 
   // An open path has no inside to be on, so the alignment is ignored rather than guessed at.
-  const line: Point2[] = [
+  const line: Vector2Like[] = [
     { x: 0, y: 0 },
     { x: 100, y: 0 },
   ]
@@ -601,14 +602,14 @@ assert(
 // own ring, so stroking it by the ring's own reckoning would put the ribbon in the void - the
 // hole would appear to shrink while the outer edge grew inward.
 {
-  const outer: Point2[] = [
+  const outer: Vector2Like[] = [
     { x: 0, y: 0 },
     { x: 100, y: 0 },
     { x: 100, y: 100 },
     { x: 0, y: 100 },
   ]
   // Wound the other way, as a hole is.
-  const hole: Point2[] = [
+  const hole: Vector2Like[] = [
     { x: 40, y: 40 },
     { x: 40, y: 60 },
     { x: 60, y: 60 },
@@ -641,7 +642,7 @@ assert(
 // --- miter limit: a near-180° hairpin turn falls back to bevel below the limit ---
 {
   // An open 3-point path with a single joint at the origin, folding back on itself.
-  const points: Point2[] = [
+  const points: Vector2Like[] = [
     { x: -1, y: 0.05 },
     { x: 0, y: 0 },
     { x: -1, y: -0.05 },
@@ -659,7 +660,7 @@ assert(
 
 // --- round join: a clean 90° turn sweeps a quarter-circle arc of the expected size ---
 {
-  const points: Point2[] = [
+  const points: Vector2Like[] = [
     { x: 0, y: -1 },
     { x: 0, y: 0 },
     { x: 1, y: 0 },
@@ -673,7 +674,7 @@ assert(
 
 // --- caps: butt adds nothing, square/round add the expected fixed geometry per end ---
 {
-  const line: Point2[] = [
+  const line: Vector2Like[] = [
     { x: 0, y: 0 },
     { x: 1, y: 0 },
   ]
@@ -692,13 +693,13 @@ assert(
 
 // --- multi-contour: an outer loop and a hole are stroked independently ---
 {
-  const outer: Point2[] = [
+  const outer: Vector2Like[] = [
     { x: -2, y: -2 },
     { x: 2, y: -2 },
     { x: 2, y: 2 },
     { x: -2, y: 2 },
   ]
-  const hole: Point2[] = [
+  const hole: Vector2Like[] = [
     { x: -1, y: -1 },
     { x: 1, y: -1 },
     { x: 1, y: 1 },
@@ -1677,12 +1678,12 @@ assert(
 // transform is. Measuring the local triangles would only restate what the code does.
 {
   /** A point's world position, through the node's own matrix. */
-  const toWorld = (node: Shape, v: { x: number; y: number }): { x: number; y: number } => {
+  const toWorld = (node: Shape, v: Vector2Like): Vector2Like => {
     const m = node.worldMatrix().m
     return { x: m[0] * v.x + m[4] * v.y + m[12], y: m[1] * v.x + m[5] * v.y + m[13] }
   }
   /** Every stroke vertex's perpendicular distance from the line the segment runs along. */
-  const worldHalfWidths = (node: Shape, from: Point2, to: Point2): number[] => {
+  const worldHalfWidths = (node: Shape, from: Vector2Like, to: Vector2Like): number[] => {
     const a = toWorld(node, from)
     const b = toWorld(node, to)
     const dx = b.x - a.x

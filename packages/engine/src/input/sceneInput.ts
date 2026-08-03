@@ -34,6 +34,7 @@
 // is why nothing in the engine calls the attached set "the selection" except this file, whose
 // whole job is to be the ordinary case.
 
+import type { Vector2Like } from '../math/Vector2'
 import type { AABB } from '../math/AABB'
 import type { Camera2D } from '../camera/Camera2D'
 import type { Scene } from '../scene/Scene'
@@ -60,7 +61,7 @@ export interface SceneInputHost {
   readonly camera: Camera2D
   getZoom(): number
   pick(screenX: number, screenY: number): PickableNode | null
-  nodesInBox(from: { x: number; y: number }, to: { x: number; y: number }): Shape[]
+  nodesInBox(from: Vector2Like, to: Vector2Like): Shape[]
   localBoundsOf(node: TransformableNode): AABB
   addFrameListener(listener: (dt: number) => void): () => void
 }

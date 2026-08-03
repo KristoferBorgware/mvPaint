@@ -27,10 +27,11 @@
 // joins instead, as Circle does by default for the same reason - the difference is on the
 // order of the chord tolerance the arc was flattened at.
 
+import type { Vector2Like } from '../math/Vector2'
 import { circleSegments } from './Circle'
 import { Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
-import { strokePolyline, type Point2 } from '../render/stroke'
+import {strokePolyline} from '../render/stroke'
 
 /** One radius for every corner, or [topLeft, topRight, bottomRight, bottomLeft]. */
 export type CornerRadius = number | readonly [number, number, number, number]
@@ -85,7 +86,7 @@ function cornerSegmentsFor(radius: number): number {
  * replaced by an arc. The straight edges between the arcs are implicit - a corner's first
  * and last arc points ARE the tangent points, so consecutive corners connect directly.
  */
-function roundedContour(width: number, height: number, r: Radii, segments?: number): Point2[] {
+function roundedContour(width: number, height: number, r: Radii, segments?: number): Vector2Like[] {
   const w = width
   const b = -height
   const [tl, tr, br, bl] = r
@@ -97,7 +98,7 @@ function roundedContour(width: number, height: number, r: Radii, segments?: numb
     { cx: tl, cy: -tl, r: tl, from: Math.PI / 2 },
     { cx: bl, cy: b + bl, r: bl, from: Math.PI },
   ]
-  const points: Point2[] = []
+  const points: Vector2Like[] = []
   for (const c of corners) {
     if (c.r <= 0) {
       // A square corner is the single point the two edges meet at: the arc's centre is
@@ -144,7 +145,7 @@ export class Rect extends Shape {
 
     // Color is not part of the geometry in either branch - the fragment shader reads the
     // object's fillColor (solid) or gradient parameters.
-    let outline: Point2[]
+    let outline: Vector2Like[]
     if (rounded) {
       // Fill: a fan from the first outline point. The outline is convex, so a fan from any
       // one of its vertices covers it exactly, with no interior vertex to add.
