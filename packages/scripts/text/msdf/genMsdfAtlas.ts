@@ -37,7 +37,7 @@ const FONT_SIZE = 42 // SDF generation size in px; runtime scales freely from it
 const DISTANCE_RANGE = 4 // SDF spread in px; the shader uses it for the screen-px conversion.
 const TEXTURE_SIZE = 512 // one page must hold the whole charset (asserted below).
 
-type BmDecoration = import('@mvpaint/engine/src/text/msdfMetrics').BmDecoration
+type BmDecoration = import('@mvpaint/engine/core').BmDecoration
 
 interface BmChar {
   id: number

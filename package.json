@@ -8,15 +8,21 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @mvpaint/example-app",
-    "build": "npm run build -w @mvpaint/engine && npm run build -w @mvpaint/ttf && npm run build -w @mvpaint/scripts && npm run build -w @mvpaint/example-app",
+    "build": "npm run build:packages && npm run build -w @mvpaint/example-app",
+    "build:packages": "npm run build -w @mvpaint/engine && npm run build -w @mvpaint/ttf",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "preview": "npm run preview -w @mvpaint/example-app",
     "gen:fonts": "npm run gen:fonts -w @mvpaint/scripts",
     "gen:msdf": "npm run gen:msdf -w @mvpaint/scripts",
     "gen:polygons": "npm run gen:polygons -w @mvpaint/scripts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "changeset": "changeset",
+    "version": "changeset version && npm install --package-lock-only",
+    "release": "npm run build:packages && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.7",
     "vitest": "^4.1.10"
   }
 }

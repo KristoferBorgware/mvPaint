@@ -31,8 +31,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TtfFont, DEFAULT_CURVE_TOLERANCE_EM } from '@mvpaint/ttf'
-import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/src/text/PolygonFont'
-import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/src/text/PolygonFont'
+import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/core'
+import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FONT_SRC = join(HERE, '..', '..', 'fonts')

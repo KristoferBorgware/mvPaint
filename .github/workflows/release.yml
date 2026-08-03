@@ -1,0 +1,83 @@
+name: Release
+
+# Publishes @mvpaint/engine and @mvpaint/ttf to npm, in two steps that are both just merges.
+#
+# On a push to master this looks for pending changesets (.changeset/*.md). If it finds any, it
+# opens or updates a PR titled "Version Packages" containing nothing but the bump: new version
+# numbers, updated CHANGELOGs, dependency ranges realigned, changeset files consumed. Nobody
+# edits a version by hand and there is no bump step before a build.
+#
+# Merging that PR runs this workflow again. There are no changesets left by then, so instead it
+# builds the packages and publishes whatever versions are not yet on the registry.
+#
+# See .changeset/README.md for the authoring side of this.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Never two releases at once, and never cancel one halfway - an interrupted publish can leave
+# one package on the registry and the other not.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version branch and create the git tags
+      pull-requests: write # open and update the "Version Packages" PR
+      id-token: write # the OIDC token npm exchanges for publish rights
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Changesets compares against the base branch to work out what changed.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          # Deliberately no registry-url: that writes an .npmrc expecting NODE_AUTH_TOKEN, and
+          # there is no token here. Auth is OIDC - see the npm upgrade below.
+
+      - name: Upgrade npm
+        # Trusted publishing needs npm 11.5.1 or newer; the npm bundled with Node 22 is older.
+        # This is what exchanges the id-token above for short-lived registry credentials, so
+        # nothing long-lived is stored in the repo.
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Version or publish
+        uses: changesets/action@v1
+        with:
+          # Consumes the changesets and writes the bump. Runs only when changesets exist.
+          version: npm run version
+          # Builds and publishes. Runs only when none are left, i.e. on the merge of the PR
+          # the line above produced.
+          publish: npm run release
+          title: 'Version Packages'
+          commit: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signed provenance: npm records which repo, commit and workflow produced the tarball,
+          # and shows it on the package page. It is set here rather than in each package's
+          # publishConfig on purpose - npm can only generate an attestation inside a CI that
+          # issues it an OIDC token, and errors out anywhere else. In publishConfig it would
+          # follow the package everywhere and make it unpublishable from a laptop, which is
+          # exactly what the first release of each package has to be.
+          NPM_CONFIG_PROVENANCE: true

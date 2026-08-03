@@ -1,0 +1,15 @@
+# Git stores text with LF and, where core.autocrlf is on, hands Windows CRLF back on checkout.
+# For source that is invisible. For the generated font atlases it is not: their self-test
+# compares the file on disk byte-for-byte against what the generator would write today, and the
+# generator writes LF on every platform. Left alone, that test asks "are you on Windows?" and
+# fails there while passing in CI - which is worse than not having it, because the one thing it
+# exists to catch is a stale atlas nobody remembered to regenerate.
+#
+# Pinning these to LF makes the comparison mean what it says everywhere.
+packages/engine/src/text/fonts/*.json eol=lf
+
+# The atlases' other half, and the fonts they come from. Git detects these as binary on its own;
+# saying so explicitly costs nothing and removes any chance of a newline being "helpfully"
+# rewritten inside a PNG or a TTF.
+*.png binary
+*.ttf binary

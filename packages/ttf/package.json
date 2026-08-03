@@ -1,21 +1,65 @@
 {
   "name": "@mvpaint/ttf",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Vector glyphs from a font file at runtime - the opt-in font parser for @mvpaint/engine's vector text path.",
+  "keywords": [
+    "ttf",
+    "otf",
+    "font",
+    "opentype",
+    "glyph",
+    "outline",
+    "vector-text",
+    "mvpaint"
+  ],
+  "license": "MIT",
+  "author": "Kristofer Borgware",
+  "homepage": "https://github.com/KristoferBorgware/mvPaint/tree/master/packages/ttf#readme",
+  "bugs": {
+    "url": "https://github.com/KristoferBorgware/mvPaint/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KristoferBorgware/mvPaint.git",
+    "directory": "packages/ttf"
+  },
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run --root ../.. packages/ttf"
   },
+  "peerDependencies": {
+    "@mvpaint/engine": ">=0.1.0 <1.0.0"
+  },
   "dependencies": {
-    "@mvpaint/engine": "*",
     "opentype.js": "2.0.0"
   },
   "devDependencies": {
+    "@mvpaint/engine": ">=0.1.0 <1.0.0",
     "@types/node": "^26.1.1",
     "tsx": "^4.23.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5",
+    "vite-plugin-dts": "^4.5.4"
   }
 }

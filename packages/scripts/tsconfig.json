@@ -6,6 +6,8 @@
     "skipLibCheck": true,
 
     "moduleResolution": "bundler",
+    // Sibling workspace packages resolve to their src/, not their dist/ - see packages/ttf.
+    "customConditions": ["development"],
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,

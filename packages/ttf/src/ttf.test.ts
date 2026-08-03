@@ -12,11 +12,14 @@
 
 import { expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { kerningFor, type MsdfFontJson } from '@mvpaint/engine/src/text/msdfMetrics'
+import { kerningFor, type MsdfFontJson } from '@mvpaint/engine/core'
 import { contoursFromCommands } from './glyphOutline'
 import { TtfFontBook, TtfFont } from './TtfFont'
-import regularJson from '@mvpaint/engine/src/text/fonts/inter-regular.json'
-import regularPolygons from '@mvpaint/engine/src/text/fonts/inter-regular.polygons.json'
+// The committed atlases themselves, by path rather than through the package: they are generated
+// assets the engine happens to hold, not part of its API, and this test exists precisely to
+// compare against the files on disk. Test-only - nothing here ships.
+import regularJson from '../../engine/src/text/fonts/inter-regular.json'
+import regularPolygons from '../../engine/src/text/fonts/inter-regular.polygons.json'
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making

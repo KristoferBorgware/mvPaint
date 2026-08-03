@@ -7,6 +7,10 @@
     "skipLibCheck": true,
 
     "moduleResolution": "bundler",
+    // Resolve sibling workspace packages through their "development" export condition, i.e. to
+    // src/ rather than dist/. Without it tsc would typecheck this package against the engine's
+    // last build, and report nothing at all until someone had run one.
+    "customConditions": ["development"],
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,

@@ -14,7 +14,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TtfFont } from '@mvpaint/ttf'
-import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/src/text/PolygonFont'
+import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 import { buildPolygonAtlas } from './genPolygonAtlas'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

@@ -41,9 +41,18 @@ npm install
 npm run dev          # example app with every demo scene
 npm test             # Vitest suite across all packages (no GPU required)
 npm run test:watch   # rerun affected tests on change
-npm run build        # typecheck + production build
+npm run build        # build the packages, then the example app
+npm run typecheck    # tsc --noEmit across every package
 npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/scripts
+npm run changeset    # describe a change for the next release (see Releasing)
 ```
+
+Inside this repo the packages resolve to each other's `src/`, not their `dist/` — every entry in
+their `exports` lists a `development` condition ahead of the built one, which Vite, Vitest and
+`tsc` all honour here and no consumer ever sees. So the dev server, the test suite and the
+typechecker all read the source, and there is no build step between editing a file and running
+it. The one exception is the offline generators, which run under plain Node: their npm scripts
+pass `--conditions=development` explicitly.
 
 ## Creating a renderer
 
@@ -351,6 +360,9 @@ handle.input?.transformer?.on('attachchange', () => {
 
 ```
 packages/engine        the renderer - no demo content, no framework, no font parser
+  src/index.ts         the public entry point; needs a bundler (it carries the atlases)
+  src/core.ts          '@mvpaint/engine/core': the same engine minus device and assets,
+                       for node, workers, and anything measuring text before a canvas exists
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
   src/text/            the shaper, MSDF metrics, and the polygon atlas
@@ -366,6 +378,48 @@ packages/example-app   a React host for the demo scenes; the engine depends on n
 Each engine subdirectory carries a Vitest suite covering its pure logic, as do the two satellite
 packages. The suite runs under plain Node with no GPU and no DOM. Anything requiring either is
 verified in a browser.
+
+## Releasing
+
+Two of the four packages are published to npm:
+
+| Package | Published | Contents |
+| --- | --- | --- |
+| [`@mvpaint/engine`](https://www.npmjs.com/package/@mvpaint/engine) | yes | the renderer, plus the bundled Inter atlases |
+| [`@mvpaint/ttf`](https://www.npmjs.com/package/@mvpaint/ttf) | yes | the opt-in runtime font parser |
+| `@mvpaint/scripts` | no | offline tools; clone the repo to run them |
+| `@mvpaint/example-app` | no | the demo host |
+
+**Versions are never edited by hand, and there is no bump step before a build.** A change that
+should reach npm carries a *changeset*: `npm run changeset` records which packages it affects and
+whether it is a patch, minor or major, in a file you commit alongside the code.
+
+From there `.github/workflows/release.yml` does the rest. On a push to `master` it collects the
+pending changesets and opens a PR called **"Version Packages"** containing only the bump — new
+version numbers, updated changelogs, dependency ranges realigned. Merging that PR publishes.
+So a release is two merges: yours, and the bot's.
+
+Publishing authenticates through **npm trusted publishing**: the workflow presents a GitHub OIDC
+token and npm exchanges it for short-lived credentials, so there is no npm token in the repo's
+secrets to leak or rotate. Each package has to be registered for it once, on npmjs.com, against
+this repository and `release.yml` — see [.changeset/README.md](.changeset/README.md), which also
+covers how to choose a bump while both packages are pre-1.0.
+
+### The first publish
+
+Trusted publishing is configured per package on npmjs.com, and a package has to exist before it
+can be configured — so the first `0.1.0` of each goes up by hand, once, and CI takes over after
+that:
+
+```bash
+npm login
+npm run build:packages
+npm publish -w @mvpaint/engine
+npm publish -w @mvpaint/ttf
+```
+
+Then, on npmjs.com, open each package's **Settings → Trusted Publisher**, choose GitHub Actions,
+and enter this repository with workflow `release.yml`. Nothing needs to change in the repo.
 
 ## Architecture
 

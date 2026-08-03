@@ -4,8 +4,11 @@
 // through what that part guarantees, and every one of them pure - no GPU, no DOM, no browser.
 // Anything that needs a device is verified on screen instead (see ARCHITECTURE.md).
 //
-// They run from source, exactly as the packages are consumed inside this repo: `main` points
-// at src/index.ts, so there is no build step between editing a file and testing it.
+// They run from source, exactly as the packages are consumed inside this repo. The published
+// packages point `exports` at dist/, but every entry lists a "development" condition ahead of
+// it that points back at src/ - and Vite resolves that condition whenever it is not building
+// for production, which includes here. So there is still no build step between editing a file
+// and testing it, and what gets tested is the source rather than a stale dist.
 
 import { defineConfig } from 'vitest/config'
 

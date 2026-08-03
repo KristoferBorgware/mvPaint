@@ -2,13 +2,19 @@
 // and both text implementations (MSDF atlas text and outline-tessellated vector text) -
 // everything needed to render a 2D scene through createSceneRenderer(), without any
 // example/demo content.
+//
+// This entry point carries the bundled font assets, so it needs a bundler. The device-free,
+// asset-free subset of it - geometry, metrics, the style ladder, the outline tessellator - is
+// also published on its own as '@mvpaint/engine/core', for the things that cannot have one.
+// See core.ts.
+
+export * from './core'
 
 export * from './math/AABB'
 export * from './math/Matrix4x4'
 export * from './math/Quaternion'
 export * from './math/Ray'
 export * from './math/Transform'
-export * from './math/Vector2'
 export * from './math/Vector3'
 export * from './math/Vector4'
 
@@ -42,9 +48,7 @@ export * from './shapes/VectorText'
 
 export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './render/color'
-export type { LineJoin, LineCap, StrokeAlign } from './render/stroke'
 
-export * from './svg/flattenPath'
 export * from './svg/loadSvg'
 
 export * from './image/ImageTexture'
@@ -53,12 +57,10 @@ export * from './image/imageUv'
 export * from './image/svgSize'
 
 export * from './webgpu/FontBook'
-export * from './text/layout'
 export * from './text/textQuad'
 export * from './text/textPath'
-export * from './text/msdfMetrics'
-export * from './text/vectorGlyphs'
-export * from './text/PolygonFont'
+// The bundled polygon atlases - the one text module that needs a bundler, and the reason
+// core.ts stops where it does.
 export * from './text/vectorFonts'
 
 export * from './systems/CanvasResizer'

@@ -31,19 +31,19 @@
 // package downloads the parser at the moment it first parses a font, not on load.
 import type { Font as OpenTypeFont, Glyph as OpenTypeGlyph } from 'opentype.js/dist/opentype.mjs'
 
-// Imported by module path rather than from '@mvpaint/engine'. The engine's public entry point
-// pulls in `?url` imports for the atlas PNGs, which only a bundler can resolve - so importing
-// it here would make this package, and its self-test, unrunnable under node. The modules named
-// below are pure: geometry, metrics and the style ladder, no assets and no device.
-import type { FontMetrics, Glyph } from '@mvpaint/engine/src/text/msdfMetrics'
-import { resolveStyle, STYLE_ORDER, type FontStyle } from '@mvpaint/engine/src/text/msdfProvider'
-import type { ResolvedStyle } from '@mvpaint/engine/src/text/layout'
+// From '@mvpaint/engine/core', not '@mvpaint/engine'. The engine's main entry point pulls in
+// `?url` imports for the atlas assets, which only a bundler can resolve - so importing it here
+// would make this package, and its self-test, unrunnable under node. /core is the same engine
+// with those left out: geometry, metrics and the style ladder, no assets and no device.
+import type { FontMetrics, Glyph, ResolvedStyle, FontStyle } from '@mvpaint/engine/core'
 import {
+  resolveStyle,
+  STYLE_ORDER,
   meshFromContours,
   type VectorFonts,
   type VectorGlyphFont,
   type VectorGlyphMesh,
-} from '@mvpaint/engine/src/text/vectorGlyphs'
+} from '@mvpaint/engine/core'
 import { DEFAULT_CURVE_TOLERANCE_EM, glyphContours } from './glyphOutline'
 
 export interface TtfFontOptions {

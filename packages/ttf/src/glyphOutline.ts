@@ -19,13 +19,12 @@
 // glyph as several overlapping strokes (some script and decorative faces do) would show the
 // overlaps punched out as holes.
 
-// Imported by module path for the reason given in TtfFont.ts: the engine's public entry point
+// From '@mvpaint/engine/core' for the reason given in TtfFont.ts: the engine's main entry point
 // carries bundler-only asset imports, and this package has to run under node too. flattenPath
 // is pure curve subdivision - and sharing it is what makes an outline flattened here identical
 // to one flattened by the offline atlas generator, or by the engine's own SVG loader.
-import type { Vector2Like } from '@mvpaint/engine/src/math/Vector2'
-import type { Contour } from '@mvpaint/engine/src/render/stroke'
-import { flattenCubic, flattenQuadratic } from '@mvpaint/engine/src/svg/flattenPath'
+import type { Vector2Like, Contour } from '@mvpaint/engine/core'
+import { flattenCubic, flattenQuadratic } from '@mvpaint/engine/core'
 import type { Glyph as OpenTypeGlyph, PathCommand } from 'opentype.js/dist/opentype.mjs'
 
 /**

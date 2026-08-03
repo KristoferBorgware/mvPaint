@@ -1,0 +1,58 @@
+name: CI
+
+# Everything the release workflow checks before it publishes, run on the pull request instead,
+# so a red release is something you already knew about rather than something you find out on
+# the way to the registry.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Not just `npm run build:packages`: this proves the tarballs npm would actually upload
+      # are complete. The entry points, the type declarations and the eight font assets all
+      # have to be in them, and `files` in package.json is easy to get subtly wrong.
+      - name: Build and pack
+        run: |
+          npm run build:packages
+          npm pack -w @mvpaint/engine -w @mvpaint/ttf --pack-destination /tmp/packed
+          for t in /tmp/packed/*.tgz; do
+            echo "--- $t"
+            tar -tzf "$t" | sed 's|^package/||' | sort
+          done
+
+      - name: Check the packed engine carries its assets
+        run: |
+          cd /tmp/packed && tar -xzf mvpaint-engine-*.tgz
+          count=$(ls package/dist/assets | wc -l)
+          echo "assets in tarball: $count"
+          test "$count" -eq 8
