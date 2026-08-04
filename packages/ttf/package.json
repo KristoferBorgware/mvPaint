@@ -46,7 +46,9 @@
   "scripts": {
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --root ../.. packages/ttf"
+    "test": "vitest run --root ../.. packages/ttf",
+    "prepack": "node ../../scripts/strip-dev-condition.mjs strip",
+    "postpack": "node ../../scripts/strip-dev-condition.mjs restore"
   },
   "peerDependencies": {
     "@mvpaint/engine": ">=0.1.0 <1.0.0"

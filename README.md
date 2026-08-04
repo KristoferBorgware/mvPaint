@@ -108,10 +108,13 @@ npm run changeset    # describe a change for the next release (see Releasing)
 
 Inside this repo the packages resolve to each other's `src/`, not their `dist/` — every entry in
 their `exports` lists a `development` condition ahead of the built one, which Vite, Vitest and
-`tsc` all honour here and no consumer ever sees. So the dev server, the test suite and the
-typechecker all read the source, and there is no build step between editing a file and running
-it. The one exception is the offline generators, which run under plain Node: their npm scripts
-pass `--conditions=development` explicitly.
+`tsc` all honour here. So the dev server, the test suite and the typechecker all read the
+source, and there is no build step between editing a file and running it. The one exception is
+the offline generators, which run under plain Node: their npm scripts pass
+`--conditions=development` explicitly. The condition never reaches the registry: `src/` is not
+part of the tarball, and bundlers match `development` in dev mode too (Vite does by default), so
+each package's `prepack` script strips it from the published manifest and `postpack` restores
+the original (`scripts/strip-dev-condition.mjs`).
 
 ## Creating a renderer
 

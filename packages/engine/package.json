@@ -53,7 +53,9 @@
   "scripts": {
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --root ../.. packages/engine"
+    "test": "vitest run --root ../.. packages/engine",
+    "prepack": "node ../../scripts/strip-dev-condition.mjs strip",
+    "postpack": "node ../../scripts/strip-dev-condition.mjs restore"
   },
   "dependencies": {
     "earcut": "^3.2.3",
