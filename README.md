@@ -404,48 +404,6 @@ Each engine subdirectory carries a Vitest suite covering its pure logic, as do `
 the polygon generator. The suite runs under plain Node with no GPU and no DOM. Anything requiring
 either is verified in a browser.
 
-## Releasing
-
-Two of the four packages are published to npm:
-
-| Package | Published | Contents |
-| --- | --- | --- |
-| [`@mvpaint/engine`](https://www.npmjs.com/package/@mvpaint/engine) | yes | the renderer, plus the Inter MSDF fallback atlas |
-| [`@mvpaint/ttf`](https://www.npmjs.com/package/@mvpaint/ttf) | yes | the opt-in runtime font parser |
-| `@mvpaint/scripts` | no | offline tools; clone the repo to run them |
-| `@mvpaint/example-app` | no | the demo host |
-
-**Versions are never edited by hand, and there is no bump step before a build.** A change that
-should reach npm carries a *changeset*: `npm run changeset` records which packages it affects and
-whether it is a patch, minor or major, in a file you commit alongside the code.
-
-From there `.github/workflows/release.yml` does the rest. On a push to `master` it collects the
-pending changesets and opens a PR called **"Version Packages"** containing only the bump — new
-version numbers, updated changelogs, dependency ranges realigned. Merging that PR publishes.
-So a release is two merges: yours, and the bot's.
-
-Publishing authenticates through **npm trusted publishing**: the workflow presents a GitHub OIDC
-token and npm exchanges it for short-lived credentials, so there is no npm token in the repo's
-secrets to leak or rotate. Each package has to be registered for it once, on npmjs.com, against
-this repository and `release.yml` — see [.changeset/README.md](.changeset/README.md), which also
-covers how to choose a bump while both packages are pre-1.0.
-
-### The first publish
-
-Trusted publishing is configured per package on npmjs.com, and a package has to exist before it
-can be configured — so the first `0.1.0` of each goes up by hand, once, and CI takes over after
-that:
-
-```bash
-npm login
-npm run build:packages
-npm publish -w @mvpaint/engine
-npm publish -w @mvpaint/ttf
-```
-
-Then, on npmjs.com, open each package's **Settings → Trusted Publisher**, choose GitHub Actions,
-and enter this repository with workflow `release.yml`. Nothing needs to change in the repo.
-
 ## Architecture
 
 **[ARCHITECTURE.md](ARCHITECTURE.md)** documents the internals: one frame end to end, the gather,
