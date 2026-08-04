@@ -44,7 +44,7 @@ import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
 import { describeAdapter } from '../renderer/adapter'
-import { GlFontBook } from './GlFontBook'
+import { GlFontLibrary } from './GlFontLibrary'
 import { glImageFactory } from './GlImageTexture'
 import { GlSceneRenderer } from './GlSceneRenderer'
 
@@ -92,7 +92,8 @@ export async function createWebGl2SceneRenderer(
 
   // Load the MSDF atlases before building the renderer, so the text lane has its texture ready
   // for the first frame rather than showing a page of nothing on the way to showing text.
-  const fonts = await GlFontBook.load(gl)
+  // Same `fonts` option the WebGPU path takes, so a scene draws with the same faces either way.
+  const fonts = await GlFontLibrary.load(gl, options.fonts)
 
   let scene: GlSceneRenderer
   try {
@@ -212,6 +213,12 @@ export async function createWebGl2SceneRenderer(
     },
     images,
     scene: scene.scene,
+    async setFonts(sources, family) {
+      await fonts.setFonts(sources, family)
+    },
+    getFonts(family) {
+      return fonts.sourcesOf(family)
+    },
     // A getter, not a captured reference: setCamera can replace it, and a handle holding the
     // camera from construction would keep handing back the old one.
     get camera() {

@@ -6,6 +6,8 @@
 # exists to catch is a stale atlas nobody remembered to regenerate.
 #
 # Pinning these to LF makes the comparison mean what it says everywhere.
+packages/example-app/src/fonts/msdf/*.json eol=lf
+packages/example-app/src/fonts/polygons/*.json eol=lf
 packages/engine/src/text/fonts/*.json eol=lf
 
 # The atlases' other half, and the fonts they come from. Git detects these as binary on its own;

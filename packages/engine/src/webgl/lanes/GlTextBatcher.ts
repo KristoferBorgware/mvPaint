@@ -13,7 +13,7 @@
 
 import type { Shape } from '../../shapes/Shape'
 import type { Text } from '../../shapes/Text'
-import type { FontProvider, TextMaterial } from '../../text/layout'
+import type { TextMaterial } from '../../text/layout'
 import { quadCorner } from '../../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from '../../render/meshFormat'
 import {
@@ -41,6 +41,7 @@ import {
 import { GlObjectTexture } from '../GlObjectTexture'
 import type { GlProgram } from '../GlProgram'
 import type { GlFontBook } from '../GlFontBook'
+import type { GlFontLibrary } from '../GlFontLibrary'
 
 interface ObjectRecord {
   node: Text
@@ -58,14 +59,22 @@ export class GlTextBatcher {
   private objectRecords: ObjectRecord[] = []
   /** Where each node's indices end, so a contiguous run of nodes can be drawn alone. */
   private nodeIndexEnds: number[] = []
+  // The book each node was shaped against, aligned with nodeIndexEnds. Draw ranges break where
+  // this changes, because a range binds one atlas texture.
+  private nodeBooks: GlFontBook[] = []
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
     this.objects = new GlObjectTexture(gl, TEXT_OBJECT_STRIDE, 'text-objects')
   }
 
-  /** Shape all Text nodes into the shared buffers, one object record per run. */
-  rebuild(texts: readonly Text[], fonts: FontProvider): void {
+  /**
+   * Shape all Text nodes into the shared buffers, one object record per run.
+   *
+   * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
+   * into the same buffers and differ only in which texture their draw binds.
+   */
+  rebuild(texts: readonly Text[], fonts: GlFontLibrary): void {
     const gl = this.gl
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = []
@@ -74,13 +83,17 @@ export class GlTextBatcher {
     let objectBase = 0
     this.objectRecords = []
     this.nodeIndexEnds = []
+    this.nodeBooks = []
 
     for (const text of texts) {
+      const book = fonts.bookFor(text.fontFamily)
+      // Pushed for invisible nodes too: both arrays are indexed by position in `texts`.
+      this.nodeBooks.push(book)
       if (!text.visible) {
         this.nodeIndexEnds.push(indices.length)
         continue
       }
-      const shaped = text.shaped(fonts)
+      const shaped = text.shaped(book)
       for (const material of shaped.materials) this.objectRecords.push({ node: text, material })
 
       for (const q of shaped.quads) {
@@ -199,23 +212,38 @@ export class GlTextBatcher {
    * interleaves the lanes back to front. One draw, whatever styles the span mixes: every style
    * is a layer of the one bound array texture (see GlFontBook.ts).
    */
-  drawRange(program: GlProgram, fonts: GlFontBook, fromNode: number, toNode: number): void {
+  drawRange(program: GlProgram, fromNode: number, toNode: number): void {
     if (!this.vao || this.indexCount === 0) return
-    const start = fromNode <= 0 ? 0 : (this.nodeIndexEnds[fromNode - 1] ?? this.indexCount)
-    const end =
-      toNode <= 0 ? 0 : (this.nodeIndexEnds[Math.min(toNode, this.nodeIndexEnds.length) - 1] ?? this.indexCount)
-    if (end <= start) return
+    const first = Math.max(0, fromNode)
+    const last = Math.min(toNode, this.nodeIndexEnds.length)
+    if (last <= first) return
     const gl = this.gl
 
-    this.objects.bind(0)
-    gl.uniform1i(program.uniform('u_objects'), 0)
-    gl.uniform1i(program.uniform('u_objectsWidth'), this.objects.width)
-    fonts.bind(1)
-    gl.uniform1i(program.uniform('u_atlas'), 1)
+    let bound = false
+    // Walk the span, emitting a draw whenever the next node's book differs from the run's - one
+    // draw per family CHANGE, so a span in a single family stays a single draw.
+    let runStart = first
+    for (let node = first; node < last; node++) {
+      const isLast = node === last - 1
+      if (!isLast && this.nodeBooks[node + 1] === this.nodeBooks[runStart]) continue
 
-    gl.bindVertexArray(this.vao)
-    gl.drawElements(gl.TRIANGLES, end - start, gl.UNSIGNED_INT, start * 4)
-    gl.bindVertexArray(null)
+      const start = runStart <= 0 ? 0 : (this.nodeIndexEnds[runStart - 1] ?? this.indexCount)
+      const end = this.nodeIndexEnds[node] ?? this.indexCount
+      runStart = node + 1
+      if (end <= start) continue
+
+      if (!bound) {
+        this.objects.bind(0)
+        gl.uniform1i(program.uniform('u_objects'), 0)
+        gl.uniform1i(program.uniform('u_objectsWidth'), this.objects.width)
+        gl.uniform1i(program.uniform('u_atlas'), 1)
+        gl.bindVertexArray(this.vao)
+        bound = true
+      }
+      this.nodeBooks[node].bind(1)
+      gl.drawElements(gl.TRIANGLES, end - start, gl.UNSIGNED_INT, start * 4)
+    }
+    if (bound) gl.bindVertexArray(null)
   }
 
   destroy(): void {

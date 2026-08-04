@@ -120,6 +120,28 @@ export interface FontProvider {
   resolve(style: FontStyle): ResolvedStyle
 }
 
+/** The family name a Text node gets when it asks for none, and the one every other falls back to. */
+export const DEFAULT_FONT_FAMILY = 'default'
+
+/**
+ * The font families a scene can draw with - what a `Text` node's `fontFamily` is resolved
+ * through, and the reason two Text nodes can be different typefaces.
+ *
+ * Device-free like FontProvider itself, and for the same reason: shaping reads metrics and an
+ * atlas index, so text can be measured, wrapped, culled and hit-tested with no renderer at all.
+ * The GPU-owning implementation (webgpu/FontLibrary.ts) adds the textures.
+ *
+ * A family is named rather than handed over as an object so that a `Text` stays plain data -
+ * serializable, settable through setAttr, and constructible before any atlas has finished
+ * loading. An unknown name resolves to the default family rather than failing, which is what
+ * makes a node built while its atlas is still in flight draw something now and the right thing
+ * once it arrives.
+ */
+export interface FontFamilies {
+  /** The provider for a family: the default family when the name is absent or not loaded. */
+  resolveFamily(family: string | undefined): FontProvider
+}
+
 /** Per-run material: transform-independent fill/gradient + per-letter stroke + coverage dilation. */
 export interface TextMaterial {
   fillPriority: FillPriority

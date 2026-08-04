@@ -45,6 +45,35 @@ export function textShapingEpoch(): number {
   return textEpochCounter
 }
 
+// --- fonts: "are the metrics a cached layout was shaped against still the current ones?" -----
+//
+// The third question, and the one the two counters above cannot answer. They say a node's own
+// content changed. This says the FONTS changed underneath every node at once - which happens
+// when an application loads an atlas at runtime (handle.setFonts) rather than handing one to
+// createSceneRenderer.
+//
+// A separate counter is needed because Text.shaped() memoizes, and its cache is keyed on
+// nothing: it takes a FontProvider as an argument and then ignores it for the life of the
+// cache. That is right for the common case - the fonts never change, and re-shaping a
+// paragraph on every access would be absurd - but it means a new atlas would leave every
+// existing Text drawing a layout measured against the old metrics: right glyphs, wrong
+// advances, wrong wrap points. Bumping the text epoch alone does not fix it, because that
+// repacks the lane from exactly those stale caches.
+//
+// A counter rather than a walk over the scene, for the usual reason and one more: a Text that
+// is not in any scene yet, or is in a different one, has to re-shape too, and no walk finds it.
+
+let fontEpochCounter = 0
+
+/** Called when a FontBook's atlases are replaced: every cached layout was measured wrong. */
+export function bumpFontEpoch(): void {
+  fontEpochCounter++
+}
+
+export function fontEpoch(): number {
+  return fontEpochCounter
+}
+
 // --- object records: "did any object's per-frame data change?" ------------------------------
 //
 // The third counter, and the one that answers a different question from the two above. Those

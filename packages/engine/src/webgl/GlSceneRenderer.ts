@@ -37,7 +37,7 @@ import { textShapingEpoch } from '../shapes/contentEpoch'
 import { Text } from '../shapes/Text'
 import type { Image } from '../shapes/Image'
 import type { Gl2Context } from './Gl2Context'
-import type { GlFontBook } from './GlFontBook'
+import type { GlFontLibrary } from './GlFontLibrary'
 import { GlProgram, GlStateCache } from './GlProgram'
 import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
@@ -80,7 +80,7 @@ export class GlSceneRenderer {
 
   // Shaping, measuring and culling need font METRICS; drawing also needs the atlas. One object
   // supplies both, and it is a FontProvider, so picking and culling never touch the texture.
-  private readonly fonts: GlFontBook
+  private readonly fonts: GlFontLibrary
 
   private readonly gather = new SceneGather()
   private cullMargin = 0
@@ -96,7 +96,7 @@ export class GlSceneRenderer {
   private visibleTexts: readonly Text[] = []
   private visibleImages: readonly Image[] = []
 
-  constructor(context: Gl2Context, fonts: GlFontBook, camera?: Camera2D | null) {
+  constructor(context: Gl2Context, fonts: GlFontLibrary, camera?: Camera2D | null) {
     this.gl = context.gl
     this.canvas = context.canvas
     this.fonts = fonts
@@ -226,7 +226,7 @@ export class GlSceneRenderer {
   }
 
   nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
-    return nodesInBox(this.scene, from, to, { fontBook: this.fonts, ...options })
+    return nodesInBox(this.scene, from, to, { fonts: this.fonts, ...options })
   }
 
   markGeometryDirty(): void {
@@ -406,7 +406,7 @@ export class GlSceneRenderer {
       if (run.lane === 'mesh') {
         this.meshBatcher.draw(this.meshTranslucent, this.meshBatcher.indexRangeFor(run.from, run.to))
       } else if (run.lane === 'text') {
-        this.textBatcher.drawRange(this.textProgram, this.fonts, run.from, run.to)
+        this.textBatcher.drawRange(this.textProgram, run.from, run.to)
       } else if (run.lane === 'image') {
         this.imageBatcher.drawRange(this.imageProgram, run.from, run.to)
       } else {

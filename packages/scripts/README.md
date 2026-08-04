@@ -1,17 +1,42 @@
 # @mvpaint/scripts
 
-Offline tools. Nothing here ships in an application — these are run by hand, on a developer's
-machine, and what they write is committed.
+Offline tools: font files in, glyph atlases out. Nothing here ships in an application — these
+are run by hand, on a developer's machine.
 
 ```bash
-npm run gen:msdf       # font files -> MSDF atlas PNG + metrics JSON, per style
-npm run gen:polygons   # font files -> polygon atlas JSON, per style
+npm run gen:msdf       # fonts/ -> out/msdf/      PNG + metrics JSON, per face
+npm run gen:polygons   # fonts/ -> out/polygons/  flattened outlines, per face
 npm run gen:fonts      # both
 npm test               # the polygon generator's self-test
 ```
 
-Input is `fonts/` (the Inter TTFs and their licence). Output is
-`packages/engine/src/text/fonts/`, where the engine imports it.
+## In and out
+
+**Input is the `fonts/` folder, enumerated.** Neither tool holds a list of typefaces. Drop a
+font file in and the next run generates atlases for it; take one out and it stops. Name files
+`<Family>-<Style>.ttf` (or `.otf`), where `<Style>` is `Regular`, `Bold`, `Italic` or
+`BoldItalic` — the four the renderer selects between per text run. Case and separators are
+ignored, and a file with no style suffix is taken as Regular. The output basename is
+`<family>-<style>`, so `Inter-BoldItalic.ttf` becomes `inter-bold-italic`.
+
+Inter is simply what this repository keeps in the folder, and its licence sits there with it.
+
+**Output is `out/`, and it is gitignored.** Copying what you want from there into your
+application is a deliberate step, and that is the point: an atlas is the *application's* asset.
+It chooses the faces, the charset and when to pay for them, and regenerating never silently
+changes what ships.
+
+```
+out/msdf/      -> your app's font folder;  pass them to createSceneRenderer({ fonts })
+out/polygons/  -> your app's font folder;  build a PolygonFontBook for VectorText
+```
+
+`packages/example-app/src/fonts/` is this repository's copy of exactly that, and
+[its index.ts](../example-app/src/fonts/index.ts) is a working example of both halves.
+
+The engine's own `src/text/fonts/` is a copy too — the Inter MSDF **fallback**, what an
+application gets when it passes no `fonts` at all. Regenerating does not touch it; updating it
+is the same deliberate copy.
 
 ## Why they are out here
 
@@ -23,7 +48,7 @@ cannot be imported by accident, and the engine's dependency list is `earcut` and
 
 ## text/msdf
 
-`genMsdfAtlas.ts` packs a distance-field glyph atlas per style: one PNG plus the BMFont-shaped
+`genMsdfAtlas.ts` packs a distance-field glyph atlas per face: one PNG plus the BMFont-shaped
 metrics JSON the shaper reads, with the underline/strikethrough metrics added. This is the
 default text path's asset — cheap, four vertices per glyph, crisp at any zoom.
 
@@ -36,8 +61,9 @@ parser leave the engine — the browser now reads geometry rather than computing
 
 The extraction is `@mvpaint/ttf`'s, the same code that package uses to parse a font at runtime,
 so an atlas glyph and a live-parsed one are identical geometry. The self-test checks exactly
-that, and also that the committed atlases are the ones this tool produces today — regenerate
-them and the test tells you if you forgot.
+that, and — since `out/` is transient — that the atlases the example app has copied in are the
+ones this tool produces today. Change the fonts or the charset without re-copying and it says
+so.
 
 Both tools take the same charset (printable ASCII) deliberately: a scene that switches between
 the two text paths should not find different characters missing.

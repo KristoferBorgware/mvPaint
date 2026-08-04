@@ -8,9 +8,11 @@
 //
 //   npm run gen:polygons        (or: npx tsx text/polygon/genPolygonAtlas.ts)
 //
-// The output is committed, like the MSDF atlases, so the production build (which only runs
-// `vite build`) and GitHub Pages serve it directly; this is a manual dev-time step, run when
-// the fonts or the charset change.
+// Input is the fonts/ FOLDER, enumerated (see ../fontSources.ts) - this tool knows about no
+// particular typeface. Output goes to out/polygons/, which is generated and gitignored: copying
+// what you want into your application is a deliberate step, because an outline atlas is the
+// APPLICATION's asset. It hands it to VectorText through the VectorFonts interface, and the
+// engine ships none of them.
 //
 // WHAT IS IN A FILE. Per glyph: the flattened outline as closed rings of whole font units, the
 // box and advance the shaper needs, and nothing else. Per file: the em size, the vertical
@@ -28,25 +30,14 @@
 // self-test next to this file proves it rather than assuming it.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { TtfFont, DEFAULT_CURVE_TOLERANCE_EM } from '@mvpaint/ttf'
 import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/core'
 import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
+import { OUT_DIR, readFontSources } from '../fontSources'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const FONT_SRC = join(HERE, '..', '..', 'fonts')
-const OUT_DIR = join(HERE, '..', '..', '..', 'engine', 'src', 'text', 'fonts')
-
-/** The four styles the renderer selects between per text run - the MSDF tool's set exactly. */
-const STYLES = [
-  { style: 'regular', file: 'Inter-Regular.ttf' },
-  { style: 'bold', file: 'Inter-Bold.ttf' },
-  { style: 'italic', file: 'Inter-Italic.ttf' },
-  { style: 'bold-italic', file: 'Inter-BoldItalic.ttf' },
-] as const
-
-const FAMILY = 'inter'
+const OUT = join(OUT_DIR, 'polygons')
 
 /**
  * Printable ASCII (0x20..0x7E), which is the MSDF atlas's charset too - the two paths draw the
@@ -140,18 +131,18 @@ function round(value: number): number {
 }
 
 async function main(): Promise<void> {
-  await mkdir(OUT_DIR, { recursive: true })
+  const sources = await readFontSources()
+  await mkdir(OUT, { recursive: true })
 
-  for (const { style, file } of STYLES) {
-    const base = `${FAMILY}-${style}`
+  for (const { base, file, path } of sources) {
     process.stdout.write(`Generating ${base}.polygons.json ... `)
 
-    const bytes = await readFile(join(FONT_SRC, file))
+    const bytes = await readFile(path)
     const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-    const atlas = await buildPolygonAtlas(file.replace(/\.ttf$/i, ''), data)
+    const atlas = await buildPolygonAtlas(file.replace(/\.(ttf|otf)$/i, ''), data)
 
     const text = `${JSON.stringify(atlas)}\n`
-    await writeFile(join(OUT_DIR, `${base}.polygons.json`), text)
+    await writeFile(join(OUT, `${base}.polygons.json`), text)
 
     const points = atlas.glyphs.reduce(
       (total, glyph) => total + (glyph.rings?.reduce((n, ring) => n + ring.length / 2, 0) ?? 0),
@@ -161,7 +152,8 @@ async function main(): Promise<void> {
     process.stdout.write(`ok (${atlas.glyphs.length} glyphs, ${points} points, ${atlas.kernings.length} kernings, ${kb} kB)\n`)
   }
 
-  console.log(`Wrote ${STYLES.length} polygon atlases to packages/engine/src/text/fonts/`)
+  console.log(`Wrote ${sources.length} polygon atlases to packages/scripts/out/polygons/`)
+  console.log('Copy the ones your application draws with into its own font folder.')
 }
 
 // Only when run as a tool: the self-test imports buildPolygonAtlas from here.

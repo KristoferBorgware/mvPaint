@@ -16,7 +16,7 @@ import { createAtlasBindGroupLayout } from './layouts'
 import { DEPTH_FORMAT } from './depthFormat'
 import { GpuCaptureTarget } from './CaptureTarget'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
-import { FontBook } from './FontBook'
+import { FontLibrary } from './FontLibrary'
 import { createGpuContext } from './GpuContext'
 import { gpuImageFactory } from './ImageTexture'
 import { FrameRenderer, type FrameContext } from './FrameRenderer'
@@ -53,13 +53,14 @@ export async function createWebGpuSceneRenderer(
   })
 
   // Load the MSDF font atlases (fetch each PNG + upload to the GPU) before building the scene,
-  // so the text lane has its textures ready on the first frame.
-  const fontBook = await FontBook.load(gpu.device)
+  // so the text lane has its textures ready on the first frame. `options.fonts` is the
+  // application's set; without it the book loads the bundled Inter fallback.
+  const fonts = await FontLibrary.load(gpu.device, options.fonts)
 
   // Catch the most common startup failure - an invalid render pipeline built from a
   // shader/layout mismatch - which is created inside the SceneRenderer constructor.
   gpu.device.pushErrorScope('validation')
-  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fontBook, options.camera)
+  const scene = new SceneRenderer(gpu.device, gpu.format, canvas, fonts, options.camera)
   gpu.device.popErrorScope().then((error) => {
     if (error) {
       console.error('WebGPU pipeline setup error:', error.message)
@@ -183,6 +184,12 @@ export async function createWebGpuSceneRenderer(
     },
     images,
     scene: scene.scene,
+    async setFonts(sources, family) {
+      await fonts.setFonts(sources, family)
+    },
+    getFonts(family) {
+      return fonts.sourcesOf(family)
+    },
     // A getter, not a captured reference: setCamera() below can replace it, and a handle
     // holding the camera from construction would keep handing back the old one.
     get camera() {

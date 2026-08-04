@@ -16,10 +16,11 @@ handle.scene.root.addChild(new VectorText({ fonts, text: 'Hello', style: { fontS
 
 ## When you want this, and when you do not
 
-The engine draws vector text from a **polygon atlas**: glyph outlines flattened once, offline
-(`@mvpaint/scripts`), and shipped as data. That is the right default for any application whose
-fonts are known when it is built — it needs no parser at all, and the atlas is a fraction of the
-size of the font it came from.
+`VectorText` normally draws from a **polygon atlas**: glyph outlines flattened once, offline
+(`@mvpaint/scripts`), and supplied by the application as data. That is the right default for any
+application whose fonts are known when it is built — it needs no parser at all, and the atlas is
+a fraction of the size of the font it came from. The engine itself ships neither, only the MSDF
+atlas behind `Text`.
 
 This package is for the case an atlas cannot cover: a font the application has never seen. A
 file the user just dropped in, a font picker over a directory, a document that names its own
@@ -34,7 +35,7 @@ on page load.
 ## What it gives you
 
 `TtfFontBook` satisfies the engine's `VectorFonts` interface, so a `VectorText` cannot tell the
-difference between it and a bundled atlas: the same shaper, the same faux bold/italic ladder,
+difference between it and a polygon atlas: the same shaper, the same faux bold/italic ladder,
 the same per-glyph picking and real blurred shadows.
 
 Two things do differ, both in this package's favour and both because a parser has the whole

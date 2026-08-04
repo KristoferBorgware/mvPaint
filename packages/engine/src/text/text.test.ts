@@ -28,16 +28,22 @@ import type { FontStyle } from './msdfProvider'
 // imports only a bundler can resolve, which would break this file running under plain node.
 import { ATLAS_LAYER_SIZE, msdfFontProvider } from './msdfProvider'
 import { PolygonFontBook, type PolygonFontJson } from './PolygonFont'
+import { Text } from '../shapes/Text'
+import { bumpFontEpoch } from '../shapes/contentEpoch'
 import { VectorText } from '../shapes/VectorText'
 import type { RGBA } from '../render/meshFormat'
 import regularJson from './fonts/inter-regular.json'
 import boldJson from './fonts/inter-bold.json'
 import italicJson from './fonts/inter-italic.json'
 import boldItalicJson from './fonts/inter-bold-italic.json'
-import regularPolygons from './fonts/inter-regular.polygons.json'
-import boldPolygons from './fonts/inter-bold.polygons.json'
-import italicPolygons from './fonts/inter-italic.polygons.json'
-import boldItalicPolygons from './fonts/inter-bold-italic.polygons.json'
+// The outlines are an application's asset, not the engine's, so there are none here to import.
+// These come from the example app's font folder by path - a test fixture reaching across the
+// workspace, the same way packages/ttf's suite reads the atlas committed here. Test-only:
+// nothing in src/ imports them, and the published package carries no outline data at all.
+import regularPolygons from '../../../example-app/src/fonts/polygons/inter-regular.polygons.json'
+import boldPolygons from '../../../example-app/src/fonts/polygons/inter-bold.polygons.json'
+import italicPolygons from '../../../example-app/src/fonts/polygons/inter-italic.polygons.json'
+import boldItalicPolygons from '../../../example-app/src/fonts/polygons/inter-bold-italic.polygons.json'
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making
@@ -106,6 +112,107 @@ it('metrics: uv rects normalized into [0,1], sane advances, kerning present', ()
     assert(m.size === 42 && m.distanceRange === 4, 'generation size 42, distance range 4')
     assert(m.glyphs.size >= 90, 'the printable-ASCII charset is present (>= 90 glyphs)')
     assert(m.kernings.size > 0, 'kerning pairs were captured')
+})
+
+//
+// Two Text nodes can be different typefaces. A node names a family, the library resolves it,
+// and the two mechanisms that has to get right are: an unknown name falls back rather than
+// failing (so a node built before its atlas lands still draws), and changing ONE node's family
+// re-shapes that node and no other - which is the whole reason it goes through
+// invalidateShaping() rather than the font epoch.
+it('a Text node draws in its own family, and changing it re-shapes only that node', () => {
+    // Two families with genuinely different advances, so "which family" is measurable.
+    const families: Record<string, MsdfFontJson> = { serif: STYLE_JSONS.regular, slab: STYLE_JSONS.bold }
+    const library = {
+      resolveFamily: (name: string | undefined) => msdfFontProvider([{ style: 'regular', json: families[name ?? ''] ?? families.serif }]),
+    }
+
+    const a = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
+    const b = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'slab' })
+    assert(a.fontFamily === undefined && b.fontFamily === 'slab', 'a node carries its own family')
+
+    const shapeIt = (t: Text) => t.shaped(library.resolveFamily(t.fontFamily))
+    const aWide = shapeIt(a).width
+    assert(shapeIt(b).width !== aWide, 'two nodes in different families measure differently')
+
+    // An unknown family is not an error: it resolves to the default and draws.
+    const missing = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'never-loaded' })
+    assert(shapeIt(missing).width === aWide, 'an unloaded family falls back to the default rather than failing')
+
+    // The precise-invalidation claim: switching one node's family drops ITS cache and leaves
+    // every other node's alone. If this went through the font epoch, `untouched` would be a
+    // different object afterwards.
+    const untouchedBefore = shapeIt(a)
+    b.fontFamily = undefined
+    assert(shapeIt(b).width === aWide, 'the node that changed re-shapes into its new family')
+    assert(shapeIt(a) === untouchedBefore, 'and every other node keeps the layout it already had')
+})
+
+//
+// Loading an atlas at runtime (handle.setFonts) changes the metrics under every Text at once,
+// and Text.shaped() memoizes its layout while ignoring the provider it was handed. Without the
+// font epoch the lane would repack from those stale caches: the right glyphs at the old
+// advances and the old wrap points, which is the kind of wrong that looks almost right.
+it('replacing the fonts re-shapes text that had already been laid out', () => {
+    const wide = msdfFontProvider([{ style: 'regular', json: STYLE_JSONS.regular }])
+    // Bold is a genuinely different set of advances, so a stale layout is measurably stale.
+    const narrow = msdfFontProvider([{ style: 'regular', json: STYLE_JSONS.bold }])
+
+    const node = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
+    const before = node.shaped(wide)
+    assert(node.shaped(wide) === before, 'the layout is memoized - shaping twice returns the same object')
+
+    // What FontBook.setFonts does, minus the GPU half.
+    bumpFontEpoch()
+
+    const after = node.shaped(narrow)
+    assert(after !== before, 'a new atlas set drops the cache rather than handing back the old layout')
+    assert(after.width !== before.width, 'and the text is re-measured against the new metrics')
+
+    assert(node.shaped(narrow) === after, 'then memoizes again until something else changes')
+})
+
+//
+// An application supplies its own atlases (createSceneRenderer's `fonts`), and it need not
+// supply four. What makes a partial set work is that a style's STYLE_ORDER index IS its texture
+// array layer: a set is placed by style, not packed tight, so the gaps are what the ladder then
+// falls through. Both font books do exactly this, and neither can be exercised without a
+// device - the arithmetic they share is here.
+it('a partial atlas set: styles land on their own layers, and the ladder covers the gaps', () => {
+    // Bold alone - the awkward case, because the ladder's last resort used to be 'regular' and
+    // there is no regular here to fall back onto.
+    const boldOnly = msdfFontProvider([{ style: 'bold', json: STYLE_JSONS.bold }])
+
+    const asBold = boldOnly.resolve('bold')
+    assert(asBold.atlasIndex === 1, "bold sits on layer 1, its STYLE_ORDER index - not layer 0 because it happens to be first")
+    assert(!asBold.fauxBold && !asBold.fauxItalic, 'and needs nothing synthesized')
+
+    const asRegular = boldOnly.resolve('regular')
+    assert(asRegular.atlasIndex === 1, 'regular resolves to the one face there is')
+    assert(!asRegular.fauxBold, 'nothing is emboldened - regular was asked for')
+    const asItalic = boldOnly.resolve('bold-italic')
+    assert(asItalic.atlasIndex === 1 && asItalic.fauxItalic && !asItalic.fauxBold, 'bold-italic is that face sheared')
+
+    // Two styles, non-adjacent, so a set placed by position rather than by style would put
+    // bold-italic on layer 1 and every bold run would draw italic glyphs.
+    const pair = msdfFontProvider([
+      { style: 'regular', json: STYLE_JSONS.regular },
+      { style: 'bold-italic', json: STYLE_JSONS['bold-italic'] },
+    ])
+    assert(pair.resolve('regular').atlasIndex === 0, 'regular on layer 0')
+    assert(pair.resolve('bold-italic').atlasIndex === 3, 'bold-italic on layer 3, not layer 1')
+    const fauxBold = pair.resolve('bold')
+    assert(fauxBold.atlasIndex === 0 && fauxBold.fauxBold, 'bold falls back to regular, emboldened')
+
+    // The layer size follows the set, not the bundled fallback: one style's atlas is its own
+    // size, and metrics normalized against it must say so or every uv is scaled wrong.
+    const single = msdfFontProvider([{ style: 'italic', json: STYLE_JSONS.italic }])
+    const metrics = single.resolve('italic').metrics
+    assert(
+      metrics.atlasWidth === STYLE_JSONS.italic.common.scaleW &&
+        metrics.atlasHeight === STYLE_JSONS.italic.common.scaleH,
+      'a one-style set sizes its layer to that style, not to the largest of the four',
+    )
 })
 
 //

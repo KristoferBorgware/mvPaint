@@ -48,8 +48,8 @@ jobs:
         run: npm test
 
       # Not just `npm run build:packages`: this proves the tarballs npm would actually upload
-      # are complete. The entry points, the type declarations and the eight font assets all
-      # have to be in them, and `files` in package.json is easy to get subtly wrong.
+      # are complete. The entry points, the type declarations and the fallback atlas all have to
+      # be in them, and `files` in package.json is easy to get subtly wrong.
       - name: Build and pack
         run: |
           npm run build:packages
@@ -61,12 +61,15 @@ jobs:
             tar -tzf "$t" | sed 's|^package/||' | sort
           done
 
-      - name: Check the packed engine carries its assets
+      # Four, not eight: glyph outlines are an application's asset and the engine ships none.
+      # What is left is the Inter MSDF FALLBACK, one PNG per style - what an application gets
+      # when it passes no `fonts` to createSceneRenderer, so that Text draws with no setup.
+      - name: Check the packed engine carries its fallback atlas
         run: |
           cd /tmp/packed && tar -xzf mvpaint-engine-*.tgz
           count=$(ls package/dist/assets | wc -l)
           echo "assets in tarball: $count"
-          test "$count" -eq 8
+          test "$count" -eq 4
 
       # Not `npm run build`: build:packages ran above, and this resolves the workspace deps to
       # that fresh dist. Unconditional, so a pull request finds out that the app no longer

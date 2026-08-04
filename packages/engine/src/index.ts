@@ -3,10 +3,14 @@
 // everything needed to render a 2D scene through createSceneRenderer(), without any
 // example/demo content.
 //
-// This entry point carries the bundled font assets, so it needs a bundler. The device-free,
-// asset-free subset of it - geometry, metrics, the style ladder, the outline tessellator - is
-// also published on its own as '@mvpaint/engine/core', for the things that cannot have one.
-// See core.ts.
+// This entry point carries the one asset the engine ships - the Inter MSDF atlas, so text draws
+// out of the box - so it needs a bundler. The device-free, asset-free subset of it - geometry,
+// metrics, the style ladder, the outline tessellator - is also published on its own as
+// '@mvpaint/engine/core', for the things that cannot have one. See core.ts.
+//
+// Outlines for VectorText are NOT here: a polygon atlas is an application's asset, supplied
+// through the VectorFonts interface (see text/vectorGlyphs.ts). @mvpaint/assets is this
+// repository's own, and @mvpaint/ttf is the runtime-parsing alternative.
 
 export * from './core'
 
@@ -57,11 +61,9 @@ export * from './image/imageUv'
 export * from './image/svgSize'
 
 export * from './webgpu/FontBook'
+export * from './webgpu/FontLibrary'
 export * from './text/textQuad'
 export * from './text/textPath'
-// The bundled polygon atlases - the one text module that needs a bundler, and the reason
-// core.ts stops where it does.
-export * from './text/vectorFonts'
 
 export * from './systems/CanvasResizer'
 export * from './webgpu/GpuContext'

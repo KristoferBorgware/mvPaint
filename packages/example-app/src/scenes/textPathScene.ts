@@ -17,13 +17,13 @@ import {
   arcPath,
   circlePath,
   flattenPathData,
-  loadDefaultVectorFonts,
   TextPathGeometry,
   type Vector2Like,
   type Scene,
   type TextPathOptions,
   type VectorFonts,
 } from '@mvpaint/engine'
+import { loadVectorFonts } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -31,7 +31,7 @@ let fonts: VectorFonts | null = null
 
 /** The outline fonts, for the one node that draws its curved text through the mesh lane. */
 export async function prepareTextPathScene(): Promise<void> {
-  fonts = await loadDefaultVectorFonts()
+  fonts = await loadVectorFonts()
 }
 
 /** Walks a curve end to end so it can be drawn as the polyline it already is. */

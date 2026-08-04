@@ -1,6 +1,6 @@
 // Vector text from a font file the engine has never seen - the opt-in half of the vector path.
 //
-// Every other vector scene draws from the polygon atlases the engine ships: outlines flattened
+// Every other vector scene draws from this application's polygon atlases: outlines flattened
 // once, offline, and read back as data. That is the right default, and it is why the engine
 // needs no font parser at all. What it cannot do is draw a font that did not exist when the
 // application was built.
@@ -11,14 +11,18 @@
 // where the outlines came from. An application that never imports this package never downloads
 // the parser.
 //
-// The font is imported with `?url`, so the file is fetched when this scene opens rather than
-// bundled - the same treatment the polygon atlases get.
+// The font files come in as `?url`, so they are fetched when this scene opens rather than
+// bundled - the same treatment the polygon atlases get. They are borrowed from the generators'
+// input folder rather than copied into src/fonts/: this demo needs a real TTF at runtime, and a
+// TTF is a generator INPUT, not one of the atlases a developer copies out.
 
 import { Text, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
 import { TtfFontBook } from '@mvpaint/ttf'
 import { CRIMSON, DARK, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
+// Two files, not four: a `?url` import emits its file whether or not the binding is used, so
+// naming the italics here would put another 800 kB of typeface in the build for nothing.
 import interRegularTtf from '@mvpaint/scripts/fonts/Inter-Regular.ttf?url'
 import interBoldTtf from '@mvpaint/scripts/fonts/Inter-Bold.ttf?url'
 

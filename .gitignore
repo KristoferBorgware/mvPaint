@@ -4,6 +4,11 @@ dist-ssr
 *.local
 .vite
 
+# What the font generators write. Deliberately not committed: an atlas is an application's
+# asset, and copying the ones you want out of here into your own font folder is the step that
+# makes that true. See packages/scripts/README.md.
+packages/scripts/out
+
 # Editor
 .vscode/*
 !.vscode/extensions.json

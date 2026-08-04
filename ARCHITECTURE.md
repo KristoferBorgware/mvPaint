@@ -873,7 +873,9 @@ repacks the text buffer.
 
 ## Text
 
-Two implementations over one shaper.
+Two implementations over one shaper. This section covers how they fit the renderer;
+[FONTS.md](FONTS.md) covers the whole pipeline end to end — source file, generation, loading,
+shaping, both render paths, and switching fonts at runtime.
 
 | Path | Class | Draws through | Asset |
 | --- | --- | --- | --- |
@@ -900,6 +902,63 @@ and casts a blurred shadow baked from the letterforms.
 Both paths read **generated assets** and neither parses a font file. The engine's dependency
 list is `earcut` and `svgpath`; turning a `.ttf` into something drawable happens offline in
 `packages/scripts`.
+
+**Both are the application's, and only one has a fallback.** Atlases are generated from font
+files by `packages/scripts`, which enumerates a folder of them and writes to an output folder of
+its own; copying what an application draws with into its own asset folder is a deliberate step.
+From there:
+
+| | Supplied as | Selected per node by | If not supplied |
+| --- | --- | --- | --- |
+| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | the engine's bundled Inter atlas |
+| Outlines | `new VectorText({ fonts })`, any `VectorFonts` | `VectorText.fonts`, the object | nothing — the engine ships no outline data |
+
+Neither has to exist before the canvas does, which is what an atlas fetched from a CDN needs.
+The **scope** column is why they get there differently. Outlines own no GPU resource at all —
+`PolygonFontBook` hands `VectorText` contours, which are tessellated into the mesh lane's shared
+buffers like any other shape's triangles — so a node built after the fetch is the whole of it.
+An MSDF atlas is one array texture behind one bind group shared by every `Text` (that is what
+draws a paragraph of mixed styles in a single call), so it is replaced on the renderer rather
+than handed to a node, and `handle.setFonts()` is that.
+
+Replacing it changes the metrics under every `Text` at once, which is what the **font epoch** in
+`shapes/contentEpoch.ts` exists for. `Text.shaped()` memoizes its layout and ignores the
+`FontProvider` it is passed once cached — right for the usual case, wrong the moment the atlas
+changes, since the lane would repack from layouts measured against metrics that are gone.
+Bumping the text-shaping epoch alone does not help: it repacks from exactly those stale caches.
+
+### Families
+
+A `FontBook` is four styles of **one** typeface in one array texture — a style's `STYLE_ORDER`
+index *is* its layer — so a second typeface cannot join it. `webgpu/FontLibrary.ts` therefore
+holds a book per family, keyed by name, and a `Text` names one. An unknown name resolves to the
+default family rather than failing, which is what lets a node be built before its atlas lands.
+
+The cost is **one draw per family change** along the packed node order — not per family, and not
+per node. `TextBatcher` records the book each node was shaped against and splits its own draw
+ranges on it (`drawRange`), so a span in one family is a single draw however many styles it
+mixes, and none of this reaches the cross-lane merge that keeps a shadow behind its caster.
+
+The two invalidations are deliberately different, and the distinction is the load-bearing part:
+
+| | Route | Re-shapes |
+| --- | --- | --- |
+| One node's `fontFamily` (or a `VectorText`'s `fonts`) | `invalidateShaping()` | that node only; the lane repacks from every other node's cache |
+| A family's atlases replaced, or a new family loaded | the font epoch | every text node |
+
+A lane repack is not a re-shape: `TextBatcher.rebuild` calls `shaped()` per node and gets the
+memoized layout back. That is why the per-node route is cheap, and why reaching for the font
+epoch on a node-level change would be badly over-broad.
+
+The engine holds the *readers* — `FontBook` and `GlFontBook` for the first, `PolygonFont` and
+`PolygonFontBook` for the second — and, of the data, only the Inter MSDF fallback. That exists so
+`Text` draws on the first frame of a project that has not chosen a typeface, not as the way to
+choose one; `packages/example-app/src/fonts/` shows the shape an application's own module takes.
+
+An MSDF set may be **partial**. A style's index in `STYLE_ORDER` is its texture array layer, so a
+set given as bold alone occupies layer 1 and leaves the rest zeroed; the ladder in
+`resolveStyle` then falls through to whatever is loaded and flags the difference as faux bold or
+faux italic, exactly as it does for a missing face in a full set.
 
 The polygon atlas holds each glyph's outline flattened to line segments in whole font units,
 plus the boxes, advances, kerning pairs and decoration metrics the shaper needs. Integer font
@@ -1252,7 +1311,8 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Loading SVG | `svg/loadSvg.ts`, `svg/shapeToPath.ts`, `svg/gradient.ts`, `svg/triangulate.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
-| Generating those assets | `packages/scripts/text/msdf/`, `packages/scripts/text/polygon/` |
+| Generating those assets | `packages/scripts/text/msdf/`, `text/polygon/`, `text/fontSources.ts` |
+| An application supplying them | `webgpu/FontBook.ts`, `webgl/GlFontBook.ts`, `packages/example-app/src/fonts/` |
 | Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |
 | Packing and uploads | `webgpu/lanes/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |

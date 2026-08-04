@@ -1,10 +1,10 @@
 // The published build of @mvpaint/engine.
 //
-// Vite rather than plain `tsc`, for one reason: text/msdfAtlasImages.ts and text/vectorFonts.ts
-// import the bundled font assets with `?url`, which tsc has no idea what to do with. Vite emits
-// those files into dist/assets and rewrites each import to a `new URL(..., import.meta.url)` -
-// plain ESM that resolves relative to the installed package, and that a consumer's own bundler
-// picks up and fingerprints like any other asset.
+// Vite rather than plain `tsc`, for one reason: text/msdfAtlasImages.ts imports the four MSDF
+// atlas PNGs with `?url`, which tsc has no idea what to do with. Vite emits those files into
+// dist/assets and rewrites each import to a `new URL(..., import.meta.url)` - plain ESM that
+// resolves relative to the installed package, and that a consumer's own bundler picks up and
+// fingerprints like any other asset.
 //
 // Two entries, matching the two conditions in package.json's exports: 'index' is the whole
 // engine, 'core' the device-free, asset-free subset (see src/core.ts). Rollup hoists what they
@@ -12,8 +12,8 @@
 //
 // NOT `build.lib`, deliberately, which is the obvious way to write this. Library mode inlines
 // every asset as a base64 data URI and ignores assetsInlineLimit while doing it - which would
-// turn the eight atlas files into 1.2 MB of string literal welded into the JS, parsed on load
-// by every consumer including the ones that never draw a glyph, and un-cacheable besides. The
+// turn the four atlas PNGs into half a megabyte of string literal welded into the JS, parsed on
+// load by every consumer including the ones that never draw a glyph, and un-cacheable besides. The
 // `?url` imports exist precisely so those bytes stay separate and get fetched when wanted.
 // Driving Rollup directly through rollupOptions keeps that property; everything build.lib would
 // have set for us is set explicitly below.

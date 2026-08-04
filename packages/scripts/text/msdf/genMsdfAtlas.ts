@@ -2,32 +2,29 @@
 // MSDF (multi-channel signed distance field) glyphs stay crisp at any size and zoom from a
 // single atlas, so one atlas per style serves every font size the renderer draws. Run with:
 //   npm run gen:msdf         (or: npx tsx text/msdf/genMsdfAtlas.ts)
-// The generated PNG/JSON are committed so the production build (which only runs `vite build`)
-// and GitHub Pages serve them directly; this script is a manual dev-time regeneration step.
+//
+// Input is the fonts/ FOLDER, enumerated (see ../fontSources.ts) - this tool knows about no
+// particular typeface, Inter included. Output goes to out/msdf/, which is generated and
+// gitignored; copying what you want into your application is a deliberate step, because an
+// atlas is the APPLICATION's asset. It hands it to createSceneRenderer through the `fonts`
+// option.
+//
+// The engine's own copy under packages/engine/src/text/fonts/ is Inter, copied in from here by
+// hand, and it exists only as a FALLBACK - what an application gets when it supplies no fonts
+// of its own. Regenerating does not touch it; updating it is a deliberate copy, exactly like
+// updating an application's.
 //
 // Each JSON is the BMFont/Hiero layout (chars, kernings, common, distanceField) plus a
 // `decoration` block (underline/strikethrough position + thickness, as em fractions read
 // from the font tables) that the runtime uses to place text-decoration lines.
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import generateBMFont from 'msdf-bmfont-xml'
 import { TtfFont } from '@mvpaint/ttf'
+import { OUT_DIR, readFontSources } from '../fontSources'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const FONT_SRC = join(HERE, '..', '..', 'fonts')
-const OUT_DIR = join(HERE, '..', '..', '..', 'engine', 'src', 'text', 'fonts')
-
-// One MSDF atlas per style. The four styles the renderer selects between per text run.
-const STYLES = [
-  { style: 'regular', file: 'Inter-Regular.ttf' },
-  { style: 'bold', file: 'Inter-Bold.ttf' },
-  { style: 'italic', file: 'Inter-Italic.ttf' },
-  { style: 'bold-italic', file: 'Inter-BoldItalic.ttf' },
-] as const
-
-const FAMILY = 'inter'
+const OUT = join(OUT_DIR, 'msdf')
 
 // Printable ASCII (0x20..0x7E). Extending this set means regenerating the atlases and, if the
 // glyphs no longer fit, raising TEXTURE_SIZE.
@@ -103,11 +100,10 @@ async function readDecoration(fontPath: string): Promise<BmDecoration> {
 }
 
 async function main(): Promise<void> {
-  await mkdir(OUT_DIR, { recursive: true })
+  const sources = await readFontSources()
+  await mkdir(OUT, { recursive: true })
 
-  for (const { style, file } of STYLES) {
-    const fontPath = join(FONT_SRC, file)
-    const base = `${FAMILY}-${style}`
+  for (const { base, path: fontPath } of sources) {
     process.stdout.write(`Generating ${base} ... `)
 
     const { textures, json } = await generate(fontPath, base)
@@ -119,12 +115,13 @@ async function main(): Promise<void> {
     json.pages = [`${base}.png`]
     const augmented = { ...json, decoration: await readDecoration(fontPath) }
 
-    await writeFile(join(OUT_DIR, `${base}.png`), textures[0].texture)
-    await writeFile(join(OUT_DIR, `${base}.json`), `${JSON.stringify(augmented)}\n`)
+    await writeFile(join(OUT, `${base}.png`), textures[0].texture)
+    await writeFile(join(OUT, `${base}.json`), `${JSON.stringify(augmented)}\n`)
     process.stdout.write(`ok (${json.chars.length} glyphs, ${json.kernings.length} kernings)\n`)
   }
 
-  console.log(`Wrote ${STYLES.length} MSDF atlases to packages/engine/src/text/fonts/`)
+  console.log(`Wrote ${sources.length} MSDF atlases to packages/scripts/out/msdf/`)
+  console.log('Copy the ones your application draws with into its own font folder.')
 }
 
 main().catch((err) => {

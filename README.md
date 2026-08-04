@@ -102,7 +102,7 @@ npm test             # Vitest suite across all packages (no GPU required)
 npm run test:watch   # rerun affected tests on change
 npm run build        # build the packages, then the example app
 npm run typecheck    # tsc --noEmit across every package
-npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/scripts
+npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/assets
 npm run changeset    # describe a change for the next release (see Releasing)
 ```
 
@@ -321,9 +321,26 @@ underline/strikethrough, highlight, per-letter outline, and text laid along an a
 
 Both read generated assets — a distance-field PNG for one, a polygon atlas of flattened outlines
 for the other — so the engine ships no font parser. Its full dependency list is `earcut` and
-`svgpath`. Where the font is not known until runtime, such as a user upload or a font picker,
-`@mvpaint/ttf` parses a TTF in the browser and provides the same interface. Applications that do
-not need it never download it.
+`svgpath`.
+
+**Fonts are the application's.** Generate atlases from your own font files with
+`packages/scripts`, keep them with your other assets, and hand them to the engine:
+
+```ts
+createSceneRenderer(canvas, { fonts: MSDF_ATLASES })   // what Text samples
+new VectorText({ fonts: await loadVectorFonts(), ... }) // what VectorText tessellates
+```
+
+The engine carries one asset of its own: an Inter MSDF atlas, used when `fonts` is omitted, so
+`Text` draws before a project has chosen a typeface. It is a **fallback**, not the way to pick a
+font, and there is no outline equivalent — `VectorText` is always given its outlines. Where the
+font is not known until runtime, `@mvpaint/ttf` parses a TTF in the browser and satisfies the
+same `VectorFonts` interface; applications that never import it never download a parser.
+
+Two `Text` nodes can be different typefaces: load a named family with
+`handle.setFonts(sources, 'roboto')` and select it per node with `fontFamily`. The full pipeline —
+generation, loading, shaping, both render paths, and runtime font switching — is documented in
+[FONTS.md](FONTS.md).
 
 ### SVG
 
@@ -364,24 +381,27 @@ WARP), which draws correctly but slowly and otherwise looks like the engine bein
 
 ```
 packages/engine        the renderer - no demo content, no framework, no font parser
-  src/index.ts         the public entry point; needs a bundler (it carries the atlases)
+  src/index.ts         the public entry point; needs a bundler (it carries the MSDF atlas)
   src/core.ts          '@mvpaint/engine/core': the same engine minus device and assets,
                        for node, workers, and anything measuring text before a canvas exists
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
-  src/text/            the shaper, MSDF metrics, and the polygon atlas
+  src/text/            the shaper, the MSDF fallback atlas, and the polygon atlas reader
   src/input/           the pointer dispatcher and the 'view'/'editor' bindings over it
   src/renderer/        render-path selection, canvas resolution, the handle interface
   src/webgpu/          SceneRenderer: the gather, the passes
   src/webgl/           the WebGL2 fallback
-packages/scripts       offline tools: MSDF and polygon atlas generation, and the font sources
+packages/scripts       offline tools: font files in, glyph atlases out
+  fonts/               the input folder, enumerated - the Inter TTFs live here
+  out/                 what they write; gitignored, copied into an app by hand
 packages/ttf           opt-in: parse a TTF in the browser, for fonts unknown until runtime
 packages/example-app   a React host for the demo scenes; the engine depends on none of it
+  src/fonts/           its own copy of the atlases, and the module that loads them
 ```
 
-Each engine subdirectory carries a Vitest suite covering its pure logic, as do the two satellite
-packages. The suite runs under plain Node with no GPU and no DOM. Anything requiring either is
-verified in a browser.
+Each engine subdirectory carries a Vitest suite covering its pure logic, as do `packages/ttf` and
+the polygon generator. The suite runs under plain Node with no GPU and no DOM. Anything requiring
+either is verified in a browser.
 
 ## Releasing
 
@@ -389,7 +409,7 @@ Two of the four packages are published to npm:
 
 | Package | Published | Contents |
 | --- | --- | --- |
-| [`@mvpaint/engine`](https://www.npmjs.com/package/@mvpaint/engine) | yes | the renderer, plus the bundled Inter atlases |
+| [`@mvpaint/engine`](https://www.npmjs.com/package/@mvpaint/engine) | yes | the renderer, plus the Inter MSDF fallback atlas |
 | [`@mvpaint/ttf`](https://www.npmjs.com/package/@mvpaint/ttf) | yes | the opt-in runtime font parser |
 | `@mvpaint/scripts` | no | offline tools; clone the repo to run them |
 | `@mvpaint/example-app` | no | the demo host |

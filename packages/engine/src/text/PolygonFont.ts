@@ -1,10 +1,14 @@
 // The polygon atlas: glyph outlines as data, and the runtime that draws from them.
 //
 // This is the vector text path's asset, and the exact counterpart of the MSDF PNG - one file
-// per style, generated offline (packages/scripts/text/polygon), committed, and fetched lazily
-// by an application that actually draws vector text. What it holds is what a font parser would
-// have produced and nothing else: each glyph's outline already flattened to line segments in
-// font units, its box and advance, the kerning pairs, and the four decoration metrics.
+// per style, generated offline (packages/scripts/text/polygon). What it holds is what a font
+// parser would have produced and nothing else: each glyph's outline already flattened to line
+// segments in font units, its box and advance, the kerning pairs, and the four decoration
+// metrics.
+//
+// The reader is here; the data is NOT. The engine ships one asset, the MSDF atlas, and outlines
+// are the application's to supply and to fetch when it wants them - see @mvpaint/assets for
+// this repository's, which is the shape an application's own asset module takes.
 //
 // WHY IT IS A FILE RATHER THAN A PARSE. Flattening 'A' of Inter Regular is a fixed computation
 // with a fixed answer, and it was being done in every browser, on every load, behind a quarter

@@ -1,4 +1,4 @@
-// The four Inter MSDF atlases as one WebGL2 array texture - the fallback's FontBook.
+// The MSDF atlases as one WebGL2 array texture - the fallback path's FontBook.
 //
 // Same arrangement as the WebGPU one (webgpu/FontBook.ts) and for the same reason: all four
 // styles live as layers of a single TEXTURE_2D_ARRAY, a run picks its layer from its object
@@ -6,53 +6,141 @@
 // of one per style. That win is worth as much here as there - more, if anything, since a
 // program switch on this path costs more than a pipeline switch does on the other.
 //
+// It takes the application's atlases exactly as the WebGPU book does, falls back to the bundled
+// Inter through the same dynamic import, and places each style at its STYLE_ORDER layer - so
+// which fonts a scene draws with does not depend on which render path it got.
+//
 // The metrics half is not duplicated at all: it comes from text/msdfProvider.ts, which needs
 // no device and is the same object the WebGPU path resolves through.
 
 import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
-import { ATLAS_LAYER_SIZE, resolveStyle, STYLE_ORDER, type FontStyle } from '../text/msdfProvider'
+import {
+  atlasLayerSize,
+  resolveStyle,
+  STYLE_ORDER,
+  type FontStyle,
+  type MsdfAtlasSource,
+} from '../text/msdfProvider'
 import { MSDF_ATLAS_SOURCES } from '../text/msdfAtlasImages'
+import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 import type { FontProvider, ResolvedStyle } from '../text/layout'
 
 export class GlFontBook implements FontProvider {
-  /** Layers of the array texture, i.e. how many styles are loaded. */
-  readonly layerCount = MSDF_ATLAS_SOURCES.length
+  /** Layers of the array texture - one per style the renderer can select, loaded or not. */
+  readonly layerCount = STYLE_ORDER.length
 
   private readonly gl: WebGL2RenderingContext
   private texture: WebGLTexture | null
-  private readonly metrics: FontMetrics[] // indexed by STYLE_ORDER, i.e. by array layer
+  private metrics: FontMetrics[] // indexed by STYLE_ORDER, i.e. by array layer
+  private atlases: readonly MsdfAtlasSource[]
 
-  private constructor(gl: WebGL2RenderingContext, texture: WebGLTexture, metrics: FontMetrics[]) {
+  private constructor(
+    gl: WebGL2RenderingContext,
+    texture: WebGLTexture,
+    metrics: FontMetrics[],
+    atlases: readonly MsdfAtlasSource[],
+  ) {
     this.gl = gl
     this.texture = texture
     this.metrics = metrics
+    this.atlases = atlases
   }
 
-  /** Fetch all four PNGs and upload one per layer. */
-  static async load(gl: WebGL2RenderingContext): Promise<GlFontBook> {
-    const texture = gl.createTexture()
-    if (!texture) throw new Error('GlFontBook: could not create the atlas texture')
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture)
-    gl.texStorage3D(
-      gl.TEXTURE_2D_ARRAY,
-      1,
-      gl.RGBA8,
-      ATLAS_LAYER_SIZE.width,
-      ATLAS_LAYER_SIZE.height,
-      MSDF_ATLAS_SOURCES.length,
-    )
-    // Every layer starts zeroed, and a layer's untouched remainder stays that way - which the
-    // shader reads as "fully outside the glyph", the same answer the distance field's outer
-    // plateau gives. Layers must be identically sized, so each style's tightly-packed image is
-    // written into the top-left of a layer sized for the largest; uvs are measured against the
-    // LAYER, not the image (see text/msdfMetrics.ts), so nothing downstream has to know.
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  /** The atlases currently loaded, in the order they were supplied. */
+  get sources(): readonly MsdfAtlasSource[] {
+    return this.atlases
+  }
 
+  /**
+   * Fetch each style's PNG and upload it to its STYLE_ORDER layer.
+   *
+   * `sources` omitted means the bundled Inter fallback. A partial set is allowed.
+   */
+  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontBook> {
+    const atlases = sources ?? MSDF_ATLAS_SOURCES
+    const built = await buildGlAtlas(gl, atlases)
+    return new GlFontBook(gl, built.texture, built.metrics, atlases)
+  }
+
+  /**
+   * Replace the atlases at any point after the renderer exists - the same contract, and the
+   * same replace-don't-merge semantics, as the WebGPU book's setFonts. See webgpu/FontBook.ts.
+   *
+   * The swap is atomic: a failed fetch throws and leaves the old texture bound and drawing.
+   */
+  async setFonts(sources: readonly MsdfAtlasSource[]): Promise<void> {
+    const built = await buildGlAtlas(this.gl, sources)
+    if (this.texture) this.gl.deleteTexture(this.texture)
+    this.texture = built.texture
+    this.metrics = built.metrics
+    this.atlases = sources
+    bumpFontEpoch()
+    bumpTextShapingEpoch()
+  }
+
+  /** Stable atlas index for a style - its array layer in the shared texture. */
+  indexOf(style: FontStyle): number {
+    return STYLE_ORDER.indexOf(style)
+  }
+
+  /**
+   * Resolve a requested style to a loaded atlas, synthesizing what is missing - the same
+   * fallback ladder the WebGPU book walks, so faux bold and faux italic behave identically on
+   * either path.
+   */
+  resolve(style: FontStyle): ResolvedStyle {
+    const r = resolveStyle(style, (i) => this.metrics[i])
+    return { metrics: r.value, atlasIndex: r.atlasIndex, fauxBold: r.fauxBold, fauxItalic: r.fauxItalic }
+  }
+
+  bind(unit: number): void {
+    const gl = this.gl
+    gl.activeTexture(gl.TEXTURE0 + unit)
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture)
+  }
+
+  destroy(): void {
+    if (this.texture) this.gl.deleteTexture(this.texture)
+    this.texture = null
+  }
+}
+
+/**
+ * One atlas set -> an array texture and the metrics indexed by array layer.
+ *
+ * Shared by load() and setFonts(), and nothing is assigned to the book here - the caller swaps
+ * the result in once every fetch has succeeded, which is what makes a failed replacement leave
+ * the old atlas in place.
+ */
+async function buildGlAtlas(
+  gl: WebGL2RenderingContext,
+  atlases: readonly MsdfAtlasSource[],
+): Promise<{ texture: WebGLTexture; metrics: FontMetrics[] }> {
+  if (atlases.length === 0) throw new Error('GlFontBook: no atlases to load.')
+  const layerSize = atlasLayerSize(atlases)
+
+  const texture = gl.createTexture()
+  if (!texture) throw new Error('GlFontBook: could not create the atlas texture')
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture)
+  // STYLE_ORDER.length layers whatever was supplied - a style's layer is its STYLE_ORDER
+  // index, which is what a shaped quad names, so a partial set leaves gaps rather than
+  // renumbering.
+  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, layerSize.width, layerSize.height, STYLE_ORDER.length)
+  // Every layer starts zeroed, and a layer's untouched remainder stays that way - which the
+  // shader reads as "fully outside the glyph", the same answer the distance field's outer
+  // plateau gives. Layers must be identically sized, so each style's tightly-packed image is
+  // written into the top-left of a layer sized for the largest; uvs are measured against the
+  // LAYER, not the image (see text/msdfMetrics.ts), so nothing downstream has to know.
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+  try {
     await Promise.all(
-      MSDF_ATLAS_SOURCES.map(async (source, layer) => {
+      atlases.map(async (source) => {
+        const layer = STYLE_ORDER.indexOf(source.style)
+        if (layer < 0) throw new Error(`GlFontBook: '${source.style}' is not one of ${STYLE_ORDER.join(', ')}.`)
         const response = await fetch(source.url)
         if (!response.ok) throw new Error(`GlFontBook: ${source.url} responded ${response.status}`)
         // colorSpaceConversion 'none': MSDF channels are distances, not sRGB colour, so any
@@ -82,35 +170,16 @@ export class GlFontBook implements FontProvider {
         }
       }),
     )
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null)
-
-    const metrics = MSDF_ATLAS_SOURCES.map((s) => normalizeMetrics(s.json, ATLAS_LAYER_SIZE))
-    return new GlFontBook(gl, texture, metrics)
+  } catch (cause) {
+    // A replacement that fails leaves the book on its old texture, so this one has no owner.
+    gl.deleteTexture(texture)
+    throw cause
   }
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, null)
 
-  /** Stable atlas index for a style - its array layer in the shared texture. */
-  indexOf(style: FontStyle): number {
-    return STYLE_ORDER.indexOf(style)
-  }
-
-  /**
-   * Resolve a requested style to a loaded atlas, synthesizing what is missing - the same
-   * fallback ladder the WebGPU book walks, so faux bold and faux italic behave identically on
-   * either path.
-   */
-  resolve(style: FontStyle): ResolvedStyle {
-    const r = resolveStyle(style, (i) => this.metrics[i])
-    return { metrics: r.value, atlasIndex: r.atlasIndex, fauxBold: r.fauxBold, fauxItalic: r.fauxItalic }
-  }
-
-  bind(unit: number): void {
-    const gl = this.gl
-    gl.activeTexture(gl.TEXTURE0 + unit)
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture)
-  }
-
-  destroy(): void {
-    if (this.texture) this.gl.deleteTexture(this.texture)
-    this.texture = null
-  }
+  // Sparse by STYLE_ORDER index, matching the layers - a style that was not supplied reads
+  // back undefined, which is what resolveStyle treats as "not loaded".
+  const metrics: FontMetrics[] = []
+  for (const source of atlases) metrics[STYLE_ORDER.indexOf(source.style)] = normalizeMetrics(source.json, layerSize)
+  return { texture, metrics }
 }

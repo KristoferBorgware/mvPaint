@@ -12,6 +12,7 @@ import {
   type SceneResources,
 } from '@mvpaint/engine'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
+import { MSDF_ATLASES } from '../fonts'
 import type { ExampleScene, SceneContent } from '../scenes'
 
 // How often a live camera-zoom change (wheel/pinch/keyboard) is reported back to React
@@ -321,6 +322,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     createSceneRenderer(canvas, {
       backend,
       camera: cameraRef.current,
+      // This application's own MSDF atlases (src/fonts/), not the engine's fallback. Supplying
+      // them is what every real application does - the engine's bundled Inter exists so a
+      // project that has not chosen a typeface still draws text, not as the way to pick one.
+      fonts: MSDF_ATLASES,
       // The whole of this application's input setup. 'editor' is pointer, keyboard, selection,
       // dragging, the resize/rotate frame and marquee selection - the bindings every canvas
       // editor writes identically, so the engine writes them once. A viewer would say 'view'

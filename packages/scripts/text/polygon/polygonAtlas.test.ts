@@ -1,11 +1,13 @@
 // Self-test for the polygon atlas generator: that what it writes is what the engine reads,
-// that the engine reading it gets the same letterforms a live parse would, and that the files
-// committed in the engine are actually the ones this tool produces today.
+// that the engine reading it gets the same letterforms a live parse would, and that the atlases
+// the example app has copied in are actually the ones this tool produces today.
 //
-// The last of those is the one that matters most in practice. The atlases are generated assets
-// under version control: nothing in the build regenerates them, so a change to the fonts, the
-// charset or the flattening tolerance is invisible until someone remembers to re-run the tool.
-// This turns "someone remembers" into a failing test.
+// The last of those is the one that matters most in practice, and it is the price of the
+// generator's output being copied rather than imported. out/ is transient and gitignored; the
+// committed copy is whatever a developer moved into an application, and nothing in the build
+// refreshes it - so a change to the fonts, the charset or the flattening tolerance is invisible
+// until someone remembers to re-run the tool AND re-copy. This turns "someone remembers" into a
+// failing test, for the one application this repository has.
 //
 //   npx vitest run packages/scripts/text/polygon/polygonAtlas.test.ts
 
@@ -16,10 +18,12 @@ import { fileURLToPath } from 'node:url'
 import { TtfFont } from '@mvpaint/ttf'
 import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 import { buildPolygonAtlas } from './genPolygonAtlas'
+import { FONT_SRC, readFontSources } from '../fontSources'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const FONT_SRC = join(HERE, '..', '..', 'fonts')
-const ATLAS_DIR = join(HERE, '..', '..', '..', 'engine', 'src', 'text', 'fonts')
+// The example app's copy: the committed artifact, and the only one there is now that the
+// generator writes to a gitignored out/.
+const ATLAS_DIR = join(HERE, '..', '..', '..', 'example-app', 'src', 'fonts', 'polygons')
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making
@@ -34,12 +38,6 @@ const fontData = async (name: string): Promise<ArrayBuffer> => {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
-const STYLES = [
-  { file: 'Inter-Regular.ttf', atlas: 'inter-regular.polygons.json' },
-  { file: 'Inter-Bold.ttf', atlas: 'inter-bold.polygons.json' },
-  { file: 'Inter-Italic.ttf', atlas: 'inter-italic.polygons.json' },
-  { file: 'Inter-BoldItalic.ttf', atlas: 'inter-bold-italic.polygons.json' },
-] as const
 
 it('the document the generator writes', async () => {
     const atlas = await buildPolygonAtlas('Inter-Regular', await fontData('Inter-Regular.ttf'))
@@ -119,13 +117,20 @@ it('what the engine reads back is what a live parse would have produced', async 
     assert(bakedPairs === livePairs, 'every kerning pair the font has over the charset is baked in')
 })
 
-it('the committed atlases are the ones this tool produces', async () => {
-    for (const { file, atlas } of STYLES) {
-      const rebuilt = `${JSON.stringify(await buildPolygonAtlas(file.replace(/\.ttf$/i, ''), await fontData(file)))}\n`
-      const committed = await readFile(join(ATLAS_DIR, atlas), 'utf8')
+// Every font in the folder, not a list kept here: the generator enumerates fonts/, so adding a
+// face means this check covers it without anyone editing the test - and means a face added but
+// never copied into the app fails here rather than going unnoticed.
+it('the atlases the app has copied in are the ones this tool produces', async () => {
+    const sources = await readFontSources()
+    assert(sources.length > 0, 'there are fonts to generate from')
+
+    for (const { base, file } of sources) {
+      const rebuilt = `${JSON.stringify(await buildPolygonAtlas(file.replace(/\.(ttf|otf)$/i, ''), await fontData(file)))}\n`
+      const committed = await readFile(join(ATLAS_DIR, `${base}.polygons.json`), 'utf8')
       assert(
         rebuilt === committed,
-        `${atlas} is up to date with the font and this generator - if this fails, run npm run gen:polygons`,
+        `${base}.polygons.json is up to date with the font and this generator - if this fails, run ` +
+          'npm run gen:polygons and copy packages/scripts/out/polygons/ into the app',
       )
     }
 })

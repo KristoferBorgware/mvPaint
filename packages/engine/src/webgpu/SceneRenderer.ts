@@ -70,7 +70,7 @@ import { createTextPipeline } from './pipelines/TextPipeline'
 import { createImagePipeline } from './pipelines/ImagePipeline'
 import { ImageBatcher } from './lanes/ImageBatcher'
 import { Image } from '../shapes/Image'
-import { FontBook } from './FontBook'
+import { FontLibrary } from './FontLibrary'
 
 /** MSAA 4x. Exported because the frame loop's targets must agree with the pipelines. */
 export const SAMPLE_COUNT = 4
@@ -100,7 +100,7 @@ export class SceneRenderer {
   private readonly textBatcher: TextBatcher
   private readonly imagePipeline: GPURenderPipeline
   private readonly imageBatcher: ImageBatcher
-  private readonly fontBook: FontBook
+  private readonly fonts: FontLibrary
 
   private readonly shadowAtlas: ShadowAtlas
   private readonly shadowBatcher: ShadowBatcher
@@ -150,11 +150,11 @@ export class SceneRenderer {
     device: GPUDevice,
     format: GPUTextureFormat,
     canvas: HTMLCanvasElement,
-    fontBook: FontBook,
+    fonts: FontLibrary,
     camera?: Camera2D | null,
   ) {
     this.canvas = canvas
-    this.fontBook = fontBook
+    this.fonts = fonts
     const frameLayout = createFrameBindGroupLayout(device)
     const objectLayout = createObjectBindGroupLayout(device)
     const pipelineLayout = createMeshPipelineLayout(device, frameLayout, objectLayout)
@@ -166,7 +166,7 @@ export class SceneRenderer {
 
     // Text lane: its own pipeline (adds the atlas bind group) and batcher, sharing group(0)
     // frame uniforms, group(1) object storage layout, and the MSAA sample count.
-    const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fontBook.atlasLayout)
+    const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fonts.atlasLayout)
     this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
     this.textBatcher = new TextBatcher(device, objectLayout)
 
@@ -276,12 +276,12 @@ export class SceneRenderer {
       height: this.canvas.clientHeight,
     })
     if (!world) return null
-    return pickNode(this.scene, world.x, world.y, this.fontBook)
+    return pickNode(this.scene, world.x, world.y, this.fonts)
   }
 
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
   localBoundsOf(node: TransformableNode): AABB {
-    return localBoundsOf(node, this.fontBook)
+    return localBoundsOf(node, this.fonts)
   }
 
   /**
@@ -289,7 +289,7 @@ export class SceneRenderer {
    * selects. Goes through the renderer so Text is measured against the loaded atlases.
    */
   nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
-    return nodesInBox(this.scene, from, to, { fontBook: this.fontBook, ...options })
+    return nodesInBox(this.scene, from, to, { fonts: this.fonts, ...options })
   }
 
   /** Force a mesh-lane geometry rebuild on the next draw (call after adding/removing shapes). */
@@ -390,7 +390,7 @@ export class SceneRenderer {
         camera,
         // Culling measures Text, which needs metrics and nothing else - the atlas is not
         // consulted here (see Text.shaped).
-        fonts: this.fontBook,
+        fonts: this.fonts,
         viewWidth,
         viewHeight,
         cullingEnabled: this.cullingEnabled,
@@ -427,7 +427,7 @@ export class SceneRenderer {
       this.builtTextEpoch !== textShapingEpoch() ||
       !sameMembers(visibleTexts, this.visibleTexts)
     ) {
-      this.textBatcher.rebuild(visibleTexts, this.fontBook)
+      this.textBatcher.rebuild(visibleTexts, this.fonts)
       this.textGeometryDirty = false
       this.builtTextEpoch = textShapingEpoch()
     }
@@ -521,7 +521,7 @@ export class SceneRenderer {
       if (run.lane === 'mesh') {
         this.batcher.draw(pass, this.frameUniforms.bindGroup, this.batcher.indexRangeFor(run.from, run.to))
       } else if (run.lane === 'text') {
-        this.textBatcher.drawRange(pass, this.frameUniforms.bindGroup, this.fontBook, run.from, run.to)
+        this.textBatcher.drawRange(pass, this.frameUniforms.bindGroup, run.from, run.to)
       } else if (run.lane === 'image') {
         this.imageBatcher.drawRange(pass, this.frameUniforms.bindGroup, run.from, run.to)
       } else {
@@ -546,7 +546,7 @@ export class SceneRenderer {
     this.imageBatcher.destroy()
     this.shadowAtlas.destroy()
     this.shadowBatcher.destroy()
-    this.fontBook.destroy()
+    this.fonts.destroy()
     this.frameUniforms.destroy()
   }
 }

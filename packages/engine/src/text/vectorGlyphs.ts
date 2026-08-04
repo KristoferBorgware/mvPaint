@@ -12,10 +12,10 @@
 // seam that keeps that from being a restriction:
 //
 //   VectorFonts        what a VectorText holds - resolve a style, prepare some text, hand back
-//                      the outline for a code point. PolygonFontBook implements it from the
-//                      bundled atlases; @mvpaint/ttf implements it by parsing a font file at
-//                      runtime, for an application that genuinely needs an arbitrary font it
-//                      has not seen before (a user upload, a font picker).
+//                      the outline for a code point. PolygonFontBook implements it from atlases
+//                      the application supplies; @mvpaint/ttf implements it by parsing a font
+//                      file at runtime, for an application that genuinely needs an arbitrary
+//                      font it has not seen before (a user upload, a font picker).
 //   meshFromContours   rings -> fill triangles, shared by both, so an atlas glyph and a
 //                      runtime-parsed one become geometry through the same code.
 //

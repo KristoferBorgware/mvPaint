@@ -19,10 +19,11 @@
 // glows - is the shaper's output, identical to what the MSDF lane consumes.
 //
 // Fonts are supplied per node rather than by the renderer: glyph outlines own no GPU
-// resources, so there is nothing for a device to hand out, and an app that never uses this
-// path never loads the atlases at all (see text/vectorFonts.ts). Where they come from is the
-// application's choice - a bundled polygon atlas, or a font file parsed at runtime through
-// @mvpaint/ttf - and this node cannot tell the difference (see text/vectorGlyphs.ts).
+// resources, so there is nothing for a device to hand out, and the engine ships none of them -
+// an app that never uses this path pays nothing for it. Where they come from is the
+// application's choice - a polygon atlas it supplies (@mvpaint/assets is this repository's),
+// or a font file parsed at runtime through @mvpaint/ttf - and this node cannot tell the
+// difference (see text/vectorGlyphs.ts).
 
 import type { Vector2Like } from '../math/Vector2'
 import { TextBlock, type TextBlockOptions } from './TextBlock'
@@ -34,9 +35,8 @@ import { quadCorner, type TextQuad } from '../text/textQuad'
 
 export interface VectorTextOptions extends TextBlockOptions {
   /**
-   * The outlines this node draws from - the bundled polygon atlases via
-   * loadDefaultVectorFonts(), or any other VectorFonts (see @mvpaint/ttf, which parses a font
-   * file at runtime).
+   * The outlines this node draws from - a PolygonFontBook over atlases the application
+   * supplies, or any other VectorFonts (see @mvpaint/ttf, which parses a font file at runtime).
    */
   fonts: VectorFonts
 }
@@ -76,13 +76,13 @@ interface ShapingResult {
 export class VectorText extends TextBlock {
   override readonly nodeName: string = 'VectorText'
 
-  readonly fonts: VectorFonts
+  private fontsValue: VectorFonts
 
   private shapingCache: ShapingResult | null = null
 
   constructor(options: VectorTextOptions) {
     super(options)
-    this.fonts = options.fonts
+    this.fontsValue = options.fonts
     // Round joins by default, unlike every other shape. A letterform has far sharper corners
     // than a rectangle or a hand-drawn path does - the apex of an A, the two of a W - and
     // Shape's default miter (limit 10) grows a spike out of each one. Measured on Inter at
@@ -94,6 +94,28 @@ export class VectorText extends TextBlock {
 
   protected override attrKeys(): readonly string[] {
     return [...super.attrKeys(), 'fonts']
+  }
+
+  /**
+   * The outlines this node draws from - this path's equivalent of `Text.fontFamily`, except
+   * that the fonts themselves are handed over rather than named, since they own no GPU resource
+   * for a renderer to have to hold.
+   */
+  get fonts(): VectorFonts {
+    return this.fontsValue
+  }
+
+  /**
+   * Draw from a different set of outlines.
+   *
+   * Goes through invalidateShaping() like any other content change, so only this node re-shapes
+   * (and re-tessellates - its geometry IS its shaping) while every other node's packed quads
+   * are reused.
+   */
+  set fonts(fonts: VectorFonts) {
+    if (this.fontsValue === fonts) return
+    this.fontsValue = fonts
+    this.invalidateShaping()
   }
 
   /** Shape the runs into quads + materials, cached until the content or layout changes. */

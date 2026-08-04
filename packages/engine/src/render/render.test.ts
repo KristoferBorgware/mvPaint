@@ -1026,7 +1026,9 @@ it('the draw order that makes transparency work across lanes', () => {
 // overlay] with the two boundaries in the right place, that culling drops shapes and their
 // depths together, and that the fast path hands back the SAME arrays rather than equal ones.
 it('The gather (render/gather.ts)', () => {
-    const provider = msdfFontProvider()
+    // The gather takes a FontLibrary now, not a bare provider: a Text names a family and the
+    // library resolves it. One family here, which is what every existing scene has.
+    const provider = { resolveFamily: () => msdfFontProvider() }
     const camera = new Camera2D()
     const VIEW = { viewWidth: 200, viewHeight: 100 }
 

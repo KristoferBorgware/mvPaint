@@ -10,7 +10,7 @@ import { Vector3 } from '../math/Vector3'
 import type { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
-import type { FontProvider } from '../text/layout'
+import type { FontFamilies } from '../text/layout'
 import { collectZOrder, textLocalBounds } from './picking'
 
 export interface MarqueeOptions {
@@ -21,15 +21,15 @@ export interface MarqueeOptions {
    */
   mode?: 'intersect' | 'contain'
   /** Needed to measure Text nodes; without it they are skipped rather than mis-measured. */
-  fontBook?: FontProvider
+  fonts?: FontFamilies
 }
 
 /** A shape's bounds in world space, or null when it has nothing to measure. */
-export function worldBounds(shape: Shape, fonts?: FontProvider): AABB | null {
+export function worldBounds(shape: Shape, fonts?: FontFamilies): AABB | null {
   const local =
     shape instanceof Text
       ? fonts
-        ? textLocalBounds(shape.shaped(fonts))
+        ? textLocalBounds(shape.shaped(fonts.resolveFamily(shape.fontFamily)))
         : null
       : shape.localBounds()
   if (!local || !local.valid()) return null
@@ -75,7 +75,7 @@ export function nodesInBox(
   const hits: Shape[] = []
   for (const node of collectZOrder(scene)) {
     if (!node.pickable) continue
-    const bounds = worldBounds(node, options.fontBook)
+    const bounds = worldBounds(node, options.fonts)
     if (!bounds) continue
     if (mode === 'contain' ? contains2D(box, bounds) : box.intersects(bounds)) {
       hits.push(node)

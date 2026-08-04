@@ -28,7 +28,7 @@ import type { Scene } from '../scene/Scene'
 import { Image } from '../shapes/Image'
 import { Shape } from '../shapes/Shape'
 import { Text } from '../shapes/Text'
-import type { FontProvider } from '../text/layout'
+import type { FontFamilies } from '../text/layout'
 import { collectZOrder, depthForRank } from '../scene/picking'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
 import { partitionByOpacity } from './opacity'
@@ -59,7 +59,7 @@ export interface GatherInput {
   scene: Scene
   camera: Camera2D
   /** Needed to measure Text for culling - metrics only, no atlas (see Text.shaped). */
-  fonts: FontProvider
+  fonts: FontFamilies
   /** The canvas's LOGICAL size: the camera is sized in CSS pixels, not backing-store ones. */
   viewWidth: number
   viewHeight: number

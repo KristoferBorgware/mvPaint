@@ -1,12 +1,15 @@
 // The half of @mvpaint/engine that runs anywhere: geometry, glyph metrics, the style ladder and
 // the outline tessellator. No device, no canvas, and - the point of the split - no assets.
 //
-// The main entry point imports the four MSDF atlas PNGs and the four polygon atlases as `?url`,
-// which only a bundler resolves. That is right for an application, and fatal for everything that
-// is not one: @mvpaint/ttf and its self-test, the offline atlas generators in packages/scripts
-// (run under tsx), and any application code that wants to shape or measure text before a device
-// exists. Those import this entry point instead - `@mvpaint/engine/core` - and get plain modules
-// node can load.
+// The main entry point imports the four MSDF atlas PNGs as `?url`, which only a bundler
+// resolves. That is right for an application, and fatal for everything that is not one:
+// @mvpaint/ttf and its self-test, the offline atlas generators in packages/scripts (run under
+// tsx), and any application code that wants to shape or measure text before a device exists.
+// Those import this entry point instead - `@mvpaint/engine/core` - and get plain modules node
+// can load.
+//
+// PolygonFont is here rather than beyond the line because reading a polygon atlas needs no
+// bundler and no device - only the data, which the application supplies (see @mvpaint/assets).
 //
 // Everything here is also exported from the main entry point, so an application never has to
 // choose: import '@mvpaint/engine' and this is part of it.

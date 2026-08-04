@@ -10,12 +10,14 @@
 // its glyphs instead), and glyph-accurate picking, since the letters ARE the geometry the hit
 // test walks.
 //
-// The outlines come from the polygon atlases (packages/scripts/text/polygon generates them),
-// fetched the first time this scene opens rather than at startup - about 200kB, and the reason
-// the engine needs no font parser at all. A font the atlases do not cover is the other scene:
-// Runtime TTF.
+// The outlines come from this application's own polygon atlases (src/fonts/polygons/, generated
+// by packages/scripts and copied in), fetched the first time this scene opens rather than at
+// startup - about 200kB, and the reason the engine needs no font parser at all. They are the
+// application's asset, not the engine's, which ships an MSDF fallback and no outlines at all. A
+// font the atlases do not cover is the other scene: Runtime TTF.
 
-import { Text, VectorText, type Scene, type VectorFonts, loadDefaultVectorFonts } from '@mvpaint/engine'
+import { Text, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
+import { loadVectorFonts } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -30,7 +32,7 @@ let fonts: VectorFonts | null = null
 
 /** Fetch the glyph atlases. Called by the canvas before build(), and memoized downstream. */
 export async function prepareVectorTextScene(): Promise<void> {
-  fonts = await loadDefaultVectorFonts()
+  fonts = await loadVectorFonts()
 }
 
 export function buildVectorTextScene(scene: Scene): SceneContent {

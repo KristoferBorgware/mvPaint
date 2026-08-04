@@ -12,6 +12,7 @@
 import type { Shape } from '../../shapes/Shape'
 import type { Text } from '../../shapes/Text'
 import type { FontBook } from '../FontBook'
+import type { FontLibrary } from '../FontLibrary'
 import type { TextMaterial } from '../../text/layout'
 import { quadCorner } from '../../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from '../../render/meshFormat'
@@ -59,14 +60,22 @@ export class TextBatcher {
   // lets any run of nodes be drawn on its own, which is how the renderer interleaves the
   // lanes back to front - see SceneRenderer's draw().
   private nodeIndexEnds: number[] = []
+  // The book each node was shaped against, aligned with nodeIndexEnds. Draw ranges break where
+  // this changes, because a range is one bind group and a book is one texture.
+  private nodeBooks: FontBook[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
     this.objectLayout = objectLayout
   }
 
-  /** Shape all Text nodes into the shared buffers, one material (object) per run. */
-  rebuild(texts: readonly Text[], fontBook: FontBook): void {
+  /**
+   * Shape all Text nodes into the shared buffers, one material (object) per run.
+   *
+   * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
+   * into the same buffers and differ only in which texture their draw binds.
+   */
+  rebuild(texts: readonly Text[], fonts: FontLibrary): void {
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isGlyph
     const indices: number[] = []
@@ -74,13 +83,18 @@ export class TextBatcher {
     let objectBase = 0
     this.objectRecords = []
     this.nodeIndexEnds = []
+    this.nodeBooks = []
 
     for (const text of texts) {
+      const book = fonts.bookFor(text.fontFamily)
+      // Pushed for invisible nodes too: both arrays are indexed by position in `texts`, and a
+      // node that contributes no indices still takes its slot.
+      this.nodeBooks.push(book)
       if (!text.visible) {
         this.nodeIndexEnds.push(indices.length)
         continue
       }
-      const shaped = text.shaped(fontBook)
+      const shaped = text.shaped(book)
       for (const material of shaped.materials) {
         this.objectRecords.push({ node: text, material })
       }
@@ -212,35 +226,51 @@ export class TextBatcher {
   }
 
   /** Draw the whole lane: one bind of the shared atlas array, one indexed draw. */
-  draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, fontBook: FontBook): void {
-    this.drawRange(pass, frameBindGroup, fontBook, 0, this.nodeIndexEnds.length)
+  draw(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup): void {
+    this.drawRange(pass, frameBindGroup, 0, this.nodeIndexEnds.length)
   }
 
   /**
    * Draw only the nodes [fromNode, toNode) of the last rebuild, in that order - which is how
-   * the renderer interleaves the lanes back to front. One draw, whatever styles the span
-   * mixes: every style is a layer of the one bound texture (see webgpu/FontBook.ts).
+   * the renderer interleaves the lanes back to front.
+   *
+   * One draw per FAMILY CHANGE within the span, not per node and not per style: every style of
+   * a family is a layer of that family's one texture (see webgpu/FontBook.ts), so a span in a
+   * single family is a single draw however many styles it mixes - the usual case, and unchanged
+   * from when a scene could only have one family. A span alternating families pays a bind and a
+   * draw at each switch.
    */
-  drawRange(
-    pass: GPURenderPassEncoder,
-    frameBindGroup: GPUBindGroup,
-    fontBook: FontBook,
-    fromNode: number,
-    toNode: number,
-  ): void {
+  drawRange(pass: GPURenderPassEncoder, frameBindGroup: GPUBindGroup, fromNode: number, toNode: number): void {
     if (!this.vertexBuffer || !this.indexBuffer || !this.objectBindGroup || this.indexCount === 0) {
       return
     }
-    const start = fromNode <= 0 ? 0 : (this.nodeIndexEnds[fromNode - 1] ?? this.indexCount)
-    const end = toNode <= 0 ? 0 : (this.nodeIndexEnds[Math.min(toNode, this.nodeIndexEnds.length) - 1] ?? this.indexCount)
-    if (end <= start) return
+    const first = Math.max(0, fromNode)
+    const last = Math.min(toNode, this.nodeIndexEnds.length)
+    if (last <= first) return
 
-    pass.setBindGroup(0, frameBindGroup)
-    pass.setBindGroup(1, this.objectBindGroup)
-    pass.setBindGroup(2, fontBook.bindGroup)
-    pass.setVertexBuffer(0, this.vertexBuffer)
-    pass.setIndexBuffer(this.indexBuffer, 'uint32')
-    pass.drawIndexed(end - start, 1, start)
+    let bound = false
+    // Walk the span, emitting a draw whenever the next node's book differs from the run's.
+    let runStart = first
+    for (let node = first; node < last; node++) {
+      const isLast = node === last - 1
+      if (!isLast && this.nodeBooks[node + 1] === this.nodeBooks[runStart]) continue
+
+      const start = runStart <= 0 ? 0 : (this.nodeIndexEnds[runStart - 1] ?? this.indexCount)
+      const end = this.nodeIndexEnds[node] ?? this.indexCount
+      runStart = node + 1
+      if (end <= start) continue
+
+      if (!bound) {
+        // Groups 0 and 1 are the same for every run in the span; only group 2 changes.
+        pass.setBindGroup(0, frameBindGroup)
+        pass.setBindGroup(1, this.objectBindGroup)
+        pass.setVertexBuffer(0, this.vertexBuffer)
+        pass.setIndexBuffer(this.indexBuffer, 'uint32')
+        bound = true
+      }
+      pass.setBindGroup(2, this.nodeBooks[node].bindGroup)
+      pass.drawIndexed(end - start, 1, start)
+    }
   }
 
   destroy(): void {
