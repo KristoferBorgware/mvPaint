@@ -43,7 +43,7 @@ export interface SceneRendererHandle extends SceneResources {
   /** Which path this renderer actually took - `'webgl2'` means WebGPU was unavailable. */
   readonly path: RenderPathKind
   /**
-   * Which GPU is drawing, and which one was asked for - see renderer/adapter.ts.
+   * Which GPU is drawing, and which one was asked for - see systems/adapter.ts.
    *
    * Reported rather than assumed, because `powerPreference` is a hint that a machine with one
    * GPU ignores and a machine whose browser is pinned elsewhere overrides. This is how an
@@ -223,7 +223,7 @@ export interface CreateSceneRendererOptions {
    * Pass `'low-power'` for an application that would rather have the battery.
    *
    * It is a hint, and the only one there is: neither WebGPU nor WebGL lets a page enumerate
-   * GPUs or name one. See renderer/adapter.ts for what it can and cannot do, and read
+   * GPUs or name one. See systems/adapter.ts for what it can and cannot do, and read
    * `handle.adapter` for what came back.
    */
   powerPreference?: GpuPowerPreference

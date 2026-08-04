@@ -2,7 +2,7 @@
 //
 // Everything under src/webgl/ exists to draw the same scene on a machine without WebGPU, and
 // is expected to be removed once such a machine is rare. Nothing outside this directory
-// imports anything inside it except renderer/createSceneRenderer.ts, through one dynamic
+// imports anything inside it except systems/createSceneRenderer.ts, through one dynamic
 // import(), so removing the fallback is removing this directory and that import.
 //
 // What it shares with the WebGPU path, it shares by using the same pure modules: the gather
@@ -36,14 +36,14 @@
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
-import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
-import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
-import { createFrameListeners } from '../renderer/frameListeners'
+import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../systems/SceneRendererHandle'
+import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../systems/canvasTarget'
+import { createFrameListeners } from '../systems/frameListeners'
 import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
-import { describeAdapter } from '../renderer/adapter'
+import { describeAdapter } from '../systems/adapter'
 import { GlFontLibrary } from './GlFontLibrary'
 import { glImageFactory } from './GlImageTexture'
 import { GlSceneRenderer } from './GlSceneRenderer'
@@ -61,7 +61,7 @@ const GL_ERRORS: Record<number, string> = {
 
 /**
  * Composition root for the WebGL2 path. Applications call createSceneRenderer()
- * (renderer/createSceneRenderer.ts), which comes here only when WebGPU is unavailable or when
+ * (systems/createSceneRenderer.ts), which comes here only when WebGPU is unavailable or when
  * `backend: 'webgl2'` asks for it deliberately.
  */
 export async function createWebGl2SceneRenderer(
@@ -115,7 +115,7 @@ export async function createWebGl2SceneRenderer(
   // caller can attach, replace or clear it at any point after construction.
   let onFrame: ((dt: number) => void) | null = null
   // The application's slot, then the engine's own per-frame work (the selection frame refits
-  // from whatever the animation above just moved). See renderer/frameListeners.ts.
+  // from whatever the animation above just moved). See systems/frameListeners.ts.
   const frames = createFrameListeners()
 
   // One message, however many frames the problem lasts: a per-frame report would bury the

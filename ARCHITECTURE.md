@@ -411,10 +411,67 @@ rotations that do not matter and sensitive to every scale and skew that does.
 
 ### SVG
 
-`loadSvg()` (`svg/loadSvg.ts`) parses a document into `Path` nodes, flattening curves against a
-tolerance and carrying across fills, gradients, strokes and transforms. Shape elements are
-converted to path data first (`svg/shapeToPath.ts`), and fills go through the same contour
-classification and triangulation the rest of the engine uses.
+There are **two ways to get an SVG onto the screen**, and they are not variations on one
+implementation — they are different answers to what an SVG *is*. One treats the document as
+geometry and turns it into triangles; the other treats it as a picture and asks the browser to
+draw it. Which is right depends on whether the document will be zoomed and how much of the SVG
+specification it leans on.
+
+#### Method 1 — polygons (`loadSvgDocument`)
+
+`loadSvgDocument()` (`svg/loadSvg.ts`) parses a document into `Path` nodes, flattening curves
+against a tolerance and carrying across fills, gradients, strokes and transforms. Shape elements
+are converted to path data first (`svg/shapeToPath.ts`), and fills go through the same contour
+classification and triangulation (`svg/triangulate.ts`) the rest of the engine uses.
+
+What comes out is ordinary scene content. The nodes are `Path`s like any other, so they pick,
+cull, z-sort, take shadows and can be transformed or restyled individually after the load — the
+document stops being a document the moment it is parsed.
+
+```ts
+const svg = loadSvgDocument(text, { rootMatrix: flipY })
+handle.scene.root.addChild(svg)
+```
+
+The parser covers `svg`, `g`, `a`, `switch` as containers and `path`, `rect`, `circle`,
+`ellipse`, `line`, `polyline`, `polygon` as geometry, plus `linearGradient` / `radialGradient`.
+Anything outside that set is skipped rather than approximated.
+
+#### Method 2 — rasterizing (`handle.images.fromSvg`)
+
+`fromSvg()` (`image/ImageTexture.ts`) hands the markup to the browser's own SVG renderer — blob
+URL into an `<img>`, `decode()`, draw onto a canvas, `getImageData` — and uploads the resulting
+RGBA8 pixels as a texture for an `Image` node. Rasterizing means choosing a pixel size, so
+`image/svgSize.ts` works out the document's implied size and writes the chosen one back into the
+markup first (adding a `viewBox` if there is none, since width/height alone enlarge the canvas
+rather than the drawing).
+
+```ts
+const tex = await handle.images.fromSvg(text, { scale: 2 })
+handle.scene.root.addChild(new Image({ texture: tex }))
+```
+
+Because it is the browser drawing, the whole specification is supported — with one caveat: an
+`<img>`-loaded SVG runs in the browser's *restricted* mode, so scripts, animation and **external
+references** are off. Webfonts, external stylesheets and linked images are not fetched, and text
+falls back to whatever font is already available. Everything the document needs must be inline.
+
+#### Pro / con
+
+| | Method 1 — polygons | Method 2 — rasterized |
+| --- | --- | --- |
+| **Pro** | Faster to render — triangles are native to the GPU and no texture is bound | Fully supported: the browser draws it, so every SVG feature works |
+| | Stays sharp at any zoom — it is geometry, not pixels | No post-load preprocessing — SVG in, image out |
+| | Less memory: vertices only | One node and one draw, however complex the document |
+| **Con** | Not every SVG feature is supported — no filters, clipping, masks or `<use>` | Not sharp: fixed at the resolution it was rasterized at, and blurs when zoomed in |
+| | Curves are flattened at load, against a fixed tolerance | Requires a texture, and the upload that goes with it |
+| | Per-element nodes cost more scene bookkeeping than one image | Slower to render, and uses more memory |
+
+**Choosing.** Zoomable content, and anything that will be picked, restyled or animated per
+element, wants Method 1. A document that uses filters, clips or masks — or one that is only ever
+drawn at a known size, like an icon — wants Method 2. `handle.images.load(url)` also rasterizes
+when the URL is an SVG, at the document's own intrinsic size; `fromSvg` is the one that lets the
+size be yours to choose.
 
 ---
 
@@ -1148,7 +1205,7 @@ ctrl, meta or space grabs the view instead of the content wherever it lands.
 The bindings are built entirely from public parts — `SceneInputDispatcher`, `MarqueeTool`,
 `Transformer`, `panToAnchor` / `zoomToward`, `nodesInBox` — so an application with different
 needs omits the preset and composes its own from the same set. The selection frame refits once a
-frame through `handle.addFrameListener` (`renderer/frameListeners.ts`) rather than through the
+frame through `handle.addFrameListener` (`systems/frameListeners.ts`) rather than through the
 single application-owned `handle.onFrame` slot, which runs first.
 
 ### The transformer
@@ -1172,7 +1229,7 @@ bookkeeping around them.
 
 ### Canvas resolution
 
-`resolveCanvas` (`renderer/canvasTarget.ts`) turns the first argument — a canvas, a selector, a
+`resolveCanvas` (`systems/canvasTarget.ts`) turns the first argument — a canvas, a selector, a
 container element, or nothing — into a canvas. It runs in `createSceneRenderer` **before** either
 render path is tried, so a WebGL2 fallback after a failed WebGPU attempt draws into the canvas
 that already exists rather than creating a second one.
@@ -1215,7 +1272,7 @@ layouts in `render/*Format.ts`, the draw-order merge, the opacity split, the str
 maths, the shaper, the capture arithmetic.
 
 They couple through exactly two things: one factory function with one branch
-(`renderer/createSceneRenderer.ts`), and one interface both implement, `SceneRendererHandle` —
+(`systems/createSceneRenderer.ts`), and one interface both implement, `SceneRendererHandle` —
 everything an application does with a renderer, naming no graphics API. The fallback is reached
 through a dynamic `import()`, so a bundler splits it into its own chunk and a browser with
 WebGPU never fetches it. `backend: 'webgl2'` forces it, which is how it gets exercised on a
@@ -1241,7 +1298,7 @@ texture's *first* texel row and GL in its *last* — corrected in exactly two pl
 
 ### Choosing a GPU
 
-Both paths take the same option and default it the same way (`renderer/adapter.ts`):
+Both paths take the same option and default it the same way (`systems/adapter.ts`):
 
 ```ts
 createSceneRenderer(canvas, { powerPreference: 'high-performance' })  // the default
@@ -1308,7 +1365,8 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
 | Shapes you write yourself | `shapes/CustomShape.ts`, `shapes/ShapeContext.ts` |
 | Stroking, contours, SVG flattening | `render/stroke.ts`, `render/contours.ts`, `svg/flattenPath.ts` |
-| Loading SVG | `svg/loadSvg.ts`, `svg/shapeToPath.ts`, `svg/gradient.ts`, `svg/triangulate.ts` |
+| Loading SVG as polygons | `svg/loadSvg.ts`, `svg/shapeToPath.ts`, `svg/gradient.ts`, `svg/triangulate.ts` |
+| Loading SVG as pixels | `image/ImageTexture.ts` (`rasterizeSvgPixels`), `image/svgSize.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
 | Generating those assets | `packages/scripts/text/msdf/`, `text/polygon/`, `text/fontSources.ts` |
@@ -1325,9 +1383,9 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Shadow baking and maths | `webgpu/ShadowAtlas.ts`, `render/shadowMath.ts` |
 | Capture | `render/capture.ts`, `webgpu/CaptureTarget.ts`, `webgl/GlCaptureTarget.ts` |
 | Orchestration | `webgpu/index.ts`, `SceneRenderer.ts`, `FrameRenderer.ts`, `GpuContext.ts` |
-| Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
-| Where the canvas comes from | `renderer/canvasTarget.ts` |
-| Choosing a GPU | `renderer/adapter.ts`, `webgpu/GpuContext.ts`, `webgl/Gl2Context.ts` |
+| Choosing a render path | `systems/createSceneRenderer.ts`, `systems/SceneRendererHandle.ts` |
+| Where the canvas comes from | `systems/canvasTarget.ts` |
+| Choosing a GPU | `systems/adapter.ts`, `webgpu/GpuContext.ts`, `webgl/Gl2Context.ts` |
 | Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts`, `shapes/transformerMath.ts` |
 | The bindings themselves | `input/inputOptions.ts`, `input/sceneInput.ts`, `input/MarqueeTool.ts`, `input/MarqueeOverlay.ts` |
 | The WebGL2 fallback | `webgl/` |

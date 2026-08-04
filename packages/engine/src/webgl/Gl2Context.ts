@@ -9,13 +9,13 @@
 // texelFetch and no array textures - it could not draw this scene without being a third,
 // different renderer. A machine with neither WebGPU nor WebGL2 gets the honest answer.
 
-import { describeAdapter, type GpuPowerPreference, type RendererAdapter } from '../renderer/adapter'
+import { describeAdapter, type GpuPowerPreference, type RendererAdapter } from '../systems/adapter'
 
 /** What the fallback's lanes are handed: the context, and the canvas it belongs to. */
 export interface Gl2Context {
   gl: WebGL2RenderingContext
   canvas: HTMLCanvasElement
-  /** Which GPU the browser gave us, and what was asked for - see renderer/adapter.ts. */
+  /** Which GPU the browser gave us, and what was asked for - see systems/adapter.ts. */
   adapter: RendererAdapter
   /** gl.MAX_TEXTURE_SIZE - the ceiling on the object data texture and any atlas. */
   maxTextureSize: number
@@ -28,7 +28,7 @@ export interface Gl2Context {
 }
 
 export interface Gl2ContextOptions {
-  /** Which GPU to ask for. Default 'high-performance' - see renderer/adapter.ts. */
+  /** Which GPU to ask for. Default 'high-performance' - see systems/adapter.ts. */
   powerPreference?: GpuPowerPreference
 }
 
@@ -63,7 +63,7 @@ export function createGl2Context(canvas: HTMLCanvasElement, options: Gl2ContextO
     // failure that costs a black screen and shows up nowhere in the console.
     //
     // Which GPU to ask for, on a machine that has more than one - the only lever there is,
-    // and the reason the default is not the platform's. See renderer/adapter.ts.
+    // and the reason the default is not the platform's. See systems/adapter.ts.
     powerPreference,
   })
 

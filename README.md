@@ -358,7 +358,7 @@ Both paths draw every node type through the same scene graph, picking, z-orderin
 They differ in scale: WebGL2 has no storage buffers, so per-object records travel through a
 float texture instead, and the fallback targets a lower object count.
 
-The fallback is contained in `src/webgl/` plus one branch in `renderer/createSceneRenderer.ts`,
+The fallback is contained in `src/webgl/` plus one branch in `systems/createSceneRenderer.ts`,
 and is intended to be removable without touching the WebGPU path.
 
 ### GPU selection
@@ -388,7 +388,8 @@ packages/engine        the renderer - no demo content, no framework, no font par
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
   src/text/            the shaper, the MSDF fallback atlas, and the polygon atlas reader
   src/input/           the pointer dispatcher and the 'view'/'editor' bindings over it
-  src/renderer/        render-path selection, canvas resolution, the handle interface
+  src/scene/           the scene graph, plus picking, culling and marquee selection
+  src/systems/         render-path selection, canvas resolution, sizing, the handle interface
   src/webgpu/          SceneRenderer: the gather, the passes
   src/webgl/           the WebGL2 fallback
 packages/scripts       offline tools: font files in, glyph atlases out

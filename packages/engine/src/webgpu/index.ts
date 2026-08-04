@@ -3,13 +3,13 @@
 // Its counterpart is webgl/index.ts, and the two are deliberately the same shape: acquire a
 // device, load the font atlases, build a renderer, start a frame loop, and hand back a
 // SceneRendererHandle over an EMPTY scene, which the caller then fills. Everything below that line differs completely, and neither
-// path knows the other exists; renderer/createSceneRenderer.ts is the only thing that does.
+// path knows the other exists; systems/createSceneRenderer.ts is the only thing that does.
 
 import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
-import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../renderer/SceneRendererHandle'
-import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../renderer/canvasTarget'
-import { createFrameListeners } from '../renderer/frameListeners'
+import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../systems/SceneRendererHandle'
+import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../systems/canvasTarget'
+import { createFrameListeners } from '../systems/frameListeners'
 import { attachSceneInput, type SceneInput } from '../input/sceneInput'
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { createAtlasBindGroupLayout } from './layouts'
@@ -32,7 +32,7 @@ const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
  * loop on a white background through a 2D orthographic camera, MSAA 4x. Scene content is
  * added afterwards, through the returned handle's `scene`. Throws if WebGPU is unavailable.
  *
- * Applications call createSceneRenderer() (renderer/createSceneRenderer.ts) instead, which
+ * Applications call createSceneRenderer() (systems/createSceneRenderer.ts) instead, which
  * comes here first and only falls back if this throws.
  */
 export async function createWebGpuSceneRenderer(
@@ -76,7 +76,7 @@ export async function createWebGpuSceneRenderer(
   const resizer = new CanvasResizer(canvas)
 
   // The application's slot, then the engine's own per-frame work (the selection frame refits
-  // from whatever the animation above just moved). See renderer/frameListeners.ts.
+  // from whatever the animation above just moved). See systems/frameListeners.ts.
   const frames = createFrameListeners()
 
   const frameRenderer = new FrameRenderer(

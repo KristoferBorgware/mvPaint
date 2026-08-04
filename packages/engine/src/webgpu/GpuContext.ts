@@ -2,19 +2,19 @@
 // operations (adapter/device request, canvas configuration, preferred format). Not
 // specific to any scene - the renderer and systems build on top of this.
 
-import { describeAdapter, type GpuPowerPreference, type RendererAdapter } from '../renderer/adapter'
+import { describeAdapter, type GpuPowerPreference, type RendererAdapter } from '../systems/adapter'
 
 export interface GpuContext {
   device: GPUDevice
   context: GPUCanvasContext
   format: GPUTextureFormat
   canvas: HTMLCanvasElement
-  /** Which GPU the browser gave us, and what was asked for - see renderer/adapter.ts. */
+  /** Which GPU the browser gave us, and what was asked for - see systems/adapter.ts. */
   adapter: RendererAdapter
 }
 
 export interface GpuContextOptions {
-  /** Which GPU to ask for. Default 'high-performance' - see renderer/adapter.ts. */
+  /** Which GPU to ask for. Default 'high-performance' - see systems/adapter.ts. */
   powerPreference?: GpuPowerPreference
 }
 
@@ -31,7 +31,7 @@ export async function createGpuContext(
   }
 
   // The one lever there is for choosing a GPU, and the reason the default is not the
-  // platform's - see renderer/adapter.ts.
+  // platform's - see systems/adapter.ts.
   const powerPreference = options.powerPreference ?? 'high-performance'
   const gpuAdapter = await navigator.gpu.requestAdapter({ powerPreference })
   if (!gpuAdapter) {

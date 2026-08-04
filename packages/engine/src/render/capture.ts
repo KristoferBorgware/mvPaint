@@ -7,7 +7,7 @@
 
 import { Camera2D } from '../camera/Camera2D'
 import { parseColor, type RGBA } from './color'
-import type { CaptureOptions } from '../renderer/SceneRendererHandle'
+import type { CaptureOptions } from '../systems/SceneRendererHandle'
 
 /** Everything a render path needs to take one capture, with every default already resolved. */
 export interface CapturePlan {
