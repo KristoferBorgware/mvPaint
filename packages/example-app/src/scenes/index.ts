@@ -14,6 +14,7 @@ import { buildStrokeScaleScene } from './strokeScaleScene'
 import { buildShapeStressScene } from './shapeStressScene'
 import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
+import { buildSvgLoadStressScene, prepareSvgLoadStressScene } from './svgLoadStressScene'
 import { buildTextScene } from './textScene'
 import { buildTransparencyScene } from './transparencyScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
@@ -175,6 +176,15 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     disableCulling: true,
     prepare: prepareVectorTextStressScene,
     build: buildVectorTextStressScene,
+  },
+  {
+    id: 'svg-load-stress',
+    title: 'SVG loading stress test',
+    description:
+      'Two real documents - Tux (47 paths, 33 gradients) and the Ghostscript tiger (240 paths of pure bezier curves) - each loaded both ways and drawn at the same size in a 2x2 grid: loadSvgDocument() into Path nodes on the left, images.fromSvg() into one texture on the right. Every cell prints what its route cost, path and triangle counts and parse/tessellate times against pixel size, memory and rasterize time. The loader reads geometry, paint, gradients and transforms but not <filter>, <clipPath> or <use>, which is why the two halves of the Tux row differ and the two halves of the tiger row do not. Zoom in for the rest of what the numbers do not show. The vector side re-loads on every build, so Reload scene re-measures it.',
+    disableShadows: true,
+    prepare: prepareSvgLoadStressScene,
+    build: buildSvgLoadStressScene,
   },
 ]
 
