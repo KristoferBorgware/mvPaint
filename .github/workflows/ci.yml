@@ -38,6 +38,16 @@ jobs:
           node-version: 22
           cache: npm
 
+      # The SAME npm the release workflow runs, and that is the whole point rather than a
+      # detail. `npm ci` refuses a lockfile whose tree it would not have produced, and npm 10
+      # and 11 do not agree on this one: 11 dedupes several nested copies (yaml@2.9.0 among
+      # them) that 10 insists on. Release regenerates the lockfile during versioning, so if this
+      # job read it with the npm bundled with Node 22 - which is 10 - every release would fail
+      # its own checks. Pinned to the major, not `latest`, so a future npm cannot reintroduce
+      # the skew by shipping while nobody is looking.
+      - name: Upgrade npm
+        run: npm install -g npm@11
+
       - name: Install dependencies
         run: npm ci
 

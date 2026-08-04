@@ -51,7 +51,12 @@ jobs:
         # Trusted publishing needs npm 11.5.1 or newer; the npm bundled with Node 22 is older.
         # This is what exchanges the id-token above for short-lived registry credentials, so
         # nothing long-lived is stored in the repo.
-        run: npm install -g npm@latest
+        #
+        # It also decides the SHAPE of the lockfile, because the version step below rewrites it -
+        # and npm majors disagree about which nested copies a tree needs. ci.yml pins the same
+        # major for that reason; the two must not drift, or a release writes a lockfile its own
+        # pull request cannot install. Pinned rather than `latest` so that upgrade is deliberate.
+        run: npm install -g npm@11
 
       - name: Install dependencies
         run: npm ci
