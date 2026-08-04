@@ -170,7 +170,9 @@ Two conventions:
 
 ### Nodes and containers
 
-`Node` → `Container` → `Group`, `Layer`, and `Shape`.
+`Node` is the base — id, name, parent link, transform, events. `Container` extends it with
+children, and `Group` and `Layer` extend that. `Shape` extends `Node` directly and adds
+everything that paints.
 
 - **`Group`** behaves as a single unit: it places its contents, sizes itself to them, hides them
   together, and a drag inside it moves the whole group.
