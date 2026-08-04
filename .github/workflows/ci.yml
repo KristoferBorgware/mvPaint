@@ -21,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -44,6 +44,8 @@ jobs:
       - name: Build and pack
         run: |
           npm run build:packages
+          # npm pack writes into --pack-destination but will not create it.
+          mkdir -p /tmp/packed
           npm pack -w @mvpaint/engine -w @mvpaint/ttf --pack-destination /tmp/packed
           for t in /tmp/packed/*.tgz; do
             echo "--- $t"
