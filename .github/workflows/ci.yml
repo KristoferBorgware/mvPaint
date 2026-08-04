@@ -60,15 +60,48 @@ jobs:
       # Not just `npm run build:packages`: this proves the tarballs npm would actually upload
       # are complete. The entry points, the type declarations and the fallback atlas all have to
       # be in them, and `files` in package.json is easy to get subtly wrong.
+      #
+      # Packed through the same strip the release runs, so what is inspected below is the shape
+      # that would reach the registry rather than the working-tree shape. Restored afterwards
+      # because later steps - the example app build - resolve through the development condition.
       - name: Build and pack
         run: |
           npm run build:packages
           # npm pack writes into --pack-destination but will not create it.
           mkdir -p /tmp/packed
+          node scripts/strip-dev-condition.mjs strip
           npm pack -w @mvpaint/engine -w @mvpaint/ttf --pack-destination /tmp/packed
+          node scripts/strip-dev-condition.mjs restore
           for t in /tmp/packed/*.tgz; do
             echo "--- $t"
             tar -tzf "$t" | sed 's|^package/||' | sort
+          done
+
+      # The condition that broke every Vite consumer of 0.2.0: "development" points at src/, which
+      # `files` does not ship, so a bundler matching it resolves to nothing. Publishing is supposed
+      # to strip it - assert that on the packed manifest, because the failure is invisible here
+      # (this repo wants the condition) and only shows up in someone else's dev server. The same
+      # strip drops prepublishOnly, which runs a path that does not exist outside this repo.
+      - name: Check the packed manifests carry no development condition
+        run: |
+          cd /tmp/packed
+          for t in *.tgz; do
+            tar -xzf "$t" package/package.json -O > manifest.json
+            node -e '
+              const pkg = JSON.parse(require("fs").readFileSync("manifest.json", "utf8"))
+              const problems = []
+              if (JSON.stringify(pkg.exports ?? null).includes("\"development\"")) {
+                problems.push("exports still carry the development condition")
+              }
+              if (pkg.scripts?.prepublishOnly !== undefined) {
+                problems.push("scripts.prepublishOnly survived the strip")
+              }
+              if (problems.length) {
+                console.error(`${pkg.name}: ${problems.join("; ")}`)
+                process.exit(1)
+              }
+              console.log(`${pkg.name}: manifest clean`)
+            '
           done
 
       # Four, not eight: glyph outlines are an application's asset and the engine ships none.

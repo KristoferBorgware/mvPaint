@@ -19,3 +19,8 @@ packages/scripts/out
 vite.config.d.ts
 vite.config.js
 *.tsbuildinfo
+
+# The manifest scripts/strip-dev-condition.mjs parks during pack. postpack removes it, so this
+# only exists if a pack died halfway - in which case package.json is still the stripped copy and
+# neither file should be committed.
+package.json.prepack-backup

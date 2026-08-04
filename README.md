@@ -111,10 +111,27 @@ their `exports` lists a `development` condition ahead of the built one, which Vi
 `tsc` all honour here. So the dev server, the test suite and the typechecker all read the
 source, and there is no build step between editing a file and running it. The one exception is
 the offline generators, which run under plain Node: their npm scripts pass
-`--conditions=development` explicitly. The condition never reaches the registry: `src/` is not
-part of the tarball, and bundlers match `development` in dev mode too (Vite does by default), so
-each package's `prepack` script strips it from the published manifest and `postpack` restores
-the original (`scripts/strip-dev-condition.mjs`).
+`--conditions=development` explicitly.
+
+That condition must never reach the registry. `src/` is not in the tarball, and consumers match
+`development` too — Vite does in dev, out of the box — so a published copy resolves the package
+to a file that does not exist and fails with "Failed to resolve entry for package", which is
+what 0.2.0 did. `npm run release` therefore strips the condition from every publishable manifest
+before it hands over to `changeset publish`, and restores it afterwards
+(`scripts/strip-dev-condition.mjs`). Stripping before rather than during the publish is
+deliberate: npm builds the manifest it sends to the registry from the package.json it read
+*before* a `prepack` hook runs but packs the directory *after*, so stripping in `prepack` — the
+obvious place — yields a correct tarball advertised by stale registry metadata.
+
+Two things keep that honest. Each package runs the same script as `prepublishOnly`, so a bare
+`npm publish` that skips the release script aborts rather than republishing the bug. And CI packs
+through the strip and asserts the packed manifests are clean, because this is a failure nobody
+sees locally — the repo wants the condition — and it only surfaces in someone else's dev server.
+
+The strip removes that `prepublishOnly` entry as well, since it runs a `../../scripts/` path that
+does not exist once the package is unpacked into someone's `node_modules`. The guard is not lost:
+a publish that bypasses the release script never strips, so it still reads the manifest with the
+guard in place, and the release path repeats the check itself after stripping.
 
 ## Creating a renderer
 
