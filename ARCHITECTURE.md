@@ -1,288 +1,146 @@
-# How mvPaint draws a scene
+# Architecture
 
-From the shape you construct to the pixels on the canvas.
+How the mvPaint engine turns a scene graph into pixels.
 
-This is the map. The territory is the module headers — every file named here starts with a
-comment explaining what it does and, more usefully, why it does it that way. When the two
-disagree, the module header is the one that was written next to the code.
+This document describes the internals: the data flow of one frame, the buffer layouts, the
+render lanes, the invalidation model, and the interfaces between the parts. It assumes you are
+comfortable with a GPU pipeline, a scene graph, and TypeScript. For the public API — how to
+create a renderer, what the handle exposes, which shapes exist — see
+[README.md](README.md).
 
-```
-Scene graph (nodes with transforms)
-        │
-        │  once, on change:  tessellate → local-space triangles
-        ▼
-   Batchers pack every shape into a FEW shared GPU buffers
-        │
-        │  every frame:      write transforms + colours into a storage buffer
-        ▼
-   One render pass, lanes interleaved back to front
-        ▼
-   MSAA resolve → canvas
-```
+File paths below are relative to `packages/engine/src/`. Every module named here opens with a
+header comment covering the same ground in more detail; when this document and a module header
+disagree, the header is closer to the code.
 
-Two ideas carry almost everything.
+## Contents
 
-**Geometry is local and shared; placement is per-frame and indexed.** A shape's triangles are
-computed once in its *own* coordinates and packed into one large vertex buffer alongside
-everyone else's. Where it lands on screen is not baked into those triangles: each vertex
-carries an integer object id, and the shader looks that object's matrix and colour up in a
-storage buffer. Moving a shape rewrites one 304-byte record and touches no geometry at all.
-
-**Depth, not draw order, decides what is on top.** Everything is drawn into one depth-tested
-pass, so a text node and a rectangle interleave correctly even though different pipelines draw
-them at different moments.
+- [The pipeline](#the-pipeline)
+- [Scene graph](#scene-graph)
+- [Geometry](#geometry)
+- [The frame](#the-frame)
+- [The gather](#the-gather)
+- [Passes and draw order](#passes-and-draw-order)
+- [Buffers and records](#buffers-and-records)
+- [Shaders](#shaders)
+- [Invalidation](#invalidation)
+- [Text](#text)
+- [Shadows](#shadows)
+- [Camera and capture](#camera-and-capture)
+- [Input](#input)
+- [Teardown](#teardown)
+- [Render paths](#render-paths)
+- [End to end](#end-to-end)
+- [Module map](#module-map)
 
 ---
 
-## The scene graph and transforms
+## The pipeline
 
-`Node` (`shapes/Node.ts`) is a tree node: name, id, parent, children, event listeners — **and
-its own 2D transform**: position, rotation, scale, skew, pivot offset. Placing yourself in your
-parent is not a drawing concern, so it belongs to the base rather than to the drawable subclass.
+```
+Scene graph (nodes with 2D transforms)
+        │
+        │  on geometry change:  tessellate → local-space triangles
+        ▼
+Each batcher packs its shapes into shared vertex/index buffers
+        │
+        │  every frame:  write world matrices, depths and materials into an object buffer
+        ▼
+One render pass: opaque batch → translucent merge → overlay tail
+        ▼
+MSAA resolve → canvas
+```
 
-`Shape extends Node` (`shapes/Shape.ts`) adds everything that affects **rendering**: size,
-zIndex, visibility, pickability, fill/stroke styling, shadow settings.
+**Lane** is the term used throughout the engine and this document for one of those batchers
+together with what belongs to it: a vertex format, a pipeline and a shader. There are four —
+mesh, text, image and shadow — declared as the `LaneName` union in `render/drawOrder.ts` and
+implemented under `webgpu/lanes/`. A shape belongs to exactly one, decided by its class.
 
-`Group extends Container` (`shapes/Group.ts`) is the other kind of node worth placing. It draws
-nothing and occupies no slot in any render lane; what it contributes is a matrix in the middle
-of the chain, which the composition below already handles, so a shape inside a group needs no
-special case anywhere downstream. It inherits the same transform a shape does — the same
-gesture has to move both identically.
+Two invariants hold the design together.
 
-### The local matrix
+**Geometry is local and shared; placement is per-object and indexed.** A shape tessellates
+into local space coordinates and its triangles are appended to one large vertex buffer
+alongside every other shape of the same kind. Where the shape lands on screen is not baked
+into those triangles. Each vertex carries an integer object id, and the vertex shader looks up
+that object's world matrix in a storage buffer. Moving a shape rewrites one fixed-size record
+and touches no geometry.
 
-Each placeable node composes a 4x4 matrix from its transform fields:
+**Depth decides stacking, not draw order.** Every shape gets a depth derived from its rank in
+a scene-wide `zIndex` sort, and that depth is written into the object record and injected into
+`clip.z` by the vertex shader. Because all four lanes share one depth buffer and one render
+pass, a text node and a rectangle interleave correctly even though different pipelines draw
+them at different points in the frame.
+
+---
+
+## Scene graph
+
+### Node, Container, Shape
+
+`Node` (`shapes/Node.ts`) is the base: id, name, parent link, event listeners, and **its own 2D
+transform** — position, rotation, scale, skew and pivot offset. Every node in the tree is
+placeable, drawable or not.
+
+`Container extends Node` adds the child list. Traversal and search stay on `Node`, which calls
+a protected `eachChild()` that `Container` overrides — so any node can be walked uniformly and a
+leaf yields nothing.
+
+`Shape extends Node` adds everything that affects rendering: size, `zIndex`, `visible`,
+`pickable`, `draggable`, `opacity`, `overlay`, the full fill/stroke vocabulary, and the shadow
+fields. It is the base of every drawable — `Rect`, `Circle`, `Polyline`, `Path`, `Image`,
+`CustomShape`, and `TextBlock` with its two subclasses `Text` and `VectorText`.
+
+`Group extends Container` (`shapes/Group.ts`) draws nothing and emits no geometry.
+It contributes a matrix in the middle of the chain, which world-matrix composition already
+handles, so a shape inside a group needs no special case downstream. A group has no size of its
+own: `group.bounds()` is computed on demand from whatever it currently holds, walking into
+nested groups and composing their matrices. Nothing caches it, so nothing needs invalidating
+when a child moves.
+
+A group governs three properties for its whole subtree: `visible`, `listening`, and
+`draggable` — a press on a shape inside a draggable group takes hold of the group.
+
+`Layer extends Container` (`shapes/Layer.ts`) names a slice of the scene and carries one
+`enabled` flag that takes that slice out of the render, out of picking and out of marquee
+selection. `enabled` stays on the layer: each shape keeps its own `visible`, so re-enabling
+restores exactly what was visible before. Stacking still comes from each shape's scene-wide
+`zIndex`, so shapes in different layers interleave by `zIndex` alone.
+
+Because it extends `Container` rather than `Group`, `closestGroup()`, `outermostGroup()` and
+`draggableGroup()` walk past it and every shape inside stays independently pickable, draggable
+and transformable. It carries a transform like any `Node`, so moving a layer moves its
+contents.
+
+### Transform composition
+
+Each node composes a 4x4 matrix from its transform fields:
 
 ```
 localMatrix = translate(x, y) · rotate(rotation) · skew · scale(scaleX, scaleY) · translate(-offsetX, -offsetY)
 ```
 
-Read it right to left, the order the geometry experiences: the pivot offset shifts the shape's
-own geometry first, then skew/scale/rotation happen *about that pivot*, then the result is
-placed at (x, y).
+Read right to left, which is the order the factors are applied to the geometry: the pivot offset
+shifts the local coordinates first, then skew, scale and rotation are applied about that pivot,
+then the result is translated to `(x, y)`. Composition is column-vector and WebGPU-native:
+`child_world = parent_world * child_local`.
 
-### Where the origin sits
+### Origin conventions
 
-Which point of a shape lands at (x, y) depends on the kind of shape:
+Which point of a shape lands at `(x, y)` depends on the shape:
 
-- **Elliptical** shapes (`Circle`) are **centred** on the origin. A radius is measured from the
-  middle, so any other origin would introduce a second, contradictory reference point.
-- **Everything else** — `Rect`, `Image`, `Text`, `VectorText` — hangs from its **top-left
-  corner**. The scene is y-up, so such a shape spans `x ∈ [0, width]` and `y ∈ [-height, 0]`.
-- `Polyline` and `Path` have no implied origin at all; their points are already local
-  coordinates, placed wherever they were authored.
+- **Radius-defined shapes** (`Circle`) are **centered** on the origin.
+- **`Rect`, `Image`, `Text`, `VectorText`** hang from their **top-left corner**. The scene is
+  y-up, so such a shape spans `x ∈ [0, width]` and `y ∈ [-height, 0]` in local space.
+- **`Polyline` and `Path`** place their points as authored; the origin is wherever the author
+  put it.
 
 The practical consequence is the pivot. Rotation and scale are about the local origin, so a
-circle spins in place while a rect turns about its corner. To spin a rect about its middle,
-give it `offsetX: width / 2, offsetY: -height / 2`.
+circle spins in place while a rect turns about its corner. To spin a rect about its middle, set
+`offsetX: width / 2, offsetY: -height / 2`.
 
-A group has no origin convention because it has no geometry of its own. It also has no size:
-`group.bounds()` is computed from whatever it currently holds, walking into nested groups and
-composing their matrices on the way. Nothing caches it, and nothing needs invalidating when a
-child moves — the same relationship the transformer's frame has with the nodes it wraps, and
-for the same reason: a stored width and height would be a second, independent claim about the
-same thing.
+### Matrix caching
 
-What a group governs for its subtree is `visible` (the render/pick walk turns back at a hidden
-one rather than testing each shape's ancestors), `listening` (inherited from `Node`), and
-`draggable` — a press on a shape inside a draggable group takes hold of the *group*. That last
-one is the only place grouping is mechanism rather than policy. Which node a click *selects* is
-an application's decision; `closestGroup()` / `outermostGroup()` are there for an application
-that wants to ask.
-
-### Writing a point
-
-There is one 2D vector: `Vector2` (`math/Vector2.ts`), and one name for its storage,
-`Vector2Like` — declared as `Pick<Vector2, 'x' | 'y'>`, so it is that class's fields rather than
-a second description of them.
-
-Which to reach for follows from what the value is *for*. Use the **class** where the arithmetic
-is the point — a world position being offset, a pointer being projected, anything that reads
-better as `a.sub(b).normalized()` than as three lines of scalar math. Use the **type** for
-coordinates being described rather than computed with: public inputs, so a caller can hand over
-the object literal they already have (`points: [{ x: 0, y: 0 }]` stays legal, which a class type
-would reject — a literal has no methods), and geometry in bulk, where a tessellated outline or a
-glyph's rings are coordinates by the thousand and the literal is the honest way to write them.
-Every `Vector2` satisfies the type, so a class value flows into either.
-
-This used to be five things: `Point2` declared separately beside the mesh formats, in the
-stroker, in the transformer's math and in the drag math, plus the class. Four copies of `{ x, y }`
-cannot disagree, which is why nobody noticed; what they cost was a reader having to check that
-they were the same type, and a maintainer having to pick one when writing something new.
-
-### Writing a colour
-
-Everything below the scene graph works in straight-alpha `RGBA` — a 4-tuple, each channel
-0..1 — because that is what a shader wants, and converting per frame would be absurd.
-
-So a string is an **input** format, never a stored one. Every colour property (`fill`, `stroke`,
-`shadowColor`, gradient stops, an `Image`'s `tint`, the text run styles, a capture's background)
-accepts either form and converts on assignment; reading one back always gives the tuple. The
-batchers pull these per object per frame and have no business parsing anything.
-
-Accepted: `#f00` / `#f00c` / `#ff0000` / `#ff0000cc` (the short forms double each digit, so
-`#abc` is `#aabbcc`), `rgb()` and `rgba()` in comma or space syntax with numbers or percentages
-and an optional `/ alpha`, `hsl()` and `hsla()` with the hue in `deg`/`grad`/`rad`/`turn` or
-bare, the colour keywords, and `transparent`. Case and surrounding whitespace are ignored.
-
-Anything unreadable **throws**. A mistyped colour that silently renders black looks like a
-design decision rather than a typo, and the message costs nothing at the one place it can be
-raised usefully. The exception is SVG paint (`svg/color.ts`), which returns null instead: a
-colour in a document did not come from the person running the code, and one bad attribute
-should not stop a drawing from loading. That module now handles only the `none` keyword and
-that fallback, and reads colours through the same parser as everything else.
-
-### Layers, which are not canvases
-
-`Layer extends Container` (`shapes/Layer.ts`) is the other organising container, and it is
-**optional**, and not a canvas. It is not a render target and **not a draw-order boundary**:
-the whole scene is drawn in one pass and what is on top comes from each shape's `zIndex`,
-scene-wide. Two shapes in different layers order by their own `zIndex`, never by which layer
-they are in, so reorganising a scene into layers cannot change how it looks.
-
-What it adds is the pair a group cannot give you: a name for a slice of the scene, and one
-`enabled` that takes that whole slice out of the picture — out of the render order, and so out
-of picking and out of a marquee too. Toggling it costs one check, not one per shape, because
-the walk turns back at a disabled layer. `enabled` is the layer's property and never written
-onto its children: every shape keeps its own `visible`, and switching the layer back on brings
-back exactly the shapes that were visible before.
-
-**Why it extends `Container` and not `Group`** is the whole design. A group is a *unit* — a
-press on a shape inside a draggable group takes hold of the group, and an application asking
-`outermostGroup()` gets the group. That is exactly wrong for a layer: putting fifty shapes on a
-"background" layer must not make them one draggable object. Because a `Layer` is not a `Group`,
-`closestGroup()` / `outermostGroup()` / `draggableGroup()` walk straight past it and every shape
-inside stays independently pickable, draggable, selectable and transformable — as if the layer
-were not there. It still carries a transform, because every `Node` does, so moving a layer moves
-its contents without any of the selection semantics a group would bring.
-
-### Taking things out again
-
-Four operations on `Node`, and the distinction between the first two is the whole design:
-
-| | what it does | is the node reusable? |
-| --- | --- | --- |
-| `remove()` | unhooks it from its parent | **yes** — transform, styling, listeners and children all intact |
-| `destroy()` | `remove()`, then tears the subtree down | no. `isDestroyed` is true and stays true |
-| `moveTo(parent, opts)` | re-homes it in one step | — |
-| `removeChildren()` | `Container`: takes every child out | yes, all of them |
-
-**Nothing has to be told.** The renderer rebuilds its visible set from the tree every frame and
-each lane repacks when its membership changes, so a removed node stops drawing on the next
-frame; the shadow atlas frees its slot the next time it bakes, because it prunes its
-per-shape entries against the shapes actually present. Removal is not a message sent to the
-renderer, it is a fact about the tree that the next frame discovers. (The one exception is a
-scene that has turned *both* culling and the zIndex sort off, which reuses the previous
-frame's visible set wholesale and needs `markGeometryDirty()` — see `render/gather.ts`.)
-
-**So what does `destroy()` actually free?** Only the things that would *not* come back on
-their own:
-
-- **Listeners.** The census in `events/listenerCensus.ts` is global and counts up, so a node
-  dropped while still holding a listener would leave its tally behind forever, making the
-  input layer run hit-tests nothing needs. `destroy()` calls `off()` on every node in the
-  subtree.
-- **A `Shape`'s caches** — its tessellated triangles and the flattened picking layout derived
-  from them. The only per-node memory that scales with complexity rather than being constant.
-- **The `Transformer`'s attached set**, which is the one place a node is held by something
-  that is *not* its parent. A transformer is a sibling of what it wraps, so no bubbling event
-  reaches it; it checks each update instead, and lets go of anything destroyed *or* removed.
-
-  Removed counts too, even though `remove()` otherwise promises the node is still perfectly
-  usable, because a detached node's `worldMatrix()` has no parent chain left to compose and
-  collapses to its **local** matrix — a shape at (10, 0) inside a group at (500, 300) reports
-  (10, 0) the instant it is removed. A frame that kept hold would not merely outline something
-  invisible, it would jump 500 units to outline where the node is not. "Left" is measured
-  against the tree top recorded when the node was attached, so attaching a node that is not in
-  a scene yet (built, selected, then added) is not mistaken for one that has just been taken
-  out of one, and a `moveTo` within the same tree keeps the selection.
-
-What `destroy()` does **not** free is anything the node did not own. An `ImageTexture` belongs
-to the application and may be drawn in ten other places, so destroying an `Image` node leaves
-it alone; call `ImageTexture.destroy()` when the picture itself is finished with.
-
-A `'destroy'` event fires on every node in the subtree *before* any of it is detached, so it
-still has a parent chain to bubble up and a watcher hears about the whole subtree rather than
-only its head. Like `'add'` and `'remove'`, it is gated on a listener existing at all.
-
-**`moveTo` and the world transform.** By default the node keeps its own
-`x`/`y`/`rotation`/`scale` and lands wherever those mean inside the new parent — right when
-the two parents are peers, jarring when they are not. `moveTo(parent, { keepWorldTransform:
-true })` instead keeps the node exactly where it is on screen, rewriting its local transform to
-absorb the difference between the two parents. That is the one for a drag that drops a shape
-into a group: the shape should not jump because its bookkeeping changed. It works by composing
-`newParentWorld⁻¹ · oldWorld` and handing the result to `Node.applyLocalMatrix()`, which
-decomposes it back into the five stored fields (`math/decompose2D.ts`) — the same machinery a
-transformer gesture goes through. `moveTo` throws rather than making a cycle out of a move into
-the node's own descendant, and refuses to re-home a destroyed node.
-
-### Screenshots
-
-`handle.toCanvas()` / `toDataURL()` / `toBlob()` draw the scene **again**, offscreen, and hand
-back the pixels.
-
-A second render rather than a copy of the canvas, which is what buys the two things a copy
-cannot give you: the image can be **any region of world at any resolution** (a 4000px export of
-a diagram that is 300px on screen), and it does not matter what was on the canvas or whether it
-had been cleared. `pixelRatio` scales the output only — the same rectangle of world, more
-pixels of it.
-
-**The engine builds the camera.** A caller describes a rectangle (`x`, `y`, `width`, `height` in
-world units, plus an optional `rotation`) and never constructs or attaches one, because a
-screenshot is a question about the scene rather than an instruction to move the view — and the
-live camera must not so much as twitch. Every field defaults from what is on screen, so
-`toCanvas()` with no arguments means "this, at this size". The background defaults to
-transparent, which is what an image meant for compositing wants.
-
-Both paths render through the *same* `draw()` the live frame uses, given a `CaptureView`
-(camera, view size, clear colour) instead of the canvas's. A screenshot assembled by separate
-drawing code would drift from the picture it is supposed to be a copy of.
-
-The parts that genuinely differ are each backend's own, and the shared arithmetic lives in
-`render/capture.ts`:
-
-| | WebGL2 | WebGPU |
-| --- | --- | --- |
-| target | multisampled RGBA8 + `DEPTH_COMPONENT24` renderbuffers, blitted into a single-sample RGBA8 one | MSAA texture → resolve texture (`COPY_SRC`) + depth, all at the pipelines' format and sample count |
-| readback | `readPixels` from the resolve buffer | `copyTextureToBuffer` → `mapAsync`, rows padded to 256 bytes and unpadded again |
-| orientation | rows come back **bottom first** and are flipped | NDC +Y is already the first texel row — no flip |
-| channels | RGBA as read | `bgra8unorm` is the usual preferred canvas format, so red and blue are swapped back |
-
-**Both captures are 4× MSAA**, including on WebGL2 — where the *live* frame has none. Those two
-facts fit together rather than contradicting: the fallback skips MSAA because it costs on every
-frame on precisely the devices that ended up on the fallback, and a screenshot is taken once, so
-the per-frame argument does not apply to it. An exported PNG with stair-stepped edges is a poor
-thing to hand someone. WebGL2 needs two framebuffers for it, since a multisampled buffer cannot
-be read directly: `blitFramebuffer` from the multisampled one into a single-sample one *is* the
-resolve, and must be `NEAREST` (a multisample resolve rejects `LINEAR`). The sample count is
-clamped to the driver's `MAX_SAMPLES` rather than assumed — `renderbufferStorageMultisample`
-fails outright rather than rounding down.
-
-**What it costs.** One gather, one repack, one draw — and because the capture culls against a
-different rectangle than the live view, the frame *after* it re-gathers. That is a screenshot's
-fair price and not something to do every frame. Oversized requests are clamped proportionally
-rather than left to fail inside the backend with a message about attachments.
-
-### The camera is not in the graph
-
-`Camera2D` (`camera/Camera2D.ts`) is a plain object, not a node. A camera is not a thing *in*
-the scene, it is the frame the scene is viewed through, and the **application owns it** —
-`createSceneRenderer({ camera })`, or `setCamera` later. Nothing in the graph refers to it and
-it refers to nothing in the graph, so one scene can be drawn through two cameras at once. The
-`'view'` and `'editor'` input sets move this object like any other caller would, through
-`panToAnchor`/`zoomToward`; a static render leaves it entirely to the application.
-
-It is a rectangle of world placed like any other rectangle here: `x, y` is the world point at
-the viewport's **top-left**, `zoom` is viewport pixels per world unit, and `rotation` turns the
-view about its own centre. Supplying no camera is a framing rather than a failure — the scene
-then renders through a default one, which puts world (0, 0) at the top-left at 1:1.
-
-It still composes a real 4x4 view-projection, and `screenToWorld` still unprojects through the
-inverse, rather than reducing to two multiplies and an add. The render path takes a
-view-projection and nothing else, so keeping that seam is what would let a perspective camera
-slot in without any lane, shader or culling code changing.
-
-### Two caches, both keyed on identity
+`Matrix4x4` instances are immutable — every factory and every `mul()` returns a fresh
+instance — so reference equality proves value equality:
 
 ```ts
 worldMatrix() {
@@ -294,117 +152,133 @@ worldMatrix() {
 }
 ```
 
-`Matrix4x4` instances are immutable — every factory and every `mul()` returns a fresh one — so
-"same object" really does prove "same value". `localMatrix()` caches on the nine transform
-fields; changing any one produces a new instance, which propagates up the ancestor chain as a
-cache miss.
+`localMatrix()` caches on the transform fields; changing any of them produces a new instance,
+which propagates up the ancestor chain as a cache miss. This is load-bearing further down: the
+mesh batcher decides whether to re-upload an object's transform by comparing its model matrix
+**by reference**, so a static scene collapses to pointer comparisons.
 
-This is load-bearing further down: the mesh batcher decides whether to re-upload an object by
-comparing its model matrix **by reference**. On a static scene every node hands back last
-frame's instance, so the whole per-frame CPU cost collapses into pointer comparisons.
+### Vectors and colors
 
-### What an input event costs
+`Vector2` (`math/Vector2.ts`) is the 2D vector class; `Vector2Like` is its structural type,
+declared as `Pick<Vector2, 'x' | 'y'>`. Public inputs and bulk geometry take the type, so a
+caller can pass an object literal (`points: [{ x: 0, y: 0 }]`); the class is for arithmetic
+(`a.sub(b).normalized()`). Every `Vector2` satisfies the type.
 
-There is no spatial index. `pickNode()` collects the visible shapes, sorts them by `zIndex`
-and walks front to back testing each one — exact, against the same triangles the mesh lane
-renders, and **O(n)**. Measured on the 100k stress scene: **~82 ms per pick**, of which the
-walk is ~130 ms against ~19 ms for building the sorted list at raw scale, so caching that list
-would recover little. Bringing the walk itself down means indexing space, which the engine
-does not do.
+Everything below the scene graph stores straight-alpha `RGBA` — a four-tuple with each channel
+in 0..1 — which is what the shaders read. Color strings are an **input** format. Every color
+property (`fill`, `stroke`, `shadowColor`, gradient stops, an `Image`'s `tint`, text run styles,
+a capture's background) accepts either form and converts on assignment; reading one back gives
+the tuple.
 
-So the design principle is that the cheapest hit-test is the one not performed, and there are
-two questions asked before any of them:
+`render/color.ts` accepts hex in three, four, six and eight digits (short forms double each
+digit), `rgb()` / `rgba()` in comma or space syntax with numbers or percentages and an optional
+`/ alpha`, `hsl()` / `hsla()` with the hue in `deg`, `grad`, `rad`, `turn` or bare, the CSS
+color keywords, and `transparent`. Case and surrounding whitespace are ignored. An unreadable
+color **throws**. SVG paint (`svg/color.ts`) is the exception: it returns null, so one bad
+attribute does not stop a document from loading.
+
+### Lifecycle
+
+Four operations, and the distinction between the first two matters:
+
+| | Effect | Node reusable afterwards? |
+| --- | --- | --- |
+| `remove()` | Unhooks it from its parent | **Yes** — transform, styling, listeners and children intact |
+| `destroy()` | `remove()`, then tears the subtree down | No. `isDestroyed` is true permanently |
+| `moveTo(parent, opts)` | Re-homes it in one step | — |
+| `removeChildren()` | `Container`: detaches every child | Yes, all of them |
+
+**Removal needs no notification.** The renderer rebuilds its visible set from the tree every
+frame and each lane repacks when its membership changes, so a removed node stops drawing on the
+next frame. The shadow atlas frees its slot the next time it bakes, because it prunes
+per-shape entries against the shapes actually present. The one exception is a scene that has
+turned **both** culling and the zIndex sort off, which reuses the previous frame's visible set
+wholesale and needs `markGeometryDirty()` — see [the gather](#the-gather).
+
+`destroy()` therefore frees only what would not come back on its own:
+
+- **Listeners.** `destroy()` calls `off()` on every node in the subtree. The census in
+  `events/listenerCensus.ts` is global and counts up, so a tally left behind would make the
+  input layer run hit-tests nothing needs.
+- **A `Shape`'s caches** — its tessellated triangles and the flattened picking layout derived
+  from them, the only per-node memory proportional to complexity rather than constant.
+- **The `Transformer`'s attached set.** A transformer is a sibling of what it wraps, so no
+  bubbling event reaches it; it checks its set each update and releases anything destroyed *or*
+  removed. Removed counts because a detached node's `worldMatrix()` has no parent chain to
+  compose and collapses to its local matrix, so the frame would refit around the wrong point.
+  "Left" is measured against the tree root recorded at attach time, so a `moveTo` within the
+  same tree keeps the selection and a node built before it joins a scene is not mistaken for
+  one that has just left.
+
+An `ImageTexture` survives `destroy()`: it belongs to the application and may be drawn by
+several `Image` nodes, so call `ImageTexture.destroy()` when the picture itself is finished
+with.
+
+A `'destroy'` event fires on every node in the subtree *before* any of it is detached, so it
+still has a parent chain to bubble up. Like `'add'` and `'remove'`, it is gated on a listener
+existing at all.
+
+**`moveTo`.** By default the node keeps its transform fields and lands wherever those mean
+inside the new parent. `moveTo(parent, { keepWorldTransform: true })` holds the node where it
+is on screen: it composes `newParentWorld⁻¹ · oldWorld` and hands the result to
+`Node.applyLocalMatrix()`, which decomposes it back into the stored fields
+(`math/decompose2D.ts`) — the same machinery a transformer gesture uses. That is the mode a
+drag-into-group wants. `moveTo` throws on a move into the node's own descendant, and refuses to
+re-home a destroyed node.
+
+### Events
+
+`on()` / `off()` / `once()` / `fire()` make every node an event target. Listeners are keyed by
+type, optionally tagged with a dot-namespace (`'click.mytool'`) so a whole group can be removed
+without holding individual handler references, and `on()` also takes a selector for delegation.
+`fire(type, init, true)` walks the event up the parent chain, rewriting `currentTarget` at each
+level, until a handler cancels it or the chain runs out. Enter and leave events do not bubble.
+
+`listening` gates both propagation and receipt: an event neither fires on nor travels past a
+node whose `isListening()` is false, so switching it off on a container makes that subtree
+inert. It is separate from `Shape.pickable`, which governs whether hit-testing can return the
+node at all.
+
+Selectors are CSS-like: `#id`, `.name`, or a bare word matching `nodeName` (the concrete class,
+e.g. `'Rect'`) or `nodeType` (the tier: `'Node'`, `'Container'`, `'Shape'`). `getAttr()` /
+`setAttr()` read and write typed fields by string key, so a property inspector or a
+deserializer needs no per-type switch; `setAttr()` prefers a `set<Key>()` method where the
+class declares one, because some attributes pair a read-only property with a method that also
+invalidates a cache.
+
+### The cost of a pick
+
+There is no spatial index. `pickNode()` (`scene/picking.ts`) collects the visible pickable
+shapes, sorts them by `zIndex`, and walks front to back testing each one. Shapes are tested
+exactly, against the same triangles the mesh lane renders, with a cheap rejection first: local
+bounds transformed into world space (a forward transform, no inverse) either clears the point
+immediately or is followed by the exact inverse-and-per-triangle test. `Text` is tested against
+the bounding box of its shaped quads.
+
+The walk is linear in scene size, so two questions gate it:
 
 1. **Does anyone listen at all?** `events/listenerCensus.ts` keeps a global tally per event
-   type, so a scene with no hover handler pays nothing for hover.
-2. **Does anyone listen *below the root*?** Every event bubbles to the root, so a listener
-   there is called whatever was under the pointer. The hit can then only change what
-   `event.target` says — nothing about who runs.
+   type, so a scene with no hover handler runs no hit-test on pointer moves.
+2. **Does anyone listen below the root?** Every event bubbles to the root, so a listener there
+   runs whatever was under the pointer, and the hit can only change what `event.target` says.
+   `SceneInputDispatcher.dispatchReported` compares the census tally against
+   `Node.ownListenerCount`, and when nothing below the root is listening it fires from the root
+   with `target` left as a thunk (`NodeEventInit.targetResolver`) — resolved on first read,
+   cached, and never computed if nobody asks. A listener further down the tree still gets an
+   eager pick.
 
-The second one matters because of how camera zoom is normally driven: `root.on('wheel')`,
-reading the delta, never asking what it was over. Naming that node used to cost a full pick on
-every wheel event. `SceneInputDispatcher.dispatchReported` now compares the census tally
-against `Node.ownListenerCount`, and when nothing below the root is listening it fires from
-the root with `target` left as a **thunk** (`NodeEventInit.targetResolver`) — resolved on
-first read, cached, and never computed if nobody asks.
-
-Semantics are unchanged either way: a handler that reads `event.target` gets exactly what it
-always got, and a listener further down the tree still gets an eager pick, because there the
-dispatch path genuinely depends on the answer. The tally reads high rather than low, so a
-wrong answer is always "pick anyway".
-
-On the 100k scene that took a wheel event from **82 ms to 0.1 ms**.
-
-### Setting input up, and the three settings of it
-
-The dispatcher decides nothing — it reports what a pointer did, and something above it decides
-what that means. That split has not moved, but the *ordinary* answers now ship with the engine,
-because "a wheel notch zooms about the cursor" and "a press selects what it landed on" are not
-choices most applications want to make; they are the ones every canvas application makes
-identically.
-
-`createSceneRenderer(target, { input })` takes a preset (`input/inputOptions.ts` resolves it,
-`input/sceneInput.ts` wires it) and the composition roots attach it last, once the handle they
-build on exists:
-
-| `input` | Dispatcher | `pick` it is given | Furniture in the scene |
-| --- | --- | --- | --- |
-| *omitted* | none | — | none |
-| `'view'` | yes | `() => null` | none |
-| `'editor'` | yes | `handle.pick` | `Transformer`, `MarqueeOverlay` |
-
-The middle column is the whole of why `'view'` is cheap: a view is not a scene with its policy
-removed, it is one that never asks the question — see the measurements above for what asking
-costs at scale. Everything else follows from it. No pick means no hover target, no drag arming,
-no handles, and every press resolving to the root.
-
-The bindings are built entirely from the public parts (`SceneInputDispatcher`, `MarqueeTool`,
-`Transformer`, `panToAnchor`/`zoomToward`, `nodesInBox`), so an application whose needs diverge
-turns the preset off and writes the same thing with the same materials. What it must not do is
-take `handle.onFrame` and expect the frame to keep fitting: the selection frame refits once a
-frame, and it subscribes through `handle.addFrameListener` (`renderer/frameListeners.ts`) rather
-than through that single application-owned slot, which runs first.
-
-`resolveCanvas` (`renderer/canvasTarget.ts`) does the same job for the other argument — canvas,
-selector, container element or nothing — and runs in `createSceneRenderer` *before* either path
-is tried, so a WebGL2 fallback after a failed WebGPU attempt draws into the canvas that already
-exists rather than creating a second one.
-
-### What destroy() gives back
-
-An application that tears a renderer down and builds another does it in whole renderers —
-switching render path, remounting a component, opening a second document — so anything the
-setup keeps must come back, or it accumulates a renderer at a time. `handle.destroy()` releases:
-
-| Taken | Given back by |
-| --- | --- |
-| Canvas + window listeners, the touch-hold timer, the frame subscription | `input.destroy()` |
-| The selection frame and marquee rectangle | `destroy()`, not `remove()` — see below |
-| A canvas the **engine** created | removed from the document; a caller's canvas is untouched |
-| GPU buffers, atlases, the device | the path's own `destroy()` |
-
-The furniture is *destroyed* rather than removed for two reasons that outlive a removal: the
-frame goes on holding whatever was selected — a reference to application content, and through
-its parents to the scene — and any listener an application put on it stays counted in the
-global census (`events/listenerCensus.ts`), which reads high and never comes back down, so the
-whole scene would keep paying to dispatch an event type nothing is listening for.
-
-The one thing dropping nodes does **not** release is a GPU texture: `ImageTexture` is handed to
-the scene that asked for it, because one texture is often shared by several `Image` nodes and
-only the scene knows when it is finished with. The example app's scenes therefore carry a
-`dispose()`, called once their nodes have left the graph.
-
-Measured over 28 build/destroy cycles of a 200-shape scene with `input: 'editor'`: zero
-outstanding DOM listeners, zero stranded canvases, every census tally back to zero, and a flat
-JS heap.
+The tally reads high rather than low — it is global, and a node dropped while holding listeners
+leaves its count behind — so the failure mode is a hit-test that turns out not to have been
+needed.
 
 ---
 
-## Geometry construction
+## Geometry
 
 ### The sink
 
-Shapes never touch GPU buffers. They emit triangles into an interface (`render/meshFormat.ts`):
+Shapes never touch GPU buffers. They emit triangles into an interface
+(`render/meshFormat.ts`):
 
 ```ts
 interface MeshSink {
@@ -414,29 +288,30 @@ interface MeshSink {
 ```
 
 Positions are in the shape's **local space**. `vertex()` returns a shape-local index and
-`triangle()` refers to those; the batcher rebases them into the shared buffers.
+`triangle()` references those; the batcher rebases them into the shared buffers and stamps in
+the object id.
 
-Note what is missing: **there is no colour**. A solid fill, a gradient and a stroke colour are
-all read from the object storage buffer at fragment time. That is why recolouring a shape needs
-no geometry rebuild, while resizing one does.
+There is **no color**. A solid fill, a gradient and a stroke color are all read from the
+object storage buffer at fragment time. That is why recoloring a shape needs no geometry
+rebuild while resizing one does.
 
 `isFill` separates fill triangles (eligible for a gradient) from stroke triangles (always
 flat). `material` selects which of the shape's materials paints the vertex — usually 0; a
-`VectorText` whose runs carry different colours emits several.
+`VectorText` whose runs carry different colors emits several.
 
 ### Who emits what
 
 | Shape | `buildGeometry()` emits |
 | --- | --- |
-| `Rect` | two triangles, plus a four-corner stroke contour |
-| `Circle` | a triangle fan; segment count adapts to radius (chord error ≤ 0.02 world units) |
+| `Rect` | two fill triangles, or a fan over the rounded outline when `cornerRadius` is set; plus a closed stroke contour when `strokeWidth > 0` |
+| `Circle` | a triangle fan; segment count adapts to radius against a fixed chord-error tolerance |
 | `Polyline`, `Path` | contours through earcut for the fill, plus the shared stroker |
-| `Image` | its quad — for the silhouette, bounds and hit test only; the pixels come from the image lane |
-| `Text` | **nothing**; it inherits the no-op, because it draws through the text lane |
+| `Image` | its quad — used for the silhouette, bounds and hit test only; the pixels come from the image lane |
+| `Text` | **nothing**; it inherits the no-op base, because it draws through the text lane |
 | `VectorText` | real glyph outlines, tessellated like any other path |
-| `CustomShape` | whatever the subclass's `describe()` drew — see below |
+| `CustomShape` | whatever the subclass's `describe()` drew |
 
-### Shapes the engine does not know about
+### Custom shapes
 
 `CustomShape` is `buildGeometry()` turned outward. Subclass it, implement `describe(ctx)`, and
 draw the outline into the context you are handed:
@@ -453,104 +328,153 @@ class Star extends CustomShape {
 }
 ```
 
-`ShapeContext` is a path builder with the vocabulary everyone already has — `beginPath`,
-`moveTo`, `lineTo`, `quadraticCurveTo`, `bezierCurveTo`, `arc`, `ellipse`, `rect`, `circle`,
-`closePath`, plus `pathData(d)` for SVG path data — and it produces **mesh geometry, not
-pixels**. Closed subpaths go through the same earcut path a `Path` node's contours do (so a
-subpath inside another is a hole); open ones go through the shared stroker. Coordinates are the
-shape's own local space, y-up.
+`ShapeContext` is a path builder with the usual vocabulary — `beginPath`, `moveTo`, `lineTo`,
+`quadraticCurveTo`, `bezierCurveTo`, `arc`, `ellipse`, `rect`, `circle`, `closePath`, plus
+`pathData(d)` for SVG path data — and it produces **mesh geometry, not pixels**. Closed subpaths
+go through the same earcut path a `Path` node's contours do, so a subpath inside another is a
+hole; open ones go through the shared stroker. Coordinates are the shape's own local space,
+y-up. Curves are flattened against the shape's `tolerance`.
 
-Everything downstream then treats it as what it is — triangles. Picking tests the real outline,
-bounds come from it, a shadow is baked from that silhouette, and gradients, object opacity and
-the scene-wide stacking order all work because none of them ever asked what drew the geometry.
+The output is triangles, so everything downstream applies unchanged: picking tests the real
+outline, bounds come from it, a shadow bakes from that silhouette, and gradients, object opacity
+and scene-wide stacking work as they do for any shape.
 
-**Segments carry their own properties.** `ctx.style({ stroke, strokeWidth, lineJoin, ... })`
-applies to everything added after it, and each segment remembers the style it was added in, so
-one continuous outline can change colour and thickness partway along without becoming several
-nodes. Each distinct *paint* becomes one material record on the shape — the same `materials()`
-mechanism a styled `VectorText` run uses — while a change to stroke *geometry* adds no record,
-because that difference is already in the triangles. A run of segments sharing a style is
-stroked as one polyline with proper joins throughout; where the style changes, the runs meet end
-to end with a cap each.
+**Segments carry their own style.** `ctx.style({ stroke, strokeWidth, lineJoin, ... })` applies
+to everything added after it, and each segment keeps the style it was added under, so one
+continuous outline can change color and thickness partway along within a single node. Each
+distinct *paint* becomes one material record — the same `materials()` mechanism a styled
+`VectorText` run uses — while a change to stroke *geometry* adds no record, since that
+difference is already in the triangles. A run of segments sharing a style is stroked as one
+polyline with proper joins throughout; where the style changes, the runs meet end to end with a
+cap each.
 
-`describe()` runs **once**, lazily, and then not again until `markGeometryDirty()`. So it is the
-right place for real work and the wrong place for anything per-frame: moving, turning or
-recolouring the node never re-runs it, and a shape whose outline depends on a property of its
-own has to say so when that property changes — exactly like `Circle.radius`.
+`describe()` runs **once**, lazily, and then not again until `markGeometryDirty()`. Put real
+work there — flattening curves, laying out a pattern — and invalidate when a property the
+outline reads changes, exactly as `Circle.radius` does.
 
-### The tessellation cache
+### Caches
 
-`tessellate()` runs `buildGeometry()` once, keeps the vertex/triangle arrays, and replays them
-into whatever sink asks. It is invalidated only by `markGeometryDirty()`.
+`tessellate()` runs `buildGeometry()` once, keeps the resulting vertex and triangle arrays, and
+replays them into whatever sink asks. It is invalidated only by `markGeometryDirty()`.
 
-A second, flattened structure (`xs`/`ys`/`tris`/`bounds`) is derived lazily from the same
-output for hit testing and bounds. It is not a second tessellation, just a layout better suited
-to point-in-triangle tests — which is why a mousemove over a hovered shape redoes no work.
+A second structure (`xs` / `ys` / `tris` / `bounds`) is derived lazily from that same output and
+cached alongside it — the same triangles in a flat layout suited to point-in-triangle tests, so
+repeated picks against an unchanged shape rebuild nothing.
+
+### Stroking
+
+`render/stroke.ts` is the one stroker: joins (miter with a limit, round, bevel), caps (butt,
+round, square), and the ribbon construction for both open polylines and closed contours.
+
+**`strokeAlign`** decides how far the ribbon reaches to each side of the outline it follows.
+The implementation is two offsets — half and half for `'center'`, the full width on one side
+for `'inside'` or `'outside'` — and every join, miter, bevel and cap reads those two numbers
+rather than a single half-width, so there is one stroker rather than three. Which side is which
+comes from the ring's own winding: `perp()` gives the right normal, so a counter-clockwise ring
+(positive shoelace area) encloses the negative-normal side. An **open** path has no enclosed
+side and stays centered whatever is asked for.
+
+Alignment is read as a statement about the shape, not about each ring. A hole's ring is wound
+against the outline containing it, so `strokeContours()` runs the same even-odd nesting test the
+fill runs (`render/contours.ts`, shared by the SVG fill, the glyph fill and this) and strokes
+hole rings with the alignment flipped.
+
+Because the ribbon is geometry, alignment changes what the node measures. `localBounds()` is the
+extent of the triangles a shape emits, so an inside stroke leaves a node exactly the size of its
+fill and an outside one grows it by the full width. Everything downstream of bounds — the
+selection frame, marquee hits, the shadow silhouette, culling — follows.
+
+### Fixed-width strokes
+
+`strokeScaleEnabled = false` holds a stroke at its authored width however the shape or an
+ancestor is scaled — a keyline, a selection outline, a hairline on a technical drawing. It is
+the **only** place in the engine where a transform reaches geometry, so it is opt-in per shape:
+a shape with it set re-tessellates whenever its world scale changes, and that costs its lane a
+repack.
+
+The stroker is handed a `StrokeGauge` — the linear part of the **world** matrix. It pushes the
+path through the gauge, strokes it there, where the width is the width that was asked for, and
+maps every vertex back through the inverse. Non-uniform scale and skew come out exact, with
+round joins returning as the ellipse arcs they have to be. It is a wrapper around the one
+stroker, so the gauged and ungauged cases cannot disagree. Dividing the width by a scale factor
+would not work: under a non-uniform stretch the thickening varies with edge direction.
+
+`render/gather.ts` asks every shape once a frame whether the scale its stroke was built against
+still holds (`Shape.refreshStrokeGauge`) — one boolean read for a shape that never opted out. It
+is a sweep rather than a setter because a shape's world scale depends on every ancestor, and no
+setter can declare a whole subtree's strokes stale.
+
+Rotation and translation cost nothing. Stroking commutes with rotation, so a gauge and that
+gauge turned by any angle produce identical triangles; `sameGauge()` therefore compares
+`GᵀG` — the two squared axis lengths and their dot product — which is invariant under exactly the
+rotations that do not matter and sensitive to every scale and skew that does.
+
+### SVG
+
+`loadSvg()` (`svg/loadSvg.ts`) parses a document into `Path` nodes, flattening curves against a
+tolerance and carrying across fills, gradients, strokes and transforms. Shape elements are
+converted to path data first (`svg/shapeToPath.ts`), and fills go through the same contour
+classification and triangulation the rest of the engine uses.
 
 ---
 
-## One frame, end to end
+## The frame
 
-`webgpu/FrameRenderer.ts` owns the loop and the boilerplate:
+`webgpu/FrameRenderer.ts` owns the loop and the pass boilerplate:
 
 ```
 requestAnimationFrame tick
   ├─ resize check; (re)create the depth and MSAA textures if the canvas changed size
   ├─ createCommandEncoder()
   ├─ onPrePass(encoder)          ← shadow silhouette baking, in its own passes
-  ├─ beginRenderPass({ colour: MSAA texture, resolveTarget: swapchain, depth: depth24plus })
+  ├─ beginRenderPass({ color: MSAA texture, resolveTarget: swapchain, depth: depth24plus })
   │    └─ onFrame({ pass, dt, width, height })    ← SceneRenderer records every draw here
-  │         ├─ pass 1: the opaque half, batched per lane, writing depth
-  │         ├─ pass 2: everything translucent, back to front, depth read-only
-  │         └─ pass 3: the overlay tail, depth off entirely
+  │         ├─ the opaque batch, writing depth
+  │         ├─ the translucent merge, back to front, depth read-only
+  │         └─ the overlay tail, depth off entirely
   ├─ pass.end()
   └─ queue.submit([encoder.finish()])
 ```
 
-- **MSAA 4x.** Rendering goes into a four-sample texture that resolves into the swapchain when
-  the pass ends. Anti-aliased edges everywhere, for free.
-- **Depth.** `depth24plus`, cleared to 1.0 every frame, compared `less-equal` — not `less`, so
-  that shapes sharing a depth still resolve by draw order.
+- **MSAA.** Rendering goes into a multisampled texture that resolves into the swapchain when
+  the pass ends, so edges are antialiased everywhere without a resolve step in the scene code.
+- **Depth.** `depth24plus`, cleared to 1.0 every frame, compared `less-equal` rather than
+  `less`, so shapes sharing a depth still resolve by draw order.
 - **Prepass.** Shadow baking needs its own render passes against different targets, which a
-  single `beginRenderPass` cannot express — hence a hook before the main pass, on the same
-  encoder.
+  single `beginRenderPass` cannot express, so it runs through a hook before the main pass on the
+  same encoder.
 
-Startup lives in `createSceneRenderer()`: acquire the device, subscribe to `uncapturederror`
-(an invalid pipeline does not throw, it just quietly poisons the command buffer and leaves the
-canvas blank), load the MSDF font atlases, then build the renderer inside a validation error
-scope.
+Startup lives in `createSceneRenderer()` and `webgpu/index.ts`: resolve the canvas, acquire the
+device, subscribe to `uncapturederror` (an invalid pipeline does not throw — it poisons the
+command buffer and leaves the canvas blank), load the MSDF atlases, then build the renderer
+inside a validation error scope.
 
 ---
 
 ## The gather
 
-The first thing a frame does, before any drawing — and the one part of a frame that knows
-nothing about the GPU. It lives in `render/gather.ts`, names no graphics type at all, and is
-shared by both render paths (see [Two render paths](#two-render-paths)): which shapes are
-visible, what depth each takes and in what order they interleave are not rendering decisions,
-and the answer is the same whichever API ends up submitting it.
+The first thing a frame does, before any drawing. `render/gather.ts` names no graphics type and
+is shared by both [render paths](#render-paths): it decides which shapes are visible, what depth
+each takes, which lane it belongs to, and in what order the translucent ones interleave.
 
-**Z-order.** `collectZOrder()` walks the tree and stable-sorts every shape by `zIndex`. Stable,
-so ties keep scene-graph order.
+**Z-order.** `collectZOrder()` walks the tree and stable-sorts every visible shape by `zIndex`.
+Stable, so ties keep scene-graph order. The walk turns back at a hidden `Group` or a disabled
+`Layer`.
 
 **Where `zIndex` comes from.** Every `Shape` takes the next number from a running counter
-(`shapes/zOrder.ts`) at construction, so shapes stack in the order they were made: the first is
-at 0, the next at 1 and therefore in front of it, and drawing something new puts it on top with
-nothing to set. Higher is in **front** — `collectZOrder()` sorts ascending and `depthForRank()`
-turns a higher rank into a nearer depth.
+(`shapes/zOrder.ts`) at construction, so shapes stack in the order they were created and a new
+shape lands on top with nothing to configure. Higher is in **front**: `collectZOrder()` sorts
+ascending and `depthForRank()` turns a higher rank into a nearer depth.
 
-Creation order, not tree order: a shape exists before it is added to anything and may be moved
-between parents afterwards, and neither should silently restack it. The counter is module-global
-because a `Shape` is constructed without knowing which scene it will join; two scenes sharing it
-costs nothing, since a `zIndex` is only ever compared against another in the same scene. It never
-goes backwards, so the numbers climb for as long as the page lives — which is free, because depth
-comes from a shape's **rank** in the sorted list and never from the `zIndex` value itself.
+The counter is module-global and monotonic. It follows creation order, not tree order, so
+re-parenting a shape does not restack it, and the value it hands out can climb without bound
+because depth comes from a shape's **rank** in the sorted list, never from the `zIndex` value.
 
-An explicit `zIndex` overrides all of that and is absolute on the same scale, so a small literal
-is not "near the bottom of these few shapes", it is near the bottom of the whole scene. To place
-one shape relative to another, say so: `front.zIndex = back.zIndex + 1`. The two idioms the
-counter is built around are `shape.zIndex = nextZIndex()` (bring to front) and any negative value
-(send behind everything, since the counter only counts up from zero).
+An explicit `zIndex` is absolute on that same scale — `zIndex: 1` is near the bottom of the whole
+scene, not near the bottom of the shapes around it. The idioms are
+`front.zIndex = back.zIndex + 1` to place one shape above another,
+`shape.zIndex = nextZIndex()` to bring one to the front, and any negative value to send one
+behind everything.
 
 **Depth assignment.** Each shape's rank becomes a depth:
 
@@ -558,8 +482,8 @@ counter is built around are `shape.zIndex = nextZIndex()` (bring to front) and a
 depthForRank(rank, count) = (count - rank) / (count + 1)
 ```
 
-Rank 0 (lowest zIndex) sits near 1.0, the far plane; the last sits near 0. Depths are assigned
-**scene-wide, before culling**, so ranks never shift as content scrolls off screen.
+Rank 0 (lowest `zIndex`) sits near the far plane; the last sits near the near plane. Depths are
+assigned **scene-wide, before culling**, so ranks never shift as content scrolls off screen.
 
 **Bucketing into lanes**, in one pass rather than three filters:
 
@@ -569,92 +493,250 @@ else if (shape instanceof Image) images.push(shape)
 else { meshShapes.push(shape); meshDepths.push(depth) }
 ```
 
-`VectorText` deliberately lands in the mesh bucket: it is text drawn *as* geometry, so it wants
-the mesh lane and gets picking, bounds and shadows without a single special case.
+`VectorText` lands in the mesh bucket: it is text drawn *as* geometry, so it picks, bounds and
+casts shadows with no special case. An `Image` has mesh geometry too, but the image lane paints
+its pixels, so it is bucketed out of the mesh draw.
 
-**Cull.** Drop anything whose world bounds miss the camera's view rectangle (plus a debug
-margin). Depths are filtered in step with their shapes by an explicit loop —
+**Cull.** Drop anything whose world bounds miss the camera's view rectangle, expanded by a
+debug margin. Depths are filtered in step with their shapes by an explicit loop, since
 `.filter()` cannot keep a second array in sync.
 
-**Overlay split.** Overlay shapes (transformer handles, marquee box) are packed **last**, so
+**Overlay split.** Overlay shapes (transformer handles, the marquee box) are packed **last**, so
 they occupy a contiguous tail of the index buffer. That is what lets one buffer be drawn as
 several ranges under different pipelines.
 
 **Opacity split.** Ahead of that tail the mesh lane splits again: shapes that provably paint no
-partial alpha are moved to the **front** of the list, so they too occupy a contiguous range and
-can be drawn as a single call (see [The two passes](#the-two-passes)). The partition is stable,
-so the translucent half keeps the back-to-front order it needs — and a lane that is entirely one
-or the other is handed straight back, unreordered and uncopied.
+partial alpha move to the **front** of the list, so they too occupy a contiguous range and can
+be drawn as a single call. The partition is stable, so the translucent half keeps the
+back-to-front order it needs, and a lane that is entirely one or the other is handed back
+unreordered and uncopied.
 
-The mesh lane's packed order is therefore `[ opaque | translucent | overlay ]`, and every draw
-in the frame is a half-open range of it.
+The mesh lane's packed order is therefore `[ opaque | translucent | overlay ]`, and every mesh
+draw in the frame is a half-open range of it.
 
-**The fast path.** When culling and z-sorting are both off and nothing is dirty, the entire
-gather is skipped and last frame's arrays are reused. That is how a 100k-shape scene avoids
-re-traversing itself sixty times a second. The opacity split is part of what gets reused, and it
-is the one thing here derived from something a caller can change silently — a fill or stroke
-alpha. In that state (culling *and* the z-sort both off), an alpha that crosses 1 needs a
-`markGeometryDirty()` to be noticed; every other state re-gathers, and re-splits, anyway.
+**The run merge.** `buildDrawRuns()` (`render/drawOrder.ts`) merges the translucent slice of
+each lane into one furthest-first sequence, coalescing neighbors from the same lane into a
+single run. Ties go to the lane listed first in `MERGE_ORDER` (`shadow`, `mesh`, `text`,
+`image`), which is how a shadow ends up behind its own caster.
+
+**The fast path.** With culling and z-sorting both off and nothing dirty, the whole gather is
+skipped and last frame's arrays are handed back. Nothing can change the visible *set* in that
+state: no camera-dependent membership, no `zIndex`-driven reordering, and structural changes
+always arrive with an explicit dirty mark. The opacity split is reused along with everything
+else, so an alpha crossing 1 needs a `markGeometryDirty()` there — every other configuration
+re-gathers and re-splits anyway. The stroke-gauge sweep still runs on the reuse path, as the
+only loop that would see a stale gauge.
 
 ---
 
-## The buffers
+## Passes and draw order
 
-### Frequency model (bind groups)
+Alpha blending is order-dependent and the depth test is not, and no single draw order serves
+both. So the frame is drawn in three phases, split by whether an object can be *proven* to
+paint only opaque fragments (`render/opacity.ts`). These are phases of one WebGPU render pass,
+not separate `beginRenderPass` calls — the color and depth attachments are never rebound, only
+the pipelines and the draw ranges change.
+
+| | Order | Batching | Depth test | Depth write |
+| --- | --- | --- | --- | --- |
+| **1. Opaque** | irrelevant | one draw per lane | yes | **yes** |
+| **2. Translucent** | strictly back to front, all lanes merged | one draw per *lane change* | yes | no |
+| **3. Overlay** | packed tail of the mesh buffer | one draw | no (`always`) | no |
+
+**Pass 1** needs no ordering, because for fully opaque fragments the depth buffer *is* the sort:
+two overlapping solid shapes resolve to the nearer one whichever draws first. An opaque lane
+therefore collapses to one draw however finely its shapes are stacked among translucent ones. It
+writes depth, which is what pass 2 reads.
+
+**Pass 2** is the opposite: back-to-front is the only order alpha blending composites correctly
+in, so the lanes are merged into one furthest-first sequence and drawn in runs, one draw per
+lane change. It still *tests* depth — an opaque shape in front hides all of it — but never
+*writes* it, because translucent fragments have no business rejecting each other.
+
+**Pass 3** is the editor furniture, on top of everything, not touching depth. A translucent
+overlay that wrote depth would punch a hole through whatever drew later.
+
+The mesh lane has three pipeline variants for exactly these three phases, differing only in
+their depth state: `depthWriteEnabled` on for the opaque one and off for the other two, and
+`depthCompare: 'always'` on the overlay one against `'less-equal'` elsewhere. The text, image
+and shadow lanes have one pipeline each, all depth read-only.
+
+### Classifying an object as opaque
+
+`isOpaqueShape()` (`render/opacity.ts`) treats "opaque" as a promise that **every** fragment the
+object can produce comes out at alpha 1, which is what earns it the right to write depth ahead of
+everything behind it. A wrong "translucent" costs one draw call; a wrong "opaque" punches a hole
+in the picture, so anything the CPU cannot prove from the object's own fields is classified
+translucent. Only the mesh lane is asked:
+
+- **Text.** An MSDF glyph's alpha *is* its coverage — the shader turns the sampled distance into
+  a soft edge — so every glyph outline is a ring of partial-alpha fragments however solid the
+  run's color is. Mesh shapes take their edges from MSAA, which resolves per *sample*, so a
+  covered sample is fully covered and a solid fill is opaque everywhere it draws.
+- **Images.** Texture contents are the application's and are never read back, so a tint alpha
+  below 1 proves an image translucent while a tint alpha of 1 proves nothing.
+
+A mesh shape is opaque when every material it declares has an opaque stroke color and either a
+flat fill at alpha 1 or a gradient whose every stop is. The stroke is checked whether or not the
+shape strokes anything, since a material carries no stroke *width*; an unstroked shape keeps the
+default opaque black, so this costs nothing in practice. A gradient with no stops resolves to
+transparent black in the shader and counts as translucent.
+
+### Object opacity
+
+`Shape.opacity` (0…1, default 1) fades a whole object — fill, stroke, gradient, glyph, texture
+and shadow — and multiplies with each color's own alpha, which stays untouched. It is the
+property an editor's opacity slider drives and an animation fades.
+
+It rides in the per-object record of every lane, and each lane's shader multiplies it into the
+fragment's **alpha only**: these lanes blend straight, non-premultiplied alpha, so scaling rgb
+would darken the shape rather than fade it. The shadow lane needs no separate field, since its
+color alpha is already `shadowColor.a × shadowOpacity` on the CPU and object opacity is one
+more factor there — a faded shape's shadow fades with it.
+
+`isOpaqueShape()` checks `opacity < 1` **first**, ahead of any material, so opacity can only
+ever move a shape *out* of the opaque pass.
+
+**It applies to one object, not a subtree.** Group opacity is a separate feature requiring an
+offscreen target and a single composite, because multiplying the value onto each child makes
+children show through *each other* where they overlap. The same applies in miniature to a shape
+whose parts are styled independently: `VectorText`'s runs are separate object records, so
+overlapping runs at partial opacity blend against one another.
+
+### Shadows in the order
+
+Shadows join pass 2 like anything else. A shadow is a translucent blob with exactly the problem
+the content lanes have: it must composite over what is behind it and under what is in front. It
+sits **half a rank step behind its caster**, which places it immediately before that caster in
+the merged sequence — late enough to land on whatever is below, early enough for its own caster
+to paint over it.
+
+A frame with shadows rebuilds the run list rather than taking it from the gather cache, because
+a blur or an offset can animate with no dirty mark. Scenes large enough for that cache to matter
+switch shadows off.
+
+---
+
+## Buffers and records
+
+### Bind group frequency
 
 Layouts are created explicitly and shared across pipelines rather than using `layout: 'auto'`,
-precisely so groups 0 and 1 can be bound once and reused across lanes.
+so groups 0 and 1 can be bound once and reused across lanes.
 
 | Group | Contents | Written |
 | --- | --- | --- |
-| **0** | `viewProjection` mat4 + `resolution` vec2 (80 bytes, uniform) | once per frame |
+| **0** | `viewProjection` mat4 + `resolution` vec2 (uniform) | once per frame |
 | **1** | array of object records (read-only storage) | per frame, changed slots only |
 | **2** | texture + sampler (font atlas array, image, shadow atlas) | per draw range |
 
-### Vertex buffers
+### Vertex layouts
 
-| Lane | Stride | Attributes |
-| --- | --- | --- |
-| Mesh | 12 B | `position` f32x2, `packedId` u32 |
-| Text | 36 B | `position` f32x2, `uv` f32x2, `color` f32x4, `packedId` u32 |
-| Image | 20 B | `position` f32x2, `uv` f32x2, `packedId` u32 |
-| Shadow | 12 B | `position` f32x2, `packedId` u32 |
+| Lane | Attributes |
+| --- | --- |
+| Mesh | `position` f32x2, `packedId` u32 |
+| Text | `position` f32x2, `uv` f32x2, `color` f32x4, `packedId` u32 |
+| Image | `position` f32x2, `uv` f32x2, `packedId` u32 |
+| Shadow | `corner` f32x2 (each component 0 or 1), `objectId` u32 |
 
-`packedId` carries an object index in its low 31 bits and a flag in the top bit — `isFill` in
-the mesh lane, `isGlyph` in the text lane.
+`packedId` carries an object index in its low bits and a flag in the top bit — `isFill` in the
+mesh lane, `isGlyph` in the text lane. The shadow lane packs no flag: every shadow vertex is the
+same kind of thing, so the whole word is the index.
 
-### The mesh object record — 304 bytes
+The shadow vertex carries a **corner**, and the quad's local-space bounds and atlas uv rect live
+in the per-object record. Both derive from the shape's atlas slot, and a slot can be re-baked
+into a different rectangle at any time, so they belong in per-frame data rather than in packed
+geometry.
 
-```
-  0   model               mat4x4<f32>    the world matrix
- 64   fillType            u32            0 = solid, 1 = linear, 2 = radial
- 68   stopCount           u32
- 72   gradientStart       vec2<f32>
- 80   gradientStartRadius f32
- 84   depth               f32            from depthForRank, not from any z coordinate
- 88   gradientEnd         vec2<f32>
- 96   gradientEndRadius   f32
-100   stopPositions       f32[8]
-144   stopColors          vec4<f32>[8]
-272   fillColor           vec4<f32>
-288   strokeColor         vec4<f32>
-```
-
-`depth` sits in what would otherwise be alignment padding, so it costs nothing.
-
-The text record is 320 bytes — the same transform and gradient fields, extended with a
-per-letter outline colour and width, the atlas distance range, and which layer of the shared
-font atlas array the run samples. The image record is 96 (model, tint, depth) and the shadow
-record 128.
+### Object records
 
 An "object" is a **(shape, material) pair**, not a shape. A shape claims a contiguous block of
-records, one per material, and its vertices pick within that block.
+records, one per material it declares, and its vertices select within that block. An ordinary
+shape declares one material — itself, since `Shape` carries the whole fill/stroke vocabulary.
+
+The mesh record, in field order (`render/meshFormat.ts` holds the authoritative offsets and
+stride as exported constants):
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `model` | `mat4x4<f32>` | the world matrix |
+| `fillType` | `u32` | solid, linear or radial |
+| `stopCount` | `u32` | |
+| `gradientStart` | `vec2<f32>` | |
+| `gradientStartRadius` | `f32` | |
+| `depth` | `f32` | from `depthForRank`, not from any z coordinate |
+| `gradientEnd` | `vec2<f32>` | |
+| `gradientEndRadius` | `f32` | |
+| `stopPositions` | `array<f32, MAX_GRADIENT_STOPS>` | |
+| `opacity` | `f32` | `Shape.opacity` |
+| `stopColors` | `array<vec4<f32>, MAX_GRADIENT_STOPS>` | |
+| `fillColor` | `vec4<f32>` | used when `fillType` is solid |
+| `strokeColor` | `vec4<f32>` | |
+
+`depth` and `opacity` sit in slots that alignment padding would otherwise occupy, so neither
+costs the record any size.
+
+The **text** record (`render/textFormat.ts`) mirrors the transform and gradient half and
+replaces the fill fields with a per-letter outline (`strokeColor`, `strokeWidth`, `hasStroke`),
+the atlas `distanceRange`, a coverage `dilate` used for faux bold and glow, and `atlasLayer` —
+which layer of the shared font atlas array the run samples. `atlasLayer` lives in the record
+rather than the vertex because it is a property of the run, not of the glyph.
+
+The **image** record (`render/imageFormat.ts`) is only a model matrix, a tint, a depth and an
+opacity. Everything about *which part* of the image shows — source rectangle, tiling, aspect fit,
+flipping — resolves to four corner uvs on the CPU (`image/imageUv.ts`), so none of it needs a
+uniform or a shader branch. The tint multiplies the sampled texel, so an opaque white tint means
+"draw it as it is".
+
+The **shadow** record (`render/shadowFormat.ts`) is a model matrix with the shadow offset
+applied, a color, the local-space quad the atlas slot maps to, the atlas uv rect, and a depth.
+
+A record's declared stride is load-bearing: WGSL rounds a struct's size up to its own alignment,
+and the shader indexes the storage buffer by *its* idea of that size. `render/render.test.ts`
+computes every shader struct's size from its source and asserts it against the stride constant,
+so a padding field added on one side and not the other fails a test rather than drawing garbage.
+
+### Uploads
+
+Geometry buffers are recreated on `rebuild()`, which only runs when *which* objects belong in a
+lane changes. Object records are refreshed every frame by `updateObjects()`, and the upload is
+by **dirty range**. Each slot keeps an `ObjectCache` of what was last written; unchanged slots
+are skipped. `model` is compared by reference, since `Matrix4x4` instances are never mutated
+after being handed out. Changed slots are collected into ranges, merging any two within a small
+gap of each other, because a few wasted bytes beat an extra `writeBuffer` call. If a frame's
+changes scatter into more ranges than a cap allows, it falls back to one whole-buffer upload
+rather than issuing an unbounded number of small writes.
+
+`ObjectCache` names no GPU type and reads only a material, so it is exported and the WebGL path
+uses the same class to answer the same question.
+
+### Draw call boundaries
+
+A draw call ends on a pipeline switch or a **group(2) rebind**. WebGPU exposes no bindless
+texturing here — no `binding_array`, no descriptor indexing, one texture per bind group — so two
+distinct textures cannot be merged into one draw.
+
+The text lane therefore samples a single texture. All four Inter styles occupy one
+`texture_2d_array`, one layer per style, behind one bind group, and a run's `atlasLayer` field
+selects between them (`webgpu/FontBook.ts`). A paragraph mixing regular, bold, italic and
+bold-italic issues one draw call.
+
+Array layers share a single size. The generator packs each style to its own tight bounds, so
+each atlas image is copied into the top-left of a layer sized for the largest, and
+`normalizeMetrics` measures uvs against the layer rather than the image (`text/msdfMetrics.ts`).
+No shader adjustment is needed: `textureDimensions` returns the layer size and `distanceRange`
+is divided by that same value, so a smaller image scales `fwidth(uv)` down and `unitRange` up by
+equal factors and the resulting screen-pixel range is unchanged.
+
+The image lane binds one texture per draw. Its textures are application-supplied at arbitrary
+size and format, so pooling them would require a general atlas allocator rather than a fixed
+layer count. It issues the most draw calls in an image-heavy scene.
 
 ---
 
-## The shaders
+## Shaders
 
-The vertex shader, in the mesh lane and in the same shape everywhere else:
+The vertex shader, in the mesh lane and the same shape everywhere else:
 
 ```wgsl
 let objectId = input.packedId & OBJECT_ID_MASK;
@@ -664,483 +746,466 @@ out.clip.z = objects[objectId].depth * out.clip.w;   // override the projected z
 out.localPos = input.position;                        // for gradient evaluation
 ```
 
-That fourth line is the crux of the whole design. Every 2D shape sits at z = 0, so the
-projected z carries no information. The renderer injects the stacking depth instead, multiplied
-by `w` so it survives the GPU's perspective divide intact.
+The fourth line is what makes cross-lane stacking work. Every 2D shape sits at z = 0, so the
+projected z carries no information; the renderer writes the stacking depth over it, multiplied
+by `w` so it survives the perspective divide intact.
 
-The fragment shader reads `fillType` and either returns `strokeColor`/`fillColor` flat, or
-evaluates a linear or radial gradient analytically from `localPos` — in the shape's own space,
-so the gradient rotates and scales with the shape for nothing.
+Fragment work per lane:
+
+| Lane | Fragment work |
+| --- | --- |
+| **Mesh** | flat `fillColor` / `strokeColor`, or a linear or radial gradient evaluated analytically from `localPos` |
+| **Text** | MSDF: `median(r, g, b)`, an `fwidth`-based screen-pixel range, an optional second threshold for the per-letter outline, plus `dilate` |
+| **Image** | `textureSample(...) * tint` |
+| **Shadow** | sample the pre-blurred silhouette from the atlas slot, tint it |
+
+Gradients are evaluated in the shape's **own** space, so a gradient rotates and scales with its
+shape for free. Object opacity multiplies the output alpha in every lane.
+
+The WGSL and the GLSL both interpolate the same `OBJECT_*_OFFSET` constants the batchers use, so
+there is one copy of each record layout and every reader derives from it.
 
 ---
 
-## The four lanes
+## Invalidation
 
-All four share group 0, the depth buffer, the sample count and the render pass. They differ
-only in vertex format and fragment maths.
+Three global counters in `shapes/contentEpoch.ts` answer three different questions. Each is a
+counter rather than a per-node flag, so the renderer compares one integer per frame regardless of
+how large the visible set is.
 
-| Lane | Fragment work | Can be opaque? |
+| Counter | Bumped by | Renderer response |
 | --- | --- | --- |
-| **Mesh** | flat colour, or an analytic gradient | **yes**, when every material's fill and stroke are at alpha 1 |
-| **Text** | MSDF: `median(r,g,b)`, an `fwidth`-based screen-pixel range, an optional second threshold for per-letter outline | never — see below |
-| **Image** | `textureSample(...) * tint` | never — see below |
-| **Shadow** | sample the pre-blurred silhouette, tint it | never; a shadow is translucent by definition |
+| Mesh geometry epoch | `Shape.markGeometryDirty()` | repack the mesh lane |
+| Text shaping epoch | a text node re-shaping | repack the text lane |
+| Object record epoch | any setter that changes a per-object record | run `updateObjects()` at all |
 
-### What group(2) costs, and the font atlas array
+All three are coarse: any node bumps the whole lane, and a node belonging to another scene bumps
+it just the same. The failure mode is therefore a rebuild that turns out to have been
+unnecessary.
 
-Everything above is about *pipeline* switches. The other thing that ends a draw call is a
-**group(2) rebind** — a different texture — and WebGPU has no bindless: no `binding_array`, no
-descriptor indexing, one texture per bind group. A draw call per distinct texture is a floor
-that no amount of shader merging gets under.
+### Transforms and paint
 
-Which makes it worth not having distinct textures. All four Inter styles live in **one
-`texture_2d_array`**, a layer each, behind one bind group; a run's layer travels in its object
-record (`webgpu/FontBook.ts`). The text lane used to segment its draws per atlas, so a paragraph
-alternating regular and bold paid a bind and a draw per switch — four pages of mixed-style
-lorem ipsum cost **108 draws against 4 distinct atlases**. It is now 1.
+Nothing is rebuilt. `localMatrix()` misses its cache, produces a new matrix instance, and the
+next `updateObjects()` sees a different `model` reference and rewrites that object's record.
+Colors and gradient parameters live in the record too, never in geometry.
 
-Array layers must be identically sized and the generator packs each style to its own tight
-bounds (280×285 through 306×324), so each image is copied into the top-left of a layer sized
-for the largest and uvs are measured against the **layer**, not the image
-(`text/msdfMetrics.ts`). The padding costs about 11% of a texture under two megabytes. The
-shader needs no adjustment for it: `textureDimensions` is the layer size and `distanceRange` is
-divided by exactly that, so packing a smaller image into a bigger layer scales `fwidth(uv)`
-down and `unitRange` up by the same factor and the screen-pixel range comes out unchanged.
-
-The image lane has the same opportunity and has not taken it: its textures are the
-application's, of any size and format, so pooling them means a real atlas allocator rather than
-four fixed layers. That is why `images` is still the scene with the most draw calls.
-
----
-
-## The two passes
-
-Alpha blending is order-dependent and the depth test is not, and **no single draw order serves
-both**. So the frame is drawn twice over, splitting the scene by whether an object can be
-*proven* to paint only opaque fragments (`render/opacity.ts`).
-
-These are phases of the one WebGPU render pass, not separate `beginRenderPass` calls — the
-colour and depth attachments are never rebound, only the pipelines and the draw ranges change.
-
-| | order | batching | depth test | depth write |
-| --- | --- | --- | --- | --- |
-| **1. Opaque** | irrelevant | one draw per lane | yes | **yes** |
-| **2. Translucent** | strictly back to front, all lanes merged | one draw per *lane change* | yes | no |
-| **3. Overlay** | packed tail of the mesh buffer | one draw | no (`always`) | no |
-
-**Pass 1** needs no ordering at all, because for fully opaque fragments the depth buffer *is*
-the sort: two overlapping solid shapes resolve to the nearer one whichever draws first. So an
-opaque lane collapses to one draw however finely its shapes are stacked among the translucent
-ones. It writes depth, which is what pass 2 then reads.
-
-**Pass 2** is the opposite: back-to-front is the only order alpha blending composites correctly
-in, so the lanes are merged into one furthest-first sequence and drawn in runs, one draw per
-lane change (`render/drawOrder.ts`). It still *tests* depth — an opaque shape in front hides all
-of it — but never *writes* it, because translucent fragments have no business rejecting each
-other.
-
-**Pass 3** is the editor furniture, on top of everything, touching depth not at all.
-
-### Why the split has to be conservative
-
-"Opaque" is a promise that **every** fragment an object can produce comes out at alpha 1,
-because that is what earns it the right to write depth ahead of everything behind it. A wrong
-"translucent" costs one draw call; a wrong "opaque" punches a hole in the picture. So anything
-the CPU cannot prove from the object's own fields is translucent, and two whole lanes fail by
-construction:
-
-- **Text.** An MSDF glyph's alpha *is* its coverage — the shader turns the sampled distance
-  into a soft edge — so every glyph outline is a ring of partial-alpha fragments however solid
-  the run's colour is. (Mesh shapes get their edges from MSAA instead, which resolves per
-  *sample*: a covered sample is fully covered, so a solid fill really is opaque everywhere it
-  draws.)
-- **Images.** What is in a texture is the application's business and is never read back, so
-  nothing on the CPU can rule out an alpha channel. A tint alpha below 1 proves an image
-  translucent; a tint alpha of 1 proves nothing. The cheap fix, should an image-heavy scene
-  ever want the opaque pass, is for the caller to declare it when building the `ImageTexture` —
-  it is the one party that knows.
-
-A mesh shape is opaque when every material it declares has an opaque stroke colour and either a
-flat fill at alpha 1 or a gradient whose every stop is. The stroke is checked whether or not the
-shape strokes anything, since a material carries no stroke *width*; that costs nothing in
-practice, because an unstroked shape keeps the default opaque black.
-
-And before any of that, `Shape.opacity` below 1 disqualifies a shape outright, in every lane —
-see below.
-
-### Object opacity
-
-`Shape.opacity` (0…1, default 1) fades a whole object, and is deliberately **not** the alpha in
-its `fill`/`stroke`. A colour's alpha is part of how the shape is painted and belongs to its
-design; this is a property of the object — what an editor's opacity slider drives and what an
-animation fades. Baking one into the other means a fade has to know, and afterwards restore,
-every colour it touched. The two multiply.
-
-It rides in the per-object record, in padding each format already had: byte 132 for mesh and
-text, byte 84 for images. **No record grew and no stride changed**, so the WebGL data-texture
-texel counts (19 / 20 / 6) are exactly what they were. Each lane's shader multiplies it into the
-fragment's **alpha only** — these lanes blend straight, non-premultiplied alpha, so scaling rgb
-would darken the shape instead of fading it. The shadow lane needs no record change at all: its
-colour alpha is already `shadowColor.a × shadowOpacity` on the CPU, so object opacity is one
-more factor there, and a faded shape's shadow fades with it rather than reading as a second
-object.
-
-The load-bearing part is the classifier. `isOpaqueShape()` checks `opacity < 1` **first**, ahead
-of any material, because an opacity it could not see is precisely the "wrong opaque" the section
-above warns about — a faded shape would write depth ahead of everything behind it and punch a
-hole. Opacity can only ever move a shape *out* of the opaque pass, never into it.
-
-**It does not cascade.** A group's opacity is a different and much harder feature: doing it
-correctly means drawing the group to an offscreen target and compositing that once, because
-multiplying the value down onto each child instead makes the children show through *each other*
-wherever they overlap. Rather than ship the cheap version under the right name, this stays what
-it says it is — one object's transparency. The same caveat applies in miniature to a shape whose
-parts are styled independently (`VectorText`'s runs are separate object records), which is why
-it is a note rather than a blocker: runs rarely overlap.
-
-### What it was before
-
-The lanes used to draw one at a time — all the mesh, then all the text, then all the images —
-and the depth buffer was supposed to arbitrate. It cannot, for anything translucent: a fragment
-at alpha 0.4 still writes depth, so whatever sat behind it **in a later lane** was rejected
-outright instead of showing through. Transparency worked in one direction and not the other,
-decided by which lane a thing happened to be in.
-
-Interleaving everything back-to-front fixed that but charged every scene for it: each lane
-change is a draw call, so a scene that alternated kinds paid one draw per object even where
-nothing was translucent at all. Splitting the passes pays that cost only where it buys
-something — and pooling the font atlases (above) removes the binds the split cannot.
-
-Draw calls in one full frame, measured on the real app at each stage:
-
-| scene | one interleaved pass | + opaque/translucent split | + pooled font atlas |
-| --- | --: | --: | --: |
-| Shapes & gradients | 2 | 2 | **2** |
-| Shape stress test (100k) | 4 | 4 | **3** |
-| Stacking order | 4 | 5 | **5** |
-| Shadows | 27 | 5 | **5** |
-| MSDF text | 14 | 14 | **3** |
-| MSDF text stress test | 112 | 108 | **3** |
-| Transparency across lanes | 45 | 41 | **32** |
-| Images | 36 | 37 | **37** |
-
-Stacking order is the honest cost of the split: pulling an opaque shape out of the middle of a
-back-to-front run splits that run in two, so a scene whose mesh lane is nearly all translucent
-can pay one extra draw per lane. It is bounded at that. Images is the lane that has not been
-pooled yet, and it shows.
-
-Total indices submitted are unchanged in every scene at every stage — the draws are merged, not
-dropped.
-
-Classifying costs a scan of the visible mesh shapes per gather — around 10 ms at 100k shapes,
-against roughly 88 ms for the viewport-cull scan sitting beside it, and nothing at all on the
-fast path where the whole gather is reused.
-
-### Shadows
-
-Shadows join pass 2 like anything else. A shadow is a translucent blob with exactly the problem
-the content lanes have: it must composite over what is behind it and under what is in front. It
-sits **half a depth step behind its caster**, which places it immediately before that caster in
-the sequence — late enough to land on whatever is below, early enough for its own caster to
-paint over it.
-
-Drawing shadows last, as they used to be, worked only while everything above them was opaque. A
-translucent panel over a shadow had already written depth by the time the shadow lane ran, so
-the shadow was rejected outright instead of showing through.
-
----
-
-## What happens when a property changes
-
-The most subtle part of the system, and the one most worth understanding before changing
-anything.
-
-### A transform changes — `x`, `y`, `rotation`, `scale`, `skew`, `offset`, `zIndex`
-
-Nothing is rebuilt. `localMatrix()` misses its cache, produces a new matrix instance, and next
-frame `updateObjects()` sees a different `model` reference and rewrites that object's record.
-
-These are **accessors, not plain fields**, and that is what makes the previous paragraph
-affordable. Refreshing records used to be O(everything visible) whether or not anything had
-happened: two function calls and a couple of dozen property reads per object, to conclude every
-time that nothing had. At 100k objects that is ~40 ms of a frame spent asking. Each setter now
-bumps the object-record epoch — guarded on the value actually differing, so writing a node's own
-value back (which a `Transformer` does to its handles on every frame it is up) announces
-nothing — and `updateObjects` returns immediately when the epoch has not moved and the visible
-set is the same objects in the same order. Depths need no separate check: they are a function of
-rank and count.
-
-Measured at 100k static objects: **40 ms → 0.6 ms**, the remainder being the membership compare.
-The trade is a ~10% slower `worldMatrix()` (nine getter reads instead of nine field reads in the
-cache check, on a path that now runs far less often) and ~19 ns per changed field on assignment.
+The transform fields, `zIndex`, `opacity`, `fill`, `stroke`, `fillPriority` and the gradient
+parameters are **accessors, not plain fields**, and each setter bumps the object-record epoch —
+guarded on the value actually differing, so writing a node's own value back (which the
+`Transformer` does to its handles every frame it is up) announces nothing. When the epoch has
+not moved and the visible set is the same objects in the same order, `updateObjects()` returns
+immediately. Depths need no separate check: they are a function of rank and count.
 
 **A value assigned is seen; a value edited in place is not.** Assigning
-`shape.fillLinearGradientStartPoint = { x, y }` announces itself; reaching through it to write
-`.x` does not, and neither does editing a colour tuple through a cast. That is the convention
-`Matrix4x4` and the colour tuples already relied on, now with a consequence attached.
+`shape.fillLinearGradientStartPoint = { x, y }` bumps the epoch; reaching through the property
+to write `.x` does not, and neither does editing a color tuple through a cast. Treat
+`Matrix4x4` instances and color tuples as immutable once handed out.
 
-**With one exception**, and it is the only one in the engine: a shape with
-`strokeScaleEnabled = false` has its stroke width baked into geometry in a way that depends on
-the world scale, so a scale change *does* rebuild it. See below.
+The one transform that does reach geometry is a shape with `strokeScaleEnabled = false`, whose
+stroke is built against the world scale. It goes through `markGeometryDirty()` like any other
+geometry change and lands as an ordinary mesh bump.
 
-The upload is by **dirty range**. Each slot keeps an `ObjectCache` of what was last written;
-unchanged slots are skipped outright. Changed slots are collected into ranges, merging any two
-within 8 slots of each other — a few hundred wasted bytes beat an extra `writeBuffer` call. If
-a frame's changes scatter into more than 512 ranges, it falls back to one whole-buffer upload
-rather than issuing an unbounded number of small writes. At 100k objects that is the difference
-between a ~30 MB copy every frame and a few hundred bytes while dragging one shape.
+### Geometry
 
-### Which side the stroke goes on — `strokeAlign`
+Call `markGeometryDirty()` after changing anything `buildGeometry()` reads: `Circle.radius`,
+`Rect.cornerRadius`, `Polyline.points`, `Path.contours` and `Path.filled`, `strokeWidth`,
+`strokeAlign`, `lineJoin`, `lineCap`, `miterLimit`, a `CustomShape` property its `describe()`
+depends on, or a change to the *length* of `materials()`.
 
-A stroke is a ribbon offset from the outline it follows, and `strokeAlign` decides how far it
-reaches to each side: `half, half` for `'center'`, `width, 0` for one of the other two and
-`0, width` for the last. Those two numbers are the *whole* implementation — every join, miter,
-bevel and cap in `render/stroke.ts` reads them rather than a single half-width, so there is one
-stroker rather than three, and a centred stroke is byte-for-byte the geometry it always was.
+It drops the shape's tessellation and pick caches, bumps its `geometryVersion` (the shadow atlas
+keys its baked silhouette on that), and bumps the mesh epoch.
 
-Which side is which comes from the ring's own winding: `perp()` gives the right normal, so a
-counter-clockwise ring (positive shoelace area) encloses the −normal side. An **open** path has
-no enclosed side, so it stays centred whatever is asked for.
+Toggling `visible` also repacks, by a different route: an invisible shape never enters the
+ordered list, so the visible set changes and the membership comparison catches it without any
+epoch.
 
-A hole is the interesting case. "Inside" is a statement about the shape, and a hole's ring is
-wound against the outline containing it — the material lies *outside* the hole's own ring — so
-`strokeContours()` asks the same even-odd nesting question the fill asks (`render/contours.ts`,
-shared by the SVG fill, glyph fill and this) and strokes hole rings with the alignment flipped.
-A donut with an inside stroke therefore keeps both of its silhouettes exactly.
-
-Because the ribbon is geometry, this changes what the node measures: `localBounds()` is the
-extent of the triangles a shape emits, so an inside stroke leaves a node exactly the size of its
-fill and an outside one grows it by the full width. That is a feature, not a side effect — it is
-what everything downstream of bounds (the selection frame, marquee hits, the shadow silhouette,
-culling) needs in order to agree with the picture.
-
-### A stroke that does not scale — `strokeScaleEnabled = false`
-
-The exception above, and the reason it is opt-in per shape.
-
-A stroke width is normally a local-space measurement like any other coordinate: the ribbon is
-tessellated once and the transform stretches it along with the rest of the shape. An outline
-that must stay the same width whatever the shape's size cannot work that way — the triangles
-genuinely differ per scale — so the shape re-tessellates whenever its world scale changes, and
-that costs its lane a repack.
-
-How the ribbon is built is the interesting half. It is **not** the width divided by a scale
-factor: under a 4:1 stretch a diagonal edge is thickened by neither 4 nor 1 but by something
-between, and by a different amount for every direction around the shape, so no single number
-fixes it. Instead the stroker is handed a `StrokeGauge` — the linear part of the world matrix —
-and pushes the path *through* it, strokes there where the width is the width that was asked
-for, and maps every vertex back through the inverse. Non-uniform scale and skew come out exact,
-round joins correctly returning as the ellipse arcs they have to be. There is still one
-stroker: this is a wrapper around it, so the gauged case cannot disagree with the ungauged one.
-
-Noticing is a sweep. `render/gather.ts` asks every shape once a frame whether the scale its
-stroke was built against still holds (`Shape.refreshStrokeGauge`) — one boolean read for a
-shape that never opted out, which is what makes it affordable over the whole scene. It has to
-be a sweep rather than a setter: a shape's world scale depends on every ancestor, and no setter
-is in a position to say that a whole subtree's strokes are now stale.
-
-Rotation and translation are free, and provably so. Stroking commutes with rotation, so a gauge
-and that gauge turned by any angle give identical triangles; the staleness check compares
-`GᵀG` — the two axis lengths and the angle between them — which is invariant under exactly the
-rotations that do not matter and sensitive to every scale and skew that does.
-
-### A colour changes
-
-Same path. Solid colours and gradient parameters live in the object record, never in geometry.
-
-One caveat, and only on the fast path: an **alpha** that crosses 1 moves the shape between the
-opaque and translucent halves of the mesh list, and that split is computed in the gather. Every
-ordinary scene re-gathers each frame and picks it up for free. A scene that has switched both
-culling and the z-sort off is reusing last frame's gather wholesale, and needs a
-`markGeometryDirty()` for the change to be seen.
-
-### Geometry changes — `Circle.radius`, `Polyline.points`, `strokeWidth`, `Path.filled`
-
-Call `markGeometryDirty()`. It drops the shape's tessellation and pick caches, bumps its
-`geometryVersion` (the shadow atlas keys its baked silhouette on that), and bumps a lane-wide
-content epoch.
-
-### Text content changes — `setRuns`, `setText`, or `markDirty()` after editing a layout option
+### Text content
 
 `TextBlock.invalidateShaping()` bumps the text epoch and calls the subclass's
-`dropShapingCache()`.
+`dropShapingCache()`. It runs on `setRuns`, `setText`, or `markDirty()` after editing a layout
+option.
 
-### The content epochs, and why they exist
+### Structure
 
-A lane packs many nodes into shared buffers and never revisits them. Dropping a node's own
-cache tells the *node*; nothing told the *renderer*, so the buffers kept the geometry they were
-packed with and the change never appeared until something unrelated forced a rebuild. Animating
-a node's **content** rather than its **transform** hit this every frame — text following a
-curve advanced its offset and sat still, with the text lane rebuilding 0 times in 62 frames.
+Shapes added or removed, or the visible set shifting under the camera, causes a full lane
+rebuild: re-tessellate everyone in the lane, repack the vertex and index buffers, recreate the
+object buffer and its bind group. Expensive, and rare. Adding and removing nodes needs no
+explicit mark, since the visible set is recomputed each frame — except on the gather's fast path.
 
-`shapes/contentEpoch.ts` holds one counter per lane. `markGeometryDirty()` and a text re-shape
-bump it; the renderer compares one integer per frame. A counter rather than a flag per node is
-what keeps it free when the visible set is in the tens of thousands.
+### Why text repacks more often than shapes do
 
-A **third** counter answers a different question: has any per-object *record* changed — a
-transform, a depth, an opacity, a colour? Those are refreshed every frame without touching
-geometry, and the batchers skip a slot whose values are unchanged; but they could only find
-that out by looking, and looking at 100k objects costs **~40 ms** to conclude there was
-nothing to do. So the record-relevant properties announce themselves instead (see below), and
-a frame where nothing announced skips the whole pass.
+One rule covers both: a rebuild is needed when a value **baked into the vertex buffer** changes,
+since everything in the object record is rewritten every frame regardless. The two lanes differ
+only in *which* of their values sit where.
 
-It over-rebuilds rather than under-rebuilds: any node bumps the whole lane, and a node from
-another scene bumps it just the same. That is the right way round — a needless rebuild is only
-slow, a missed one is wrong — and it fires rarely. Measured across every example scene, the
-only rebuilds are in the one scene that animates its content; the other ten are at zero, with
-frame rates unchanged.
+**Shape** — repacks on everything `buildGeometry()` reads (see above). Free: the transform,
+`zIndex` via depth, `fill` and `stroke` colors, and every gradient parameter.
 
-Transforms bump neither of the two geometry counters — they are re-uploaded from the world
-matrix and never baked into a packed buffer — but they do bump the object-record one, because
-that is exactly what they change.
+**Text** — repacks on very nearly everything: the string and its runs; `fontStyle`, `fontSize`,
+`letterSpacing`, `baselineShift`; `align`, `maxWidth`, `lineHeight`, `direction`,
+`orientation`, `textPath`; `underline`, `strikethrough` and `highlight`, which add and remove
+whole quads; `shadow` and `glow`, which add a duplicate copy of every glyph; faux italic, whose
+shear is baked into each corner; and `color`, which is packed per vertex. Free: the node's
+transform, `zIndex` via depth, per-run gradient parameters, and `strokeColor`, `strokeWidth`,
+`distanceRange` and `dilate`.
 
-### The structure changes — shapes added or removed, or the visible set shifts
-
-A full lane rebuild: re-tessellate everyone, repack the vertex and index buffers, recreate the
-object buffer and its bind group. Expensive, and rare.
-
----
-
-## Where glyphs come from
-
-Both text paths draw from **generated assets**, and neither reads a font file. That is a
-deliberate boundary: the engine's whole dependency list is `earcut` and `svgpath`, and turning
-a `.ttf` into something drawable happens once, offline, in `packages/scripts`.
-
-| Path | Asset | Per style | What the runtime does with it |
-| --- | --- | --- | --- |
-| `Text` | MSDF atlas — `inter-*.png` + `inter-*.json` | ~90–120 kB PNG | samples a distance field in the text lane |
-| `VectorText` | polygon atlas — `inter-*.polygons.json` | ~50 kB | triangulates rings into mesh geometry |
-
-The polygon atlas is the newer of the two and the reason the parser left. It holds each glyph's
-outline already flattened to line segments in **whole font units** (at Inter's 2048 units per em
-that is a rounding error of 1/2048 em, far below the 1/400 em tolerance the curves were
-flattened at, and it makes the file a fraction of the size it would be as floats), plus the
-boxes, advances, kerning pairs and decoration metrics the shaper needs. `PolygonFont` reads it
-into the same `FontMetrics` the MSDF path uses and triangulates a glyph the first time it is
-drawn.
-
-What that replaced was 1.6 MB of TTF plus a 240 kB parser, downloaded to recompute a fixed
-answer on every load — the flattened outline of Inter's 'A' does not change between sessions.
-Four polygon atlases are about 200 kB in total and need no parser at all.
-
-The cost is that a polygon atlas, like an MSDF one, covers the charset it was generated for.
-Where the font genuinely is not known until runtime — a user upload, a font picker — the opt-in
-`@mvpaint/ttf` package parses one in the browser and satisfies the same `VectorFonts` interface
-(`text/vectorGlyphs.ts`), so a `VectorText` cannot tell the difference. It shares its extraction
-code with the offline generator, which is what makes a baked glyph and a live-parsed one
-identical rather than merely similar; the generator's self-test asserts it, and also that the
-committed atlases are the ones the tool produces today.
-
-## Why text repacks more often than shapes do
-
-The rule above is single: a rebuild is needed when a value **baked into the vertex buffer**
-changes, because everything in the object record is rewritten every frame anyway. What makes
-the two lanes feel so different is only *which* of their values sit where.
-
-```
-Shape (mesh):   position f32x2 · packedId u32                              12 B
-Text:           position f32x2 · uv f32x2 · color f32x4 · packedId u32     36 B
-```
-
-### Shape
-
-**Repacks** — everything `buildGeometry()` reads: `Circle.radius`; `Polyline.points`;
-`Path.contours` and `Path.filled`; `strokeWidth`, `lineJoin`, `lineCap`, `miterLimit`; a Rect's
-or Image's `width`/`height`. Toggling `visible` also repacks, though by a different route — an
-invisible shape never enters the ordered list at all (`scene/picking.ts`), so the visible set
-changes and `sameMembers` catches it without any epoch.
-
-**Free** — the transform (`x`, `y`, `rotation`, `scale`, `skew`, `offset`), `zIndex` via depth,
-`fill` and `stroke` colours, and every gradient parameter.
-
-### Text
-
-**Repacks** — very nearly everything: the string and its runs; `fontStyle`, `fontSize`,
-`letterSpacing`, `baselineShift`; `align`, `maxWidth`, `lineHeight`, `direction`, `orientation`,
-`textPath`; `underline`, `strikethrough` and `highlight`, which add and remove whole quads;
-`shadow` and `glow`, which add a duplicate copy of every glyph; faux italic, whose shear is
-baked into each corner by `quadCorner()`; and `color`, which is packed per vertex.
-
-**Free** — the node's transform, `zIndex` via depth, per-run gradient parameters, and
-`strokeColor`, `strokeWidth`, `distanceRange` and `dilate`.
-
-### The two inversions
+Two properties invert exactly between the lanes:
 
 | | Shape | Text |
 | --- | --- | --- |
-| `strokeWidth` | **repacks** — the stroker emits real triangles for the outline | **free** — a distance threshold the fragment shader compares against: `obj.strokeWidth * screenPerWorld` |
-| fill colour | **free** — `fillColor` at byte 272 of the object record | **repacks** — packed into every vertex |
+| `strokeWidth` | **repacks** — the stroker emits real triangles for the outline | **free** — a distance threshold the fragment shader compares against |
+| fill color | **free** — `fillColor` in the object record | **repacks** — packed into every vertex |
 
-Exactly opposite, on both. That is the point worth carrying away: the rule has nothing to do
-with what a property is called or how structural it feels. `strokeWidth` sounds geometric, and
-is, for a shape — but for text it is a number compared against a signed distance, so changing it
-costs four bytes. `color` sounds cosmetic, and is, for a shape — but for text it lives in the
-vertex stream, so changing it repacks the lane.
-
-### Why the difference exists at all
-
-A shape has **one geometry and one transform**. Every vertex of a rect is affected by `x` in
-exactly the same way, so `x` factors out of the vertex data into a single matrix the shader
-applies to all of them. The geometry is *invariant* under the transform, and that invariance is
-what makes the indirection possible in the first place.
-
-A text node has **many glyphs at many different places**, and those places are the output of
-shaping. There is no per-node value from which a shader could derive where glyph 47 sits.
-Change the font size and every glyph moves by a different amount; change the wrap width and some
-jump to another line. **The layout is the geometry.** So under a non-instanced design it has to
-be in the vertex stream.
-
-Put the other way round: for a shape, the thing that varies per frame is shared by all its
-vertices; for text, the thing that varies is different for every quad.
+The difference comes from the geometry itself. A shape has **one geometry and one transform**:
+every vertex of a rect is affected by `x` identically, so `x` factors out of the vertex data
+into a single matrix the shader applies to all of them. A text node has **many glyphs at many
+places**, and those places are the output of shaping — change the font size and every glyph moves
+by a different amount, change the wrap width and some jump to another line. **The layout is the
+geometry**, so under a non-instanced design it lives in the vertex stream. Moving per-glyph
+placement into a storage buffer and drawing the quads instanced would put re-shaping in the
+cheap per-frame path.
 
 `VectorText` has the same property for the same reason. It draws through the *mesh* lane, but
 its glyph outlines are baked, so re-shaping repacks the mesh buffer exactly as re-shaping
 repacks the text buffer.
 
-This is also why a missing rebuild signal went unnoticed for so long. The mesh lane's repack
-list is short and mostly one-time — few applications animate a circle's radius — while the text
-lane's is "nearly everything about the text", so any animated text content lands in it. The gap
-was invisible for the whole life of the mesh lane and surfaced the moment a scene animated a
-`textPath` offset.
+---
 
-If the per-glyph placement were moved into a storage buffer and the quads drawn with
-instancing, re-shaping would land in the cheap per-frame path too, and the text lane would
-behave like the mesh lane in this respect. Nothing needs that today.
+## Text
+
+Two implementations over one shaper.
+
+| Path | Class | Draws through | Asset |
+| --- | --- | --- | --- |
+| Distance field | `Text` | text lane, four vertices per glyph | MSDF atlas: a PNG plus metrics JSON per style |
+| Outline | `VectorText` | mesh lane, tessellated glyph outlines | polygon atlas: flattened outlines per style |
+
+`text/layout.ts` is the shaper for both. It resolves each run to a font atlas (synthesizing a
+missing weight or slant as faux bold or italic), lays glyphs out with kerning, letter spacing
+and baseline shift, greedily wraps to an optional max width, breaks on `\n`, aligns each line
+(left, center, right, justified), and emits quads back to front: highlight backgrounds, drop
+shadows, soft glows, glyph bodies, then underline and strikethrough. Horizontal text supports
+left-to-right and mechanically mirrored right-to-left; a vertical orientation stacks glyphs
+top-to-bottom in right-to-left columns. Text can be bent onto an arbitrary path
+(`text/textPath.ts`). Every run becomes one or more materials referenced by its quads.
+
+Coordinates are the node's local space: +x right, +y up, the block's top-left at the origin.
+
+A `Text` drop shadow is a duplicate of the run's glyphs drawn behind them at an offset, styled
+per run. `VectorText` has real mesh geometry, so it honours the ordinary `Shape.shadow*` fields
+and casts a blurred shadow baked from the letterforms.
+
+### Where glyphs come from
+
+Both paths read **generated assets** and neither parses a font file. The engine's dependency
+list is `earcut` and `svgpath`; turning a `.ttf` into something drawable happens offline in
+`packages/scripts`.
+
+The polygon atlas holds each glyph's outline flattened to line segments in whole font units,
+plus the boxes, advances, kerning pairs and decoration metrics the shaper needs. Integer font
+units keep the file small at a quantisation well below the curve-flattening tolerance.
+`PolygonFont` reads it into the same `FontMetrics` the MSDF path uses and triangulates a glyph
+the first time it is drawn.
+
+An atlas covers the charset it was generated for. Where the font is not known until runtime — a
+user upload, a font picker — the opt-in `@mvpaint/ttf` package parses one in the browser and
+implements the same `VectorFonts` interface (`text/vectorGlyphs.ts`), so a `VectorText` cannot
+tell the difference. It shares its extraction code with the offline generator, so a baked glyph
+and a live-parsed one are identical; the generator's self-test asserts that, and that the
+committed atlases are what the tool produces today.
+
+`meshFromContours` is shared by both sources, so an atlas glyph and a runtime-parsed one become
+geometry through the same code.
+
+`@mvpaint/engine/core` (`core.ts`) exports the device-free half of all this — geometry, glyph
+metrics, the style ladder, the outline tessellator — with no `?url` asset imports, so it loads
+under plain Node. That is what `@mvpaint/ttf`, the offline generators and any code measuring
+text before a canvas exists import.
 
 ---
 
 ## Shadows
 
-Different from everything else, because a blurred silhouette cannot be computed per-fragment
-cheaply.
+A blurred silhouette is baked once into a shared atlas and sampled thereafter, rather than
+computed per fragment.
 
 In the **prepass**, each caster's local-space geometry is rasterized as coverage into a scratch
 texture, optionally grown or shrunk (`shadowSpread`, two separable morphology passes), blurred
-horizontally into a second scratch, then blurred vertically straight into its slot of a shared
-atlas. Every pass is bounded by the slot size, never by the canvas — which is the whole
-difference from rendering each shadow through a full-screen pass. Coverage is single-channel
-`r8unorm`; a shadow is a stencil, and its colour lives in the object record.
+horizontally into a second scratch, then blurred vertically straight into its slot of the atlas
+(`webgpu/ShadowAtlas.ts`). Every pass is bounded by the slot size, never by the canvas. Coverage
+is single-channel `r8unorm` — a shadow is a stencil, and its color lives in the object record.
 
-The slot is sized from things a transform cannot affect: local silhouette bounds and blur
-radius. It is re-baked only when `geometryVersion`, `shadowBlur`, `shadowSpread` or
-`shadowForStrokeEnabled` changes. Position, rotation, scale, parenting, the shadow's own offset
-and camera zoom are all applied afterwards, to the quad that samples the slot — so dragging,
-spinning or zooming a shadowed shape re-bakes nothing. Moving the shadow stress scene's 1344 shadowed shapes
-costs zero bakes.
+The slot is sized from things a transform cannot affect — local silhouette bounds and blur
+radius — and capped, so an oversized shape bakes at reduced resolution. Slots are padded apart so
+a neighbor's texels cannot bleed in under linear filtering. A slot is re-baked only when
+`geometryVersion`, `shadowBlur`, `shadowSpread` or `shadowForStrokeEnabled` changes, and a
+re-bake keeps its existing rectangle when the new one still fits, so dragging a blur slider does
+not churn the atlas. Position, rotation, scale, parenting, the shadow's own offset and camera
+zoom are all applied afterwards to the quad that samples the slot, so moving, spinning or
+zooming a shadowed shape re-bakes nothing.
 
 Casters are deliberately **not** culled: a shape just off-screen can still throw a shadow into
 view, and keeping its slot baked avoids a stutter the moment it scrolls in.
 
-Then in the main pass, one textured quad per shadow samples its slot. Nothing outside the atlas
+In the main pass, one textured quad per shadow samples its slot. Nothing outside the atlas
 caches a slot, because a re-bake can move a shape to a different rectangle without the set of
-casters changing at all. The shadow offset is applied along **world** axes rather than the
-shape's own, matching canvas 2D — where a shadow's offset lives outside the current transform,
-so a rotated shape's shadow still falls in the direction the notional light comes from.
+casters changing at all — `ShadowBatcher` reads `slotFor()` every frame.
+
+`shadowBlur` is a canvas-style radius (Gaussian sigma is half of it) authored in the shape's own
+local units, so it scales with the shape. `shadowSpread` is CSS `box-shadow`'s spread, using a
+square structuring element, so a large spread squares off corners slightly. The offset is
+applied along **world** axes rather than the shape's own, matching Canvas2D, where a shadow's
+offset lives outside the current transform — so a rotated shape's shadow still falls in the
+direction the notional light comes from. `render/shadowMath.ts` holds this arithmetic, shared by
+both render paths.
 
 ---
 
-## A worked example
+## Camera and capture
+
+### The camera
+
+`Camera2D` (`camera/Camera2D.ts`) is a plain object the **application owns** —
+`createSceneRenderer({ camera })`, or `setCamera` later. It holds no reference to the graph and
+the graph holds none to it, so one scene can be drawn through two cameras at once (a minimap, a
+print preview).
+
+It describes a rectangle of world under the same conventions the shapes use: `x, y` is the world
+point at the viewport's **top-left**, `zoom` is viewport pixels per world unit, and `rotation`
+turns the view about its own center. Omitting it renders through a default camera, which puts
+world (0, 0) at the top-left at 1:1.
+
+Zoom is in **CSS pixels**, not device pixels, so a shape is the same physical size on a
+high-DPI display as anywhere else; the device pixel ratio only decides how many physical pixels
+render each logical one. Callers pass the viewport's logical size; the frame uniform still
+carries the backing-store size, which is what the shaders want.
+
+The camera composes a full 4x4 view-projection and `screenToWorld` unprojects through its
+inverse. The render path's contract with the camera is that matrix and nothing else, so a
+perspective camera could implement it without any lane, shader or culling code changing. The
+cost is one 4x4 inverse per screen-to-world call, which happens per pointer event.
+
+### Capture
+
+`handle.toCanvas()` / `toDataURL()` / `toBlob()` draw the scene **again**, offscreen, and hand
+back the pixels. Because it is a fresh render, the image can cover **any region of world at any
+resolution** independently of the canvas's contents or size. `pixelRatio` scales the output
+only — the same rectangle of world, more pixels of it.
+
+**The engine builds the camera.** A caller describes a rectangle (`x`, `y`, `width`, `height` in
+world units, plus an optional `rotation`); the live camera is untouched. Every field defaults
+from what is on screen, so `toCanvas()` with no arguments means "this, at this size". The
+background defaults to transparent.
+
+Both paths render through the *same* `draw()` the live frame uses, given a `CaptureView`
+(camera, view size, clear color) in place of the canvas's. The backend-neutral arithmetic —
+building the camera, resolving the pixel size, turning bytes back into a canvas — lives in
+`render/capture.ts`. The camera is handed the region's **world** size, not the pixel size: it is
+sized in CSS pixels at zoom 1, so passing the pixel size would apply the ratio twice.
+
+What each backend implements for itself:
+
+| | WebGPU | WebGL2 |
+| --- | --- | --- |
+| Target | MSAA texture → resolve texture (`COPY_SRC`) + depth, at the pipelines' format and sample count | multisampled RGBA8 + `DEPTH_COMPONENT24` renderbuffers, blitted into a single-sample RGBA8 one |
+| Readback | `copyTextureToBuffer` → `mapAsync`, rows padded to the required alignment and unpadded again | `readPixels` from the resolve buffer |
+| Orientation | NDC +Y is already the first texel row — no flip | rows come back bottom first and are flipped |
+| Channels | `bgra8unorm` is the usual preferred canvas format, so red and blue are swapped back | RGBA as read |
+
+Both captures are multisampled. WebGL2 needs two framebuffers for it, since a multisampled
+buffer cannot be read directly: `blitFramebuffer` from the multisampled one into a single-sample
+one *is* the resolve, and must be `NEAREST`, since a multisample resolve rejects `LINEAR`. The
+sample count is clamped to the driver's `MAX_SAMPLES` rather than assumed, because
+`renderbufferStorageMultisample` fails outright rather than rounding down.
+
+A capture costs one gather, one repack and one draw, and because it culls against a different
+rectangle than the live view, the frame after it re-gathers. Oversized requests are clamped
+proportionally rather than left to fail inside the backend.
+
+---
+
+## Input
+
+Input is **opt-in**. A renderer given no `input` option installs no pointer listeners on the
+canvas, no keys on the window, runs no hit-test and raises no scene event. The camera remains an
+ordinary object the application can move from code.
+
+### The dispatcher
+
+`SceneInputDispatcher` (`input/SceneInputDispatcher.ts`) is the whole path from a DOM pointer
+event to a scene-graph event: it listens on the canvas, tracks pointers, works out which node
+each event is over, and dispatches on it. It **reports**; the layer above decides what each
+report means.
+
+- Press, release, move, hover crossings, click and double click go out on whichever node the
+  pointer is over, bubbling to the root. Empty space and a non-listening node both resolve to
+  the root, so a background handler is `root.on('click')`.
+- Viewport gestures are recognized but never applied. A pan or pinch reports the pointer (or the
+  midpoint of two), the world point that sat under it when the gesture began, and how far a
+  pinch has spread — everything `panToAnchor` and a zoom need. Nothing here reads the camera.
+- The marquee is fed from here but never started here. An application calls `beginMarquee()`
+  when it decides a press means one, and hears `'marqueeend'`.
+- Node dragging and the transformer's resize/rotate **are** performed here, and report as
+  `dragstart` / `dragmove` / `dragend` and `transformstart` / `transform` / `transformend` on
+  every participating node.
+
+A press resolves in priority order: a transformer handle, then a draggable node, then empty
+space. Where the node it lands on sits inside a draggable `Group`, the group is what the drag
+takes hold of. Gestures resolve against the values captured when the press began, never
+accumulated per move, so no gesture drifts over a long drag. The raw entry points
+(`down`/`move`/`up`/`cancel`/`leave`/`wheel`/`contextMenu`) are public, so a test or a replay can
+drive input without a DOM.
+
+Selection lives above the dispatcher, in the application, which often keeps a broader set than a
+frame around some shapes. Where the dispatcher needs to know which nodes move as a unit, it asks
+the `Transformer` what it is wrapping.
+
+### Presets
+
+`createSceneRenderer(target, { input })` takes a preset. `input/inputOptions.ts` resolves it and
+`input/sceneInput.ts` wires it; the composition roots attach it last, once the handle exists.
+
+| `input` | Dispatcher | `pick` it is given | Furniture added to the scene |
+| --- | --- | --- | --- |
+| *omitted* | none | — | none |
+| `'view'` | yes | `() => null` | none |
+| `'editor'` | yes | `handle.pick` | `Transformer`, `MarqueeOverlay` |
+
+The middle column is why `'view'` is cheap. The dispatcher is handed a hit-test that always
+answers null, so every press resolves to the root, there is no hover target and no drag arming,
+and a pointer move costs the same at any scene size. It also means no listener can reach a node
+the host did not mean to expose.
+
+The long form (`{ camera: {...}, objects: {...}, keyboardTarget }`) turns individual behaviors
+off and tunes their constants. Each field defaults to the behavior its preset would have given,
+so an options object only ever states what differs. Both halves switched off is a static render
+however it was asked for.
+
+In the `'editor'` set, a press means: a transformer handle resizes or rotates the framed set;
+a node selects it (shift extends) and drags it, taking the whole group unless `groupsAsUnits` is
+off; empty space pulls out a rubber band, and a click that covered nothing clears the selection;
+ctrl, meta or space grabs the view instead of the content wherever it lands.
+
+The bindings are built entirely from public parts — `SceneInputDispatcher`, `MarqueeTool`,
+`Transformer`, `panToAnchor` / `zoomToward`, `nodesInBox` — so an application with different
+needs omits the preset and composes its own from the same set. The selection frame refits once a
+frame through `handle.addFrameListener` (`renderer/frameListeners.ts`) rather than through the
+single application-owned `handle.onFrame` slot, which runs first.
+
+### The transformer
+
+`Transformer` (`shapes/Transformer.ts`) is an ordinary `Container` of `Rect`s and `Circle`s in
+the scene, so it draws through the mesh lane and needs no special-case rendering. It never
+parents itself to the attached nodes: it sits at the scene root and re-fits from their world
+bounds, which is what lets one frame wrap a set whose members live under different, possibly
+transformed, parents.
+
+Every part is a **unit** shape — a 1x1 quad for the border bars, a radius-0.5 circle for the
+handles — driven entirely through its transform. `width`, `height`, `radius` and `strokeWidth`
+are baked into geometry and changing them needs a renderer-level rebuild, which the transformer
+has no handle to trigger; moving, turning and scaling need none. That is why the border is four
+edge quads and each anchor is two stacked circles rather than stroked shapes, and it is what
+lets the frame track a set being dragged, scaled or spun without a single repack. Anchors are
+held at a constant screen size by dividing their world size by the camera zoom.
+
+The gestures themselves live in `shapes/transformerMath.ts`; the `Transformer` is the scene
+bookkeeping around them.
+
+### Canvas resolution
+
+`resolveCanvas` (`renderer/canvasTarget.ts`) turns the first argument — a canvas, a selector, a
+container element, or nothing — into a canvas. It runs in `createSceneRenderer` **before** either
+render path is tried, so a WebGL2 fallback after a failed WebGPU attempt draws into the canvas
+that already exists rather than creating a second one.
+
+---
+
+## Teardown
+
+Renderers are torn down and rebuilt whole — switching render path, remounting a component,
+opening a second document — so `handle.destroy()` releases everything setup took:
+
+| Taken | Given back by |
+| --- | --- |
+| Canvas and window listeners, the touch-hold timer, the frame subscription | `input.destroy()` |
+| The selection frame and marquee rectangle | `destroy()`, not `remove()` |
+| A canvas the **engine** created | removed from the document; a caller's canvas is untouched |
+| GPU buffers, atlases, the device | the render path's own `destroy()` |
+
+The furniture is *destroyed* rather than removed because a removed frame keeps holding whatever
+was selected — a reference to application content, and through its parents to the whole scene —
+and any listener an application put on it stays counted in the global census, which only counts
+up.
+
+GPU textures are the application's to release. `ImageTexture` is handed to the scene that asked
+for it, since one texture is often shared by several `Image` nodes and only the scene knows when
+it is finished with.
+
+---
+
+## Render paths
+
+WebGPU is the primary path. `webgl/` is a **second, self-contained implementation** that serves
+machines without WebGPU support.
+
+The WebGPU files call `device.queue.writeBuffer` and `pass.drawIndexed` directly, and no symbol
+in them refers to the fallback.
+
+The two share everything that is not graphics API code: the scene graph, the gather, the byte
+layouts in `render/*Format.ts`, the draw-order merge, the opacity split, the stroker, the shadow
+maths, the shaper, the capture arithmetic.
+
+They couple through exactly two things: one factory function with one branch
+(`renderer/createSceneRenderer.ts`), and one interface both implement, `SceneRendererHandle` —
+everything an application does with a renderer, naming no graphics API. The fallback is reached
+through a dynamic `import()`, so a bundler splits it into its own chunk and a browser with
+WebGPU never fetches it. `backend: 'webgl2'` forces it, which is how it gets exercised on a
+development machine.
+
+Both paths produce the same picture; the fallback differs in **scale**:
+
+- It antialiases from the browser's own multisampled drawing buffer (`antialias: true`), which
+  saves a full-screen blit and a second color buffer every frame. The implementation picks the
+  sample count and `Gl2Context.sampleCount` reports what was granted.
+- WebGL2 has no storage buffers, so the per-object records that carry every transform and
+  material become a float data texture read with `texelFetch` (`webgl/GlObjectTexture.ts`). Same
+  architecture, reached a slower way, and it targets tens of thousands of objects rather than
+  hundreds of thousands.
+- The GLSL is a template string interpolating the same `OBJECT_*_OFFSET` constants the WGSL and
+  the batchers use (`webgl/shaders/`), so the two shaders cannot drift apart.
+
+All four lanes are implemented. The shadow bake ports without a compute shader, since silhouette,
+separable morphology and separable Gaussian are all ordinary render passes into small textures.
+The one genuine divergence is render-to-texture orientation — WebGPU puts NDC y = +1 in a
+texture's *first* texel row and GL in its *last* — corrected in exactly two places and pinned by
+`webgl/webgl.test.ts`, since getting one without the other gives upside-down shadows.
+
+### Choosing a GPU
+
+Both paths take the same option and default it the same way (`renderer/adapter.ts`):
+
+```ts
+createSceneRenderer(canvas, { powerPreference: 'high-performance' })  // the default
+```
+
+WebGPU passes it to `requestAdapter()`, WebGL2 to `getContext('webgl2', …)`. It is a **hint with
+two settings** and the only control the platform offers: neither API lets a page enumerate GPUs
+or name one, because an exact hardware list is a strong fingerprint. On a machine with an
+integrated GPU and a discrete card it selects between them; on a single-GPU machine it does
+nothing; and it loses to a browser already pinned to an adapter from outside the page (Windows
+Graphics Settings, a vendor control panel — `chrome://gpu` reports which one the browser is on).
+
+The engine defaults to `'high-performance'`; the platform default is the integrated GPU.
+
+The request can be silently ignored, so `handle.adapter` reports what came back: vendor,
+architecture, device and the driver's description as far as the browser discloses them (WebGPU's
+`adapter.info`; WebGL's `WEBGL_debug_renderer_info`, which is more specific but more often
+withheld), plus a `fallback` flag for a software renderer — SwiftShader, llvmpipe, WARP — which
+draws correctly but slowly. Both paths warn about one once at startup.
+
+---
+
+## End to end
 
 You write:
 
@@ -1148,120 +1213,45 @@ You write:
 scene.root.addChild(new Circle({ x: 100, y: 50, radius: 40, fill: [1, 0, 0, 1] }))
 ```
 
-1. The constructor stores fields. No GPU work, no geometry.
-2. The app calls `markGeometryDirty()` on the renderer — the visible set changed.
-3. **Gather.** The circle sorts into z-order at rank *r*, takes `depth = (n - r) / (n + 1)`,
-   buckets into the mesh lane, survives the cull. Its fill is at alpha 1 and its stroke colour
-   defaults to opaque, so it classifies as opaque and lands in the head of the mesh list.
-4. **Rebuild.** Set membership changed, so `batcher.rebuild()` runs. `tessellate()` calls
-   `buildGeometry()` once: a fan of 101 vertices and 100 triangles around **(0, 0)** — its own
-   local space, the segment count chosen from the radius. The batcher rebases the indices, stamps object id 37 into
-   each vertex's `packedId`, appends to the shared arrays, and uploads one vertex buffer and
-   one index buffer for the entire scene.
-5. **`updateObjects()`.** Slot 37 receives the world matrix (a translation to 100, 50), the
-   depth, `fillType = 0`, `fillColor = (1, 0, 0, 1)`. 304 bytes, uploaded inside a merged dirty
+1. The constructor stores fields and takes a `zIndex` from the counter. No GPU work, no
+   geometry.
+2. **Gather.** The circle sorts into z-order at rank *r*, takes `depth = (count - r) / (count + 1)`,
+   buckets into the mesh lane, and survives the cull. Its fill is at alpha 1 and its stroke
+   color defaults to opaque, so it classifies as opaque and lands in the head of the mesh list.
+3. **Rebuild.** `sameMembers()` reports the visible set changed, so `batcher.rebuild()` runs —
+   no dirty mark was needed. `tessellate()` calls `buildGeometry()` once: a triangle fan around
+   **(0, 0)** in the shape's own local space, with the segment count chosen from the radius. The
+   batcher rebases the indices, stamps the object id into each vertex's `packedId`, appends to
+   the shared arrays, and uploads one vertex buffer and one index buffer for the whole lane.
+4. **`updateObjects()`.** The circle's slot receives the world matrix (a translation to 100, 50),
+   the depth, a solid `fillType`, and `fillColor = (1, 0, 0, 1)`, uploaded inside a merged dirty
    range.
-6. **Draw.** In the opaque pass: `setBindGroup(0, frame)`, `setBindGroup(1, objects)`,
-   `setVertexBuffer`, `setIndexBuffer`, and one `drawIndexed` covering every opaque mesh shape
-   in the scene.
-7. **Vertex shader.** Reads `objects[37].model`, transforms the local origin-centred positions
-   to clip space, overwrites `clip.z` with the object's depth.
-8. **Fragment shader.** `fillType == 0`, so it returns `fillColor`. The depth test decides
+5. **Draw.** In the opaque pass: `setBindGroup(0, frame)`, `setBindGroup(1, objects)`,
+   `setVertexBuffer`, `setIndexBuffer`, and one `drawIndexed` covering every opaque mesh shape in
+   the scene.
+6. **Vertex shader.** Reads `objects[id].model`, transforms the local origin-centered positions
+   to clip space, and overwrites `clip.z` with the object's depth.
+7. **Fragment shader.** `fillType` is solid, so it returns `fillColor`. The depth test decides
    whether the fragment survives.
-9. The pass ends and the four-sample texture resolves into the swapchain.
+8. The pass ends and the multisampled texture resolves into the swapchain.
 
-Then you set `circle.x = 200`. Steps 1–4 and 6–9 are unchanged; only step 5 runs again, and
-only for slot 37.
-
----
-
-## Two render paths
-
-The engine is WebGPU. `webgl/` is a **second, separate implementation** for machines that do
-not have WebGPU yet, and it is meant to be deleted again once they are rare enough.
-
-It is separate in the strong sense. There is no device abstraction, no backend interface and
-no lane abstraction anywhere in this engine, because building one would mean shaping the
-permanent path around the temporary one. The WebGPU files call `device.queue.writeBuffer` and
-`pass.drawIndexed` directly, exactly as they always have, and nothing in them knows a second
-path exists.
-
-What the two share is everything that was never about graphics in the first place: the whole
-scene graph, the gather, the byte layouts in `render/*Format.ts`, the draw-order merge, the
-opacity split, the stroker, the shadow maths, the shaper. What they do not share is anything
-that touches an API.
-
-The seam between them is one function with one branch —
-`renderer/createSceneRenderer.ts` — and one interface, `SceneRendererHandle`, which is just
-"everything an application does with a renderer" and mentions no API. The fallback is reached
-through a dynamic `import()`, so a browser with WebGPU never downloads it. Removing it later
-is deleting `src/webgl/` and a `catch`.
-
-Where the fallback differs is **scale**, not edge quality. It renders with 4x MSAA too, from
-the browser's own multisampled drawing buffer (`antialias: true`) rather than from a
-multisampled target it drives itself — the picture is the same, and it saves a full-screen
-blit and a second colour buffer every frame, at the cost of not being able to *name* a sample
-count (the implementation picks; `Gl2Context.sampleCount` reports what was granted). What it
-does target is tens of thousands of objects rather than hundreds of thousands. WebGL2 has no
-storage buffers, so the per-object
-records that carry every transform and material become a float data texture read with
-`texelFetch` — the same architecture, reached a slower way. `webgl/GlObjectTexture.ts` explains
-that substitution, including why integer fields are stored as floats rather than as
-reinterpreted bits.
-
-The GLSL is a template string that interpolates the same `OBJECT_*_OFFSET` constants the WGSL
-and the batchers use (`webgl/shaders/`), so the two shaders cannot drift apart — there is only
-one copy of the record layout and both read it.
-
-All four lanes are implemented — mesh, text, image and shadow. The shadow bake ports without
-a compute shader because it never needed one: silhouette, separable morphology and separable
-Gaussian are already ordinary render passes into small textures. The one thing that genuinely
-diverges is render-to-texture orientation — WebGPU puts NDC y = +1 in a texture's *first*
-texel row and GL in its *last* — and it is corrected in exactly two places, pinned by
-`webgl/webgl.test.ts` because getting one without the other gives upside-down shadows.
-
-`packages/engine/src/webgl/webgl.test.ts` covers the pure half: the data texture's index maths, and
-every generated shader's agreement with the record layout it was generated from.
-
-### Choosing a GPU
-
-Both paths take the same option and both default it the same way (`renderer/adapter.ts`):
-
-```ts
-createSceneRenderer(canvas, { powerPreference: 'high-performance' })  // the default
-```
-
-WebGPU passes it to `requestAdapter()`, WebGL2 to `getContext('webgl2', …)`. It is a **hint
-with two settings** and the only control the platform offers — there is no device list to
-enumerate and no way to name a GPU, because an exact hardware list is a strong fingerprint.
-On a machine with an integrated GPU and a discrete card it selects between them; on a machine
-with one it does nothing; and it loses outright to a browser already pinned to an adapter from
-outside the page (Windows Graphics Settings, the vendor control panel — `chrome://gpu` says
-which one the browser is on).
-
-The default is deliberately **not** the platform's. Left to choose, browsers pick the
-integrated GPU — right for a page that draws a form, wrong for a renderer whose premise is a
-hundred thousand shapes through a depth-tested pass.
-
-Since the request can be silently ignored, what came back is reported rather than assumed.
-`handle.adapter` carries vendor, architecture, device and the driver's description as far as
-the browser discloses them (WebGPU's `adapter.info`; WebGL's `WEBGL_debug_renderer_info`,
-which is more specific but more often withheld), plus a `fallback` flag for a software
-renderer, which both paths also warn about once at startup.
+Then you set `circle.x = 200`. The setter bumps the object-record epoch. Steps 1–3 and 5–8 are
+unchanged; only step 4 runs again, and only for that one slot.
 
 ---
 
-## Where to look
+## Module map
 
 | Concern | Files |
 | --- | --- |
-| Nodes, transforms, events | `shapes/Node.ts`, `shapes/Shape.ts`, `shapes/Group.ts`, `shapes/Layer.ts`, `events/` |
+| Nodes, transforms, events | `shapes/Node.ts`, `Shape.ts`, `Group.ts`, `Layer.ts`, `Container.ts`, `events/` |
 | The view: pan, zoom, rotate | `camera/Camera2D.ts`, `input/viewport.ts`, `input/cameraControls.ts` |
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
 | Shapes you write yourself | `shapes/CustomShape.ts`, `shapes/ShapeContext.ts` |
-| Stroking, SVG flattening | `render/stroke.ts`, `svg/flattenPath.ts` |
+| Stroking, contours, SVG flattening | `render/stroke.ts`, `render/contours.ts`, `svg/flattenPath.ts` |
+| Loading SVG | `svg/loadSvg.ts`, `svg/shapeToPath.ts`, `svg/gradient.ts`, `svg/triangulate.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
-| Where glyphs come from | `text/msdfMetrics.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
+| Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
 | Generating those assets | `packages/scripts/text/msdf/`, `packages/scripts/text/polygon/` |
 | Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |
@@ -1269,17 +1259,21 @@ renderer, which both paths also warn about once at startup.
 | Shaders | `webgpu/shaders/mesh.wgsl.ts`, `text.wgsl.ts`, `image.wgsl.ts`, `shadowQuad.wgsl.ts`, `shadowBake.wgsl.ts` |
 | Pipelines, bind layouts | `webgpu/pipelines/`, `webgpu/layouts.ts`, `webgpu/vertexLayouts.ts`, `webgpu/depthFormat.ts` |
 | The gather (shared, GPU-free) | `render/gather.ts` |
-| Orchestration | `webgpu/index.ts`, `webgpu/SceneRenderer.ts`, `webgpu/FrameRenderer.ts`, `webgpu/GpuContext.ts` |
+| Draw order and the passes | `render/opacity.ts`, `render/drawOrder.ts` |
+| Z-order, picking, culling, marquee | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
+| Invalidation | `shapes/contentEpoch.ts` |
+| Shadow baking and maths | `webgpu/ShadowAtlas.ts`, `render/shadowMath.ts` |
+| Capture | `render/capture.ts`, `webgpu/CaptureTarget.ts`, `webgl/GlCaptureTarget.ts` |
+| Orchestration | `webgpu/index.ts`, `SceneRenderer.ts`, `FrameRenderer.ts`, `GpuContext.ts` |
 | Choosing a render path | `renderer/createSceneRenderer.ts`, `renderer/SceneRendererHandle.ts` |
 | Where the canvas comes from | `renderer/canvasTarget.ts` |
 | Choosing a GPU | `renderer/adapter.ts`, `webgpu/GpuContext.ts`, `webgl/Gl2Context.ts` |
-| The WebGL2 fallback (temporary) | `webgl/` |
-| Z-order, picking, culling | `scene/picking.ts`, `scene/culling.ts`, `scene/selection.ts` |
-| Draw order and the two passes | `render/opacity.ts`, `render/drawOrder.ts` |
-| Invalidation | `shapes/contentEpoch.ts` |
-| Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts` |
-| The bindings themselves | `input/inputOptions.ts`, `input/sceneInput.ts`, `input/MarqueeOverlay.ts` |
+| Input and gestures | `input/SceneInputDispatcher.ts`, `shapes/Transformer.ts`, `shapes/transformerMath.ts` |
+| The bindings themselves | `input/inputOptions.ts`, `input/sceneInput.ts`, `input/MarqueeTool.ts`, `input/MarqueeOverlay.ts` |
+| The WebGL2 fallback | `webgl/` |
 
-Each engine subdirectory carries a Vitest suite covering its pure half - `src/<dir>/<dir>.test.ts`,
-run with `npm test` (or `npx vitest run <path>` for one of them). Everything needing a GPU or a DOM is verified in a browser
-instead.
+Subdirectories with pure logic to check carry a Vitest suite next to it
+(`src/<dir>/<dir>.test.ts`), run with `npm test`, or `npx vitest run <path>` for one of them.
+The suite runs under plain Node with no GPU and no DOM, so it covers the geometry, the formats,
+the shaper, the gather and the shader-struct assertions; anything needing a device or a DOM is
+verified in a browser.

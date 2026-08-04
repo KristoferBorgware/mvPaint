@@ -3,15 +3,19 @@ name: CI
 # Everything the release workflow checks before it publishes, run on the pull request instead,
 # so a red release is something you already knew about rather than something you find out on
 # the way to the registry.
+#
+# A push to master also deploys the example app to GitHub Pages from the same job. That used to
+# be its own workflow, which meant a second checkout, a second `npm ci` and a second
+# `build:packages` for work this job had already done. Having it here also means a deploy can
+# only come off a commit that typechecks, tests and packs.
+# Requires Settings -> Pages -> Source: "GitHub Actions".
 
 on:
   pull_request:
   push:
     branches: [master]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Redeploy the current master to Pages without pushing a commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,6 +23,11 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Per job, not per workflow: a superseded check should be cancelled, an in-flight Pages
+    # deployment should not be. A workflow-wide group could not say both.
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -58,3 +67,38 @@ jobs:
           count=$(ls package/dist/assets | wc -l)
           echo "assets in tarball: $count"
           test "$count" -eq 8
+
+      # Not `npm run build`: build:packages ran above, and this resolves the workspace deps to
+      # that fresh dist. Unconditional, so a pull request finds out that the app no longer
+      # bundles rather than master finding out at deploy time.
+      - name: Build the example app
+        run: npm run build -w @mvpaint/example-app
+
+      # Anything on master that is not a pull request build, so the manual trigger deploys too.
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: packages/example-app/dist
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # There is no actions/configure-pages step feeding this. Its only job would be to hand the
+    # build a base path, and the example app does not want one: vite.config.ts builds with a
+    # relative base so the same output works from any subpath. Pages itself is enabled in the
+    # repo settings, not from here.
+    permissions:
+      pages: write # create the deployment
+      id-token: write # deploy-pages authenticates with OIDC
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
