@@ -153,6 +153,27 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   const onErrorRef = useRef(onError)
   const onPathChangeRef = useRef(onPathChange)
 
+  /**
+   * The zoom this component last handed OUT to React - see the frame loop's report below and
+   * the push-back effect near the bottom, which together make `zoom` a round trip rather than
+   * an input.
+   *
+   * A value we reported is not somebody asking for a zoom. It is our own reading of the camera
+   * coming back a render or two later, and a wheel burst has moved on by then: the notches
+   * between the report and the echo are already applied, so pushing it back sets the camera to
+   * a zoom several notches stale. That is not merely a redundant write - setZoom() keeps the
+   * camera's x/y, which are the world point at the viewport's TOP-LEFT, so it rescales the view
+   * about the corner rather than about anything the reader is looking at, and it does so while
+   * a gesture is mid-flight. The wheel binding then finds a camera it did not leave behind,
+   * correctly concludes its held anchor is stale, and re-reads one from wherever the jump put
+   * the content - which is the anchor "changing world position" mid-scroll. Zoomed out, where
+   * one pixel is a lot of world, the burst throws the scene thousands of pixels across.
+   *
+   * So the echo is dropped and only a genuine slider change is applied. Identity, not a
+   * tolerance: the exact number we sent is the echo of it, and any other number is a request.
+   */
+  const reportedZoomRef = useRef(zoom)
+
   useEffect(() => {
     onZoomChangeRef.current = onZoomChange
   }, [onZoomChange])
@@ -212,7 +233,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       // and someone reloading a scene they have zoomed into is not asking to lose their place.
       if (replace && handle && canvasRef.current) {
         resetView(handle, canvasRef.current, resetZoom ? DEFAULT_ZOOM : undefined)
-        if (resetZoom) onZoomChangeRef.current?.(DEFAULT_ZOOM)
+        if (resetZoom) {
+          // Reported, so the slider agrees - and recorded as reported, since resetView has
+          // already put the camera there and re-framed it. Letting this one round-trip back
+          // would re-apply the zoom about the corner and undo the centring just done.
+          reportedZoomRef.current = DEFAULT_ZOOM
+          onZoomChangeRef.current?.(DEFAULT_ZOOM)
+        }
       }
 
       // Every scene switch sets this from the new scene's own preference (default false, i.e.
@@ -278,7 +305,6 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     if (!canvas) return
 
     let cancelled = false
-    let lastReportedZoom = zoom
     let lastZoomReportTime = 0
     const cullBoundsOverlay = new CullBoundsOverlay()
     cullBoundsOverlayRef.current = cullBoundsOverlay
@@ -349,10 +375,12 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
           // imperceptibly laggy for a numeric readout, and the final value always lands (the
           // very next tick past the interval reports it, gesture or not).
           const currentZoom = handle.getZoom()
-          if (currentZoom !== lastReportedZoom) {
+          if (currentZoom !== reportedZoomRef.current) {
             const now = performance.now()
             if (now - lastZoomReportTime >= ZOOM_REPORT_INTERVAL_MS) {
-              lastReportedZoom = currentZoom
+              // Recorded BEFORE the report goes out, since the effect that hears it has to be
+              // able to tell it apart from a slider drag - see reportedZoomRef.
+              reportedZoomRef.current = currentZoom
               lastZoomReportTime = now
               onZoomChangeRef.current?.(currentZoom)
             }
@@ -408,8 +436,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     speedRef.current = speed
   }, [speed])
 
-  // Push zoom-slider changes to the running renderer.
+  // Push zoom-SLIDER changes to the running renderer. Not zoom changes generally: the wheel,
+  // pinch and keyboard drive the camera themselves, and what arrives here from those is this
+  // component's own report coming back round. Applying that would fight the gesture that
+  // produced it - see reportedZoomRef.
   useEffect(() => {
+    if (zoom === reportedZoomRef.current) return
+    reportedZoomRef.current = zoom
     handleRef.current?.setZoom(zoom)
   }, [zoom])
 
