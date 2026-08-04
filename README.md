@@ -34,6 +34,65 @@ implementation:
 - Node 20+
 - A browser with WebGPU (Chrome/Edge 113+). Browsers without it take the WebGL2 path.
 
+
+## Example
+
+```ts
+import { Circle, Group, Rect, Text, createSceneRenderer } from '@mvpaint/engine'
+
+const handle = await createSceneRenderer('#board', { input: 'editor' })
+
+const card = new Group({ x: 120, y: -80 })
+
+card.addChild(
+  new Rect({
+    name: 'card-face',
+    width: 260,
+    height: 140,
+    cornerRadius: 12,
+    fill: [1, 1, 1, 1],
+    stroke: [0.8, 0.84, 0.9, 1],
+    strokeWidth: 1.5,
+    shadowColor: [0, 0, 0, 0.25],
+    shadowBlur: 24,
+    shadowOffsetY: 8,
+  }),
+)
+
+card.addChild(
+  new Text({
+    x: 20,
+    y: -34,
+    text: 'Hello, mvPaint',
+    style: { fontSize: 22, fontStyle: 'bold', color: [0.1, 0.12, 0.16, 1] },
+  }),
+)
+
+const dot = new Circle({ name: 'dot', x: 90, y: -150, radius: 46, zIndex: -1 })
+dot.fillPriority = 'linear-gradient'
+dot.fillLinearGradientStartPoint = { x: -46, y: 0 }
+dot.fillLinearGradientEndPoint = { x: 46, y: 0 }
+dot.fillLinearGradientColorStops = [
+  { offset: 0, color: [0.2, 0.7, 0.9, 1] },
+  { offset: 1, color: [0.5, 0.3, 0.9, 1] },
+]
+
+handle.scene.root.addChild(dot)
+handle.scene.root.addChild(card)
+
+handle.onFrame = (dt) => {
+  dot.rotation += dt
+}
+
+handle.scene.root.on('click', (event) => {
+  console.log('clicked', event.target.name)
+})
+
+handle.input?.transformer?.on('attachchange', () => {
+  console.log('selected', handle.input?.selection.map((node) => node.name))
+})
+```
+
 ## Setup
 
 ```bash
@@ -300,63 +359,6 @@ page can change that. `chrome://gpu` reports which adapter the browser itself is
 as far as the browser discloses them — and flags a software renderer (SwiftShader, llvmpipe,
 WARP), which draws correctly but slowly and otherwise looks like the engine being slow.
 
-## Example
-
-```ts
-import { Circle, Group, Rect, Text, createSceneRenderer } from '@mvpaint/engine'
-
-const handle = await createSceneRenderer('#board', { input: 'editor' })
-
-const card = new Group({ x: 120, y: -80 })
-
-card.addChild(
-  new Rect({
-    name: 'card-face',
-    width: 260,
-    height: 140,
-    cornerRadius: 12,
-    fill: [1, 1, 1, 1],
-    stroke: [0.8, 0.84, 0.9, 1],
-    strokeWidth: 1.5,
-    shadowColor: [0, 0, 0, 0.25],
-    shadowBlur: 24,
-    shadowOffsetY: 8,
-  }),
-)
-
-card.addChild(
-  new Text({
-    x: 20,
-    y: -34,
-    text: 'Hello, mvPaint',
-    style: { fontSize: 22, fontStyle: 'bold', color: [0.1, 0.12, 0.16, 1] },
-  }),
-)
-
-const dot = new Circle({ name: 'dot', x: 90, y: -150, radius: 46, zIndex: -1 })
-dot.fillPriority = 'linear-gradient'
-dot.fillLinearGradientStartPoint = { x: -46, y: 0 }
-dot.fillLinearGradientEndPoint = { x: 46, y: 0 }
-dot.fillLinearGradientColorStops = [
-  { offset: 0, color: [0.2, 0.7, 0.9, 1] },
-  { offset: 1, color: [0.5, 0.3, 0.9, 1] },
-]
-
-handle.scene.root.addChild(dot)
-handle.scene.root.addChild(card)
-
-handle.onFrame = (dt) => {
-  dot.rotation += dt
-}
-
-handle.scene.root.on('click', (event) => {
-  console.log('clicked', event.target.name)
-})
-
-handle.input?.transformer?.on('attachchange', () => {
-  console.log('selected', handle.input?.selection.map((node) => node.name))
-})
-```
 
 ## Repository layout
 
