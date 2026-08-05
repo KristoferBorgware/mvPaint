@@ -24,26 +24,27 @@ import { layoutText, type FontProvider, type TextRun } from './layout'
 import { arcPath, circlePath, TextPathGeometry } from './textPath'
 import { quadCorner } from './textQuad'
 import type { FontStyle } from './msdfProvider'
-// Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts also pulls in `?url` PNG
-// imports only a bundler can resolve, which would break this file running under plain node.
-import { ATLAS_LAYER_SIZE, msdfFontProvider } from './msdfProvider'
+// Imported from msdfProvider directly, not FontAtlas: FontAtlas.ts pulls in the WebGPU half,
+// which would break this file running under plain node.
+import { atlasLayerSize, msdfFontProvider, type StyleJson } from './msdfProvider'
 import { PolygonFontBook, type PolygonFontJson } from './PolygonFont'
 import { Text } from '../shapes/Text'
 import { bumpFontEpoch } from '../shapes/contentEpoch'
 import { VectorText } from '../shapes/VectorText'
 import type { RGBA } from '../render/meshFormat'
-import regularJson from './fonts/inter-regular.json'
-import boldJson from './fonts/inter-bold.json'
-import italicJson from './fonts/inter-italic.json'
-import boldItalicJson from './fonts/inter-bold-italic.json'
-// The outlines are an application's asset, not the engine's, so there are none here to import.
-// These come from the example app's font folder by path - a test fixture reaching across the
-// workspace, the same way packages/ttf's suite reads the atlas committed here. Test-only:
-// nothing in src/ imports them, and the published package carries no outline data at all.
-import regularPolygons from '../../../example-app/src/fonts/polygons/inter-regular.polygons.json'
-import boldPolygons from '../../../example-app/src/fonts/polygons/inter-bold.polygons.json'
-import italicPolygons from '../../../example-app/src/fonts/polygons/inter-italic.polygons.json'
-import boldItalicPolygons from '../../../example-app/src/fonts/polygons/inter-bold-italic.polygons.json'
+// NEITHER kind of atlas is the engine's - it ships no typeface - so both come from the example
+// app's asset folder by path, a test fixture reaching across the workspace the same way
+// packages/ttf's suite does. Test-only: nothing in src/ imports them, and the published package
+// carries no font data. They sit under the app's public/ because that is how the app serves
+// them; a JSON import reads the file just the same.
+import regularJson from '../../../example-app/public/fonts/msdf/inter-regular.json'
+import boldJson from '../../../example-app/public/fonts/msdf/inter-bold.json'
+import italicJson from '../../../example-app/public/fonts/msdf/inter-italic.json'
+import boldItalicJson from '../../../example-app/public/fonts/msdf/inter-bold-italic.json'
+import regularPolygons from '../../../example-app/public/fonts/polygons/inter-regular.polygons.json'
+import boldPolygons from '../../../example-app/public/fonts/polygons/inter-bold.polygons.json'
+import italicPolygons from '../../../example-app/public/fonts/polygons/inter-italic.polygons.json'
+import boldItalicPolygons from '../../../example-app/public/fonts/polygons/inter-bold-italic.polygons.json'
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making
@@ -60,6 +61,12 @@ const STYLE_JSONS: Record<FontStyle, MsdfFontJson> = {
   italic: italicJson as unknown as MsdfFontJson,
   'bold-italic': boldItalicJson as unknown as MsdfFontJson,
 }
+// The set under test, in STYLE_ORDER - what an application passes as `fonts`, and what every
+// layer-size assertion below is measured against. The layer size follows whichever set it is
+// given, so the test computes it with atlasLayerSize, exactly as a FontBook does.
+const STYLES: StyleJson[] = STYLE_ORDER.map((style) => ({ style, json: STYLE_JSONS[style] }))
+const ATLAS_LAYER_SIZE = atlasLayerSize(STYLES)
+
 const METRICS: Record<FontStyle, FontMetrics> = {
   regular: normalizeMetrics(STYLE_JSONS.regular, ATLAS_LAYER_SIZE),
   bold: normalizeMetrics(STYLE_JSONS.bold, ATLAS_LAYER_SIZE),
@@ -85,16 +92,32 @@ const regularOnly: FontProvider = {
 const run = (text: string, style: TextRun['style'] = {}): TextRun => ({ text, style })
 const finite = (n: number) => Number.isFinite(n)
 
-// FontBook/device involved (see FontAtlas.ts) - built off the SAME bundled JSON as `fonts`
-// above, so the two must resolve identically. ---
+// FontBook/device involved (see FontAtlas.ts) - built off the SAME JSON as `fonts` above, so
+// the two must resolve identically. ---
 it('msdfFontProvider: the GPU-free FontProvider a scene can measure text with, with no', () => {
-    const provider = msdfFontProvider()
-    assert(provider === msdfFontProvider(), 'the provider is built once and cached, not rebuilt per call')
+    const provider = msdfFontProvider(STYLES)
 
     const bold = provider.resolve('bold')
     assert(bold.atlasIndex === STYLE_ORDER.indexOf('bold'), "resolving 'bold' returns bold's atlas index")
-    assert(!bold.fauxBold && !bold.fauxItalic, 'an exact style match needs no synthesis (all four are bundled)')
+    assert(!bold.fauxBold && !bold.fauxItalic, 'an exact style match needs no synthesis (all four were supplied)')
     assert(bold.metrics.glyphs.size === METRICS.bold.glyphs.size, "msdfFontProvider's metrics match FontBook's own normalization")
+
+    // A partial set is the common case for an application that ships one face: the ladder
+    // synthesizes every other style off the one that is there.
+    const regularOnlyProvider = msdfFontProvider([{ style: 'regular', json: STYLE_JSONS.regular }])
+    const synthesized = regularOnlyProvider.resolve('bold-italic')
+    assert(synthesized.atlasIndex === 0, 'a set of only regular resolves every style onto layer 0')
+    assert(synthesized.fauxBold && synthesized.fauxItalic, 'and flags both faux bold and faux italic')
+
+    // The empty set is what a renderer created without `fonts` holds. Measuring against it is a
+    // loud error, not a silent zero-size layout.
+    let threw = false
+    try {
+      msdfFontProvider([]).resolve('regular')
+    } catch {
+      threw = true
+    }
+    assert(threw, 'an empty set resolves nothing at all and throws rather than measuring against zero')
 
     const shaped = layoutText([run('Measured before any device exists', { fontSize: 20 })], { maxWidth: 140 }, provider)
     assert(shaped.lineCount > 1 && shaped.height > 0, 'the shaper runs against it exactly like any other FontProvider')
@@ -204,7 +227,7 @@ it('a partial atlas set: styles land on their own layers, and the ladder covers 
     const fauxBold = pair.resolve('bold')
     assert(fauxBold.atlasIndex === 0 && fauxBold.fauxBold, 'bold falls back to regular, emboldened')
 
-    // The layer size follows the set, not the bundled fallback: one style's atlas is its own
+    // The layer size follows the set it was given and nothing else: one style's atlas is its own
     // size, and metrics normalized against it must say so or every uv is scaled wrong.
     const single = msdfFontProvider([{ style: 'italic', json: STYLE_JSONS.italic }])
     const metrics = single.resolve('italic').metrics

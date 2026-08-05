@@ -21,7 +21,8 @@
 // Fonts are supplied per node rather than by the renderer: glyph outlines own no GPU
 // resources, so there is nothing for a device to hand out, and the engine ships none of them -
 // an app that never uses this path pays nothing for it. Where they come from is the
-// application's choice - a polygon atlas it supplies (@mvpaint/assets is this repository's),
+// application's choice - a polygon atlas it supplies (packages/example-app has this
+// repository's, under public/fonts/polygons/),
 // or a font file parsed at runtime through @mvpaint/ttf - and this node cannot tell the
 // difference (see text/vectorGlyphs.ts).
 

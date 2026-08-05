@@ -44,8 +44,7 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE",
-    "LICENSE-Inter.txt"
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"

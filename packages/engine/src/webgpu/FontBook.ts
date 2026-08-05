@@ -6,24 +6,25 @@
 // switch - 108 draws for four pages of mixed-style lorem ipsum, against 4 distinct atlases.
 //
 // WHOSE ATLASES. The application's: `load()` takes MsdfAtlasSource[], which is what
-// createSceneRenderer's `fonts` option carries down. Given none it loads the bundled Inter
-// fallback, so a project that has not chosen a typeface still draws text. A set may be
-// partial - one face, or three - and the style ladder synthesizes the rest.
+// createSceneRenderer's `fonts` option carries down. Given none, it loads none - a renderer
+// created without `fonts` draws no text until setFonts() is called. A set may be partial -
+// one face, or three - and the style ladder synthesizes the rest.
 //
 // Array layers must all be the same size, and the generator packs each style to its own tight
 // bounds, so every image is copied into the TOP-LEFT of a layer sized for the largest of them
-// (ATLAS_LAYER_SIZE) and the remainder is left transparent. Uvs are measured against the layer
+// (atlasLayerSize) and the remainder is left transparent. Uvs are measured against the layer
 // rather than the image, which normalizeMetrics does; nothing else has to know. The waste is a
 // few percent of a texture under two megabytes.
 //
 // Atlases load asynchronously (fetch the PNG -> ImageBitmap -> one layer of the texture)
-// before the text lane draws; the metrics JSON is bundled, so only the PNG is fetched.
+// before the text lane draws; the application hands over the metrics JSON as a value, so only
+// the PNG is fetched here.
 //
-// The metrics-only half of this - the JSON, the style-fallback ladder, ATLAS_LAYER_SIZE, and
+// The metrics-only half of this - the style-fallback ladder, atlasLayerSize, and
 // msdfFontProvider() (a FontProvider needing no device at all) - lives in msdfProvider.ts,
-// re-exported below. It's a separate module specifically so it stays importable under node (no
-// `?url` PNG import only a bundler can resolve), which is what lets the self-test - and any app
-// code that wants to measure text before a device exists - reach it directly.
+// re-exported below. It's a separate module specifically so it stays importable under node,
+// which is what lets the self-test - and any app code that wants to measure text before a
+// device exists - reach it directly.
 
 import { createAtlasBindGroupLayout } from './layouts'
 import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
@@ -38,16 +39,7 @@ import {
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 
 export type { FontStyle, MsdfAtlasSource } from '../text/msdfProvider'
-export { msdfFontProvider, atlasLayerSize, ATLAS_LAYER_SIZE } from '../text/msdfProvider'
-
-// The fallback set, statically. A `?url` import is a STRING - the four PNGs land in a consumer's
-// output as files and are fetched only if load() below actually reaches for them, so an
-// application that passes its own atlases pays four unrequested files and nothing else. An
-// `import()` here would buy no less than that and would put a second dynamic import in the
-// engine, which breaks a consumer's own Rollup: the two land in different chunks, one imports
-// Vite's `__vitePreload` helper across the boundary, and the consumer's build-import-analysis
-// then declares a helper of the same name in that module.
-import { MSDF_ATLAS_SOURCES } from '../text/msdfAtlasImages'
+export { msdfFontProvider, atlasLayerSize } from '../text/msdfProvider'
 
 export class FontBook {
   /**
@@ -93,8 +85,10 @@ export class FontBook {
   /**
    * Load a set of atlases into one array texture, each style at its STYLE_ORDER layer.
    *
-   * `sources` omitted means the bundled Inter fallback. A partial set is allowed: unnamed
-   * layers stay zeroed and unresolvable, and the style ladder falls back onto what is there.
+   * A partial set is allowed: unnamed layers stay zeroed and unresolvable, and the style ladder
+   * falls back onto what is there. `sources` omitted, or empty, is the far end of that - a book
+   * with no atlases, which fetches nothing and draws no text until setFonts() supplies some.
+   * That is what a renderer created without the `fonts` option holds.
    */
   static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<FontBook> {
     return FontBook.loadWith(device, createAtlasBindGroupLayout(device, '2d-array'), createAtlasSampler(device), sources)
@@ -115,7 +109,7 @@ export class FontBook {
     sampler: GPUSampler,
     sources?: readonly MsdfAtlasSource[],
   ): Promise<FontBook> {
-    const atlases = sources ?? MSDF_ATLAS_SOURCES
+    const atlases = sources ?? []
     const built = await buildAtlas(device, atlasLayout, sampler, atlases)
     return new FontBook(device, atlasLayout, sampler, built.bindGroup, built.texture, built.metrics, atlases)
   }
@@ -198,7 +192,10 @@ async function buildAtlas(
   sampler: GPUSampler,
   atlases: readonly MsdfAtlasSource[],
 ): Promise<{ texture: GPUTexture; bindGroup: GPUBindGroup; metrics: FontMetrics[] }> {
-  if (atlases.length === 0) throw new Error('FontBook: no atlases to load.')
+  // An empty set means no atlases. The texture below is created either way - the text
+  // pipeline's bind group needs one - but at the 1x1 atlasLayerSize gives for an empty set,
+  // with nothing fetched into it and no metrics behind it, so every style is unresolvable and
+  // Text draws nothing until setFonts() is called.
   const layerSize = atlasLayerSize(atlases)
 
   const texture = device.createTexture({

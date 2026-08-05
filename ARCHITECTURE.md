@@ -967,7 +967,7 @@ From there:
 
 | | Supplied as | Selected per node by | If not supplied |
 | --- | --- | --- | --- |
-| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | the engine's bundled Inter atlas |
+| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing until `setFonts()` |
 | Outlines | `new VectorText({ fonts })`, any `VectorFonts` | `VectorText.fonts`, the object | nothing — the engine ships no outline data |
 
 Neither has to exist before the canvas does, which is what an atlas fetched from a CDN needs.

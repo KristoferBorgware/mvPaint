@@ -6,9 +6,10 @@
 // of one per style. That win is worth as much here as there - more, if anything, since a
 // program switch on this path costs more than a pipeline switch does on the other.
 //
-// It takes the application's atlases exactly as the WebGPU book does, falls back to the bundled
-// Inter through the same dynamic import, and places each style at its STYLE_ORDER layer - so
-// which fonts a scene draws with does not depend on which render path it got.
+// It takes the application's atlases exactly as the WebGPU book does, treats an absent set the
+// same way (no atlases, no fetches, a 1x1 placeholder texture), and places each style at its
+// STYLE_ORDER layer - so which fonts a scene draws with does not depend on which render path
+// it got.
 //
 // The metrics half is not duplicated at all: it comes from text/msdfProvider.ts, which needs
 // no device and is the same object the WebGPU path resolves through.
@@ -21,7 +22,6 @@ import {
   type FontStyle,
   type MsdfAtlasSource,
 } from '../text/msdfProvider'
-import { MSDF_ATLAS_SOURCES } from '../text/msdfAtlasImages'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 import type { FontProvider, ResolvedStyle } from '../text/layout'
 
@@ -54,10 +54,12 @@ export class GlFontBook implements FontProvider {
   /**
    * Fetch each style's PNG and upload it to its STYLE_ORDER layer.
    *
-   * `sources` omitted means the bundled Inter fallback. A partial set is allowed.
+   * A partial set is allowed, and so is none at all: `sources` omitted or empty gives a book
+   * with no atlases, which fetches nothing and draws no text until setFonts() supplies some.
+   * See webgpu/FontBook.ts - the contract is identical on both paths.
    */
   static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontBook> {
-    const atlases = sources ?? MSDF_ATLAS_SOURCES
+    const atlases = sources ?? []
     const built = await buildGlAtlas(gl, atlases)
     return new GlFontBook(gl, built.texture, built.metrics, atlases)
   }
@@ -116,7 +118,10 @@ async function buildGlAtlas(
   gl: WebGL2RenderingContext,
   atlases: readonly MsdfAtlasSource[],
 ): Promise<{ texture: WebGLTexture; metrics: FontMetrics[] }> {
-  if (atlases.length === 0) throw new Error('GlFontBook: no atlases to load.')
+  // An empty set means no atlases - see the WebGPU book. texStorage3D runs either way, at the
+  // 1x1 atlasLayerSize gives for an empty set, because the text program samples a texture
+  // whether or not anything was loaded into it; nothing is fetched and no metrics come back,
+  // so every style is unresolvable.
   const layerSize = atlasLayerSize(atlases)
 
   const texture = gl.createTexture()

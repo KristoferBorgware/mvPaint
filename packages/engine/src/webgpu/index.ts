@@ -54,7 +54,7 @@ export async function createWebGpuSceneRenderer(
 
   // Load the MSDF font atlases (fetch each PNG + upload to the GPU) before building the scene,
   // so the text lane has its textures ready on the first frame. `options.fonts` is the
-  // application's set; without it the book loads the bundled Inter fallback.
+  // application's set; without it the library comes up empty and no fetch happens here at all.
   const fonts = await FontLibrary.load(gpu.device, options.fonts)
 
   // Catch the most common startup failure - an invalid render pipeline built from a

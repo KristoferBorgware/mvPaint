@@ -1,22 +1,18 @@
-// The fallback Inter MSDF metrics - and everything derivable from JUST that data, no device, no
-// PNG, no texture. Split out from FontAtlas.ts (which adds exactly those three things to turn
-// this into something the text lane can actually draw) so this half can be imported under
-// node - by the self-test, or by any app code that wants to run the shaper before a device
-// exists - without pulling in a `?url` PNG import only a bundler can resolve.
+// MSDF metrics arithmetic: everything derivable from a set of atlas JSON and nothing else - no
+// device, no PNG, no texture. Split out from FontAtlas.ts (which adds exactly those three
+// things to turn this into something the text lane can actually draw) so this half can be
+// imported under node, by the self-test or by any app code that wants to run the shaper before
+// a device exists.
 //
-// FALLBACK, not the atlas. An application supplies its own through `createSceneRenderer`'s
-// `fonts` option (see MsdfAtlasSource below); Inter is what it gets if it supplies none, so
-// that `Text` draws something on the first frame of a project that has not thought about fonts
-// yet. Everything here that names Inter is therefore prefixed FALLBACK_, and everything that
-// does not - the style ladder, the layer-size arithmetic - works on whatever it is handed.
+// THE ENGINE SHIPS NO FONT. Every function here works on whatever set it is handed and names
+// no typeface: an atlas is an application's asset, in the same way glyph outlines are (see
+// PolygonFont.ts). A renderer created without the `fonts` option has no atlases and draws no
+// text until setFonts() supplies some, so a consumer's bundle carries only the typeface that
+// consumer chose. This repository's Inter set lives with the example app, under
+// packages/example-app/public/fonts/, and reaches the engine through `fonts` like any other.
 
 import { normalizeMetrics, type AtlasLayerSize, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
 import type { FontProvider } from './layout'
-
-import interRegularJson from './fonts/inter-regular.json'
-import interBoldJson from './fonts/inter-bold.json'
-import interItalicJson from './fonts/inter-italic.json'
-import interBoldItalicJson from './fonts/inter-bold-italic.json'
 
 export type FontStyle = 'regular' | 'bold' | 'italic' | 'bold-italic'
 
@@ -32,23 +28,15 @@ export interface StyleJson {
  * One style of an MSDF atlas set, as an application supplies it: which style it is, the
  * generated metrics JSON, and a URL the PNG can be fetched from.
  *
- * The JSON is a value rather than a URL because an application's bundler already inlines it
- * (`import metrics from './fonts/inter-regular.json'`) and the shaper wants it synchronously;
- * the image is a URL because it is a quarter of a megabyte that should stay out of the JS.
- * `packages/scripts` writes exactly this pair per style.
+ * The JSON is a value rather than a URL because the shaper wants it synchronously - however
+ * the application got hold of it, by bundling the document or by fetching it before creating
+ * the renderer; the image is a URL because it is a quarter of a megabyte that should stay out
+ * of the JS. `packages/scripts` writes exactly this pair per style.
  */
 export interface MsdfAtlasSource extends StyleJson {
-  /** Where the PNG is served from - typically a bundler's `?url` import of it. */
+  /** Where the PNG is served from - a static path, a CDN, or a bundler's `?url` import. */
   url: string
 }
-
-/** The fallback set's metrics. Inter, in STYLE_ORDER. */
-export const STYLE_JSON: readonly StyleJson[] = [
-  { style: 'regular', json: interRegularJson as unknown as MsdfFontJson },
-  { style: 'bold', json: interBoldJson as unknown as MsdfFontJson },
-  { style: 'italic', json: interItalicJson as unknown as MsdfFontJson },
-  { style: 'bold-italic', json: interBoldItalicJson as unknown as MsdfFontJson },
-]
 
 /**
  * The size of one layer of a shared atlas array: big enough for the largest style in the set,
@@ -58,19 +46,22 @@ export const STYLE_JSON: readonly StyleJson[] = [
  * regular, bold, italic and bold-italic at once.
  *
  * Computed from the set rather than hard-coded, so an application's atlases - packed at
- * whatever size its charset needed - are as correct here as the bundled ones. The packer emits
- * tight bounds per style and they differ (280x285 through 306x324 for Inter at the time of
- * writing); the padding that costs is a few percent of a texture under two megabytes.
+ * whatever size its charset needed - come out right whatever they are. The packer emits tight
+ * bounds per style and they differ (280x285 through 306x324 for Inter at the time of writing);
+ * the padding that leaves is a few percent of a texture under two megabytes.
+ *
+ * An EMPTY set is 1x1. That is the no-atlases case - a renderer created without the `fonts`
+ * option - and the size the placeholder texture behind it is allocated at: the text lane binds
+ * a texture unconditionally, and one texel it never samples is the smallest thing that
+ * satisfies it.
  */
 export function atlasLayerSize(styles: readonly StyleJson[]): AtlasLayerSize {
+  if (styles.length === 0) return { width: 1, height: 1 }
   return {
     width: Math.max(...styles.map((s) => s.json.common.scaleW)),
     height: Math.max(...styles.map((s) => s.json.common.scaleH)),
   }
 }
-
-/** The fallback set's layer size. An application-supplied set computes its own. */
-export const ATLAS_LAYER_SIZE: AtlasLayerSize = atlasLayerSize(STYLE_JSON)
 
 /**
  * The style-fallback ladder shared by FontBook.resolve and msdfFontProvider: try the exact
@@ -118,8 +109,6 @@ export function resolveStyle<T>(
   throw new Error('No font atlas is loaded for any style.')
 }
 
-let defaultMsdfProvider: FontProvider | null = null
-
 /**
  * A FontProvider over MSDF metrics alone - no device, no fetch, no texture, just the same JSON
  * a FontBook would eventually feed into its atlases. For running the shaper (layoutText)
@@ -127,16 +116,15 @@ let defaultMsdfProvider: FontProvider | null = null
  * a paragraph of Text will wrap, to place the next node below it, without waiting on WebGPU
  * initialization to do so.
  *
- * Called with no argument it measures against the bundled Inter fallback, which is right for an
- * application that draws with it. Pass your own styles to measure against the atlases you will
- * actually render with - the numbers differ, and text laid out against the wrong metrics wraps
- * in the wrong place. The no-argument case is cached; a supplied set builds a fresh provider,
- * since the caller holds it for as long as it is useful.
+ * `styles` must be the set you render with. Metrics differ between atlases, and a layout is
+ * only valid against the one it was measured with.
+ *
+ * The result is not cached. Building it is one normalizeMetrics per style, and the caller holds
+ * it for as long as it is useful - the only scope that knows when the atlases behind it have
+ * been replaced.
  */
-export function msdfFontProvider(styles?: readonly StyleJson[]): FontProvider {
-  if (styles) return providerOver(styles)
-  defaultMsdfProvider ??= providerOver(STYLE_JSON)
-  return defaultMsdfProvider
+export function msdfFontProvider(styles: readonly StyleJson[]): FontProvider {
+  return providerOver(styles)
 }
 
 function providerOver(styles: readonly StyleJson[]): FontProvider {

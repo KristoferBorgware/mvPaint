@@ -31,12 +31,13 @@ out/msdf/      -> your app's font folder;  pass them to createSceneRenderer({ fo
 out/polygons/  -> your app's font folder;  build a PolygonFontBook for VectorText
 ```
 
-`packages/example-app/src/fonts/` is this repository's copy of exactly that, and
+`packages/example-app/public/fonts/` is this repository's copy of exactly that, and
 [its index.ts](../example-app/src/fonts/index.ts) is a working example of both halves.
 
-The engine's own `src/text/fonts/` is a copy too — the Inter MSDF **fallback**, what an
-application gets when it passes no `fonts` at all. Regenerating does not touch it; updating it
-is the same deliberate copy.
+The engine ships **no font at all**. An application that passes no `fonts` gets a renderer that
+draws no text until it calls `setFonts()`. The example app's copy is the only Inter in this
+repository, and it is an application's asset like any other — served from `public/`, fetched at
+runtime, swappable without a rebuild.
 
 ## Why they are out here
 

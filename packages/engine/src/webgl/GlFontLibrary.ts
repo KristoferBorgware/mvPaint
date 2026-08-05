@@ -22,7 +22,7 @@ export class GlFontLibrary implements FontFamilies {
     this.books.set(DEFAULT_FONT_FAMILY, fallback)
   }
 
-  /** Build a library holding one family - the default, from `sources` or the bundled fallback. */
+  /** Build a library holding one family - the default, from `sources`, or empty if none. */
   static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontLibrary> {
     return new GlFontLibrary(gl, await GlFontBook.load(gl, sources))
   }

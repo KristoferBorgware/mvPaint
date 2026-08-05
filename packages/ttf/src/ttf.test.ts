@@ -17,10 +17,10 @@ import { contoursFromCommands } from './glyphOutline'
 import { TtfFontBook, TtfFont } from './TtfFont'
 // The committed atlases themselves, by path rather than through a package entry point: they are
 // generated assets, not part of anybody's API, and this test exists precisely to compare against
-// the files on disk. The MSDF one is the engine's fallback copy, the outlines are the example
-// app's. Test-only - nothing here ships.
-import regularJson from '../../engine/src/text/fonts/inter-regular.json'
-import regularPolygons from '../../example-app/src/fonts/polygons/inter-regular.polygons.json'
+// the files on disk. Both are the example app's; the engine ships no font of its own.
+// Test-only - nothing here ships.
+import regularJson from '../../example-app/public/fonts/msdf/inter-regular.json'
+import regularPolygons from '../../example-app/public/fonts/polygons/inter-regular.polygons.json'
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making

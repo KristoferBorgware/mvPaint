@@ -15,8 +15,9 @@
 // Each paragraph is its own node in the scene (its own pick target, its own object in either
 // lane), not one node per page with embedded line breaks - which is why this module also
 // stacks them: every paragraph is measured with the shared shaper BEFORE either scene builds a
-// single Text or VectorText, using msdfFontProvider() (no device needed - see FontAtlas.ts), so
-// each one's y-offset is its actual wrapped height, not a guess.
+// single Text or VectorText, using msdfFontProvider over this application's own atlases (no
+// device needed - see FontAtlas.ts), so each one's y-offset is its actual wrapped height, not
+// a guess.
 //
 // The sheet is a fixed A4 rectangle, and that same measurement decides how much text goes ON
 // it: paragraphs are added until the next one would not fit, so a page is as full as a page
@@ -24,6 +25,7 @@
 // setting - which is also why the layout reports the total it actually placed.
 
 import { layoutText, msdfFontProvider, Rect, Text, type Container, type ColorInput, type TextRun, type TextRunStyle, type Vector2Like } from '@mvpaint/engine'
+import { msdfAtlases } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 
 // --- page grid ------------------------------------------------------------------------
@@ -224,7 +226,9 @@ export function loremStressLayout(): LoremLayout {
 
 function computeLayout(): LoremLayout {
   const rng = mulberry32(SEED)
-  const provider = msdfFontProvider()
+  // Measured against THIS application's atlases - the ones the renderer was created with, so
+  // the wrap points here are the wrap points on screen.
+  const provider = msdfFontProvider(msdfAtlases())
 
   let wordCount = 0
   const pages: LoremPage[] = []

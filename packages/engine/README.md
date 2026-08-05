@@ -94,10 +94,17 @@ Each family is one array texture, so the text lane issues one draw per family *c
 the packed order. A scene in a single family costs exactly what it did before, and a paragraph
 mixing all four styles is still a single draw.
 
-Omit `fonts` and you get the Inter MSDF atlas this package ships — printable ASCII in Regular,
-Bold, Italic and Bold Italic. It is a **fallback**, so that `Text` draws before a project has
-chosen a typeface, and a set you supply may be partial: give it bold alone and the style ladder
-synthesizes the rest. There is no outline fallback; `VectorText` is always given its outlines.
+This package ships **no typeface at all**. Omit `fonts` and the renderer starts with no atlases:
+nothing is fetched, no texture is uploaded, and `Text` draws nothing until you call
+`setFonts()`. A scene of rectangles issues no font request at all. A set you supply may be
+partial: give it bold alone and the style ladder synthesizes the rest. Outlines work the same
+way — `VectorText` is always given its own.
+
+Generate atlases with [`@mvpaint/scripts`](https://github.com/KristoferBorgware/mvPaint/tree/master/packages/scripts)
+and serve them as your application's assets.
+[`packages/example-app`](https://github.com/KristoferBorgware/mvPaint/tree/master/packages/example-app)
+is a working example: its Inter set lives in `public/fonts/` and is fetched at runtime, so the
+atlases can be swapped without rebuilding.
 
 For a font the application has never seen — one the user drops in, or a document that names its
 own typeface — add [`@mvpaint/ttf`](https://www.npmjs.com/package/@mvpaint/ttf), which parses a
@@ -113,7 +120,7 @@ type declarations, and no CommonJS build.
 
 MIT — see [LICENSE](./LICENSE).
 
-The fallback MSDF glyph atlases in `dist/assets` are generated from the **Inter** typeface, which is
-licensed separately under the SIL Open Font License 1.1; that licence travels with them in
-[LICENSE-Inter.txt](./LICENSE-Inter.txt) and applies to those files wherever they end up,
-including inside an application built on this package.
+That is the whole of it: this package contains no font data, so no font licence applies to
+anything it ships. Whatever typeface you generate atlases from carries its own terms, and they
+are between you and that typeface — this repository's own Inter set, and the SIL Open Font
+Licence that travels with it, lives with the example app under `public/fonts/`.

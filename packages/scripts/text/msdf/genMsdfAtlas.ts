@@ -9,10 +9,10 @@
 // atlas is the APPLICATION's asset. It hands it to createSceneRenderer through the `fonts`
 // option.
 //
-// The engine's own copy under packages/engine/src/text/fonts/ is Inter, copied in from here by
-// hand, and it exists only as a FALLBACK - what an application gets when it supplies no fonts
-// of its own. Regenerating does not touch it; updating it is a deliberate copy, exactly like
-// updating an application's.
+// The engine has no copy of its own and no fallback: an application that supplies no fonts
+// draws no text. The only Inter in this repository is the example app's, under
+// packages/example-app/public/fonts/, copied in from here by hand like any other application's
+// would be. Regenerating does not touch it; updating it is a deliberate copy.
 //
 // Each JSON is the BMFont/Hiero layout (chars, kernings, common, distanceField) plus a
 // `decoration` block (underline/strikethrough position + thickness, as em fractions read

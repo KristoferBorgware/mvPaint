@@ -246,9 +246,11 @@ export interface CreateSceneRendererOptions {
    * plus a URL for its PNG. Generate them with `packages/scripts` and keep them with your
    * application's other assets.
    *
-   * Omit it and the engine loads the Inter atlas it ships with, so text draws before an
-   * application has chosen a typeface. That fallback is fetched through a dynamic import, so
-   * supplying your own keeps those four images out of your main bundle.
+   * The engine ships NO typeface. Omit this and the renderer starts with no atlases: nothing
+   * is fetched, no texture is uploaded, and `Text` draws nothing until `setFonts()` supplies a
+   * set. For a working set to copy, see
+   * packages/example-app: its Inter atlases are served from `public/`, the shape an
+   * application's own asset folder takes.
    *
    * A partial set is fine - give it bold alone and every run resolves to bold, with regular
    * synthesized off it by the same ladder that synthesizes faux italic.

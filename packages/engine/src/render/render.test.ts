@@ -49,6 +49,11 @@ import { Scene } from '../scene/Scene'
 import { Text } from '../shapes/Text'
 import { Camera2D } from '../camera/Camera2D'
 import { msdfFontProvider } from '../text/msdfProvider'
+import type { MsdfFontJson } from '../text/msdfMetrics'
+// The engine ships no atlas, so the gather's FontProvider is built from the example app's
+// metrics - the same across-the-workspace fixture text.test.ts uses. What the gather actually
+// needs is a provider that resolves; which typeface is behind it is irrelevant here.
+import gatherRegularJson from '../../../example-app/public/fonts/msdf/inter-regular.json'
 import {
   SLOT_GRANULARITY,
   blurMarginUnits,
@@ -1028,7 +1033,10 @@ it('the draw order that makes transparency work across lanes', () => {
 it('The gather (render/gather.ts)', () => {
     // The gather takes a FontLibrary now, not a bare provider: a Text names a family and the
     // library resolves it. One family here, which is what every existing scene has.
-    const provider = { resolveFamily: () => msdfFontProvider() }
+    const provider = {
+      resolveFamily: () =>
+        msdfFontProvider([{ style: 'regular' as const, json: gatherRegularJson as unknown as MsdfFontJson }]),
+    }
     const camera = new Camera2D()
     const VIEW = { viewWidth: 200, viewHeight: 100 }
 

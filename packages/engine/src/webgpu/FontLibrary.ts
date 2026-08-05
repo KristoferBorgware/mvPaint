@@ -43,7 +43,8 @@ export class FontLibrary implements FontFamilies {
   }
 
   /**
-   * Build a library holding one family - the default, from `sources` or the bundled fallback.
+   * Build a library holding one family - the default, from `sources`, or an empty book if none
+   * were given. Either way the family exists, so nothing downstream has to test for its absence.
    * Further families arrive through setFonts() at any point afterwards.
    */
   static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<FontLibrary> {

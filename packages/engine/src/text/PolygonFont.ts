@@ -6,9 +6,10 @@
 // segments in font units, its box and advance, the kerning pairs, and the four decoration
 // metrics.
 //
-// The reader is here; the data is NOT. The engine ships one asset, the MSDF atlas, and outlines
-// are the application's to supply and to fetch when it wants them - see @mvpaint/assets for
-// this repository's, which is the shape an application's own asset module takes.
+// The reader is here; the data is NOT. That holds for every kind of font data the engine
+// touches, the MSDF atlas included: outlines are the application's to supply and to fetch when
+// it wants them, and packages/example-app/public/fonts/ is this repository's set, in the shape
+// an application's own asset folder takes.
 //
 // WHY IT IS A FILE RATHER THAN A PARSE. Flattening 'A' of Inter Regular is a fixed computation
 // with a fixed answer, and it was being done in every browser, on every load, behind a quarter

@@ -23,7 +23,7 @@ import { FONT_SRC, readFontSources } from '../fontSources'
 const HERE = dirname(fileURLToPath(import.meta.url))
 // The example app's copy: the committed artifact, and the only one there is now that the
 // generator writes to a gitignored out/.
-const ATLAS_DIR = join(HERE, '..', '..', '..', 'example-app', 'src', 'fonts', 'polygons')
+const ATLAS_DIR = join(HERE, '..', '..', '..', 'example-app', 'public', 'fonts', 'polygons')
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making

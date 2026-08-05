@@ -9,7 +9,8 @@
 // can load.
 //
 // PolygonFont is here rather than beyond the line because reading a polygon atlas needs no
-// bundler and no device - only the data, which the application supplies (see @mvpaint/assets).
+// bundler and no device - only the data, which the application supplies (packages/example-app
+// serves this repository's from public/fonts/).
 //
 // Everything here is also exported from the main entry point, so an application never has to
 // choose: import '@mvpaint/engine' and this is part of it.

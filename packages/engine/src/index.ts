@@ -9,8 +9,8 @@
 // '@mvpaint/engine/core', for the things that cannot have one. See core.ts.
 //
 // Outlines for VectorText are NOT here: a polygon atlas is an application's asset, supplied
-// through the VectorFonts interface (see text/vectorGlyphs.ts). @mvpaint/assets is this
-// repository's own, and @mvpaint/ttf is the runtime-parsing alternative.
+// through the VectorFonts interface (see text/vectorGlyphs.ts). packages/example-app serves
+// this repository's own, and @mvpaint/ttf is the runtime-parsing alternative.
 
 export * from './core'
 
