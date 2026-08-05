@@ -59,9 +59,9 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      // Runtime dependencies stay dependencies, resolved from the application's own
-      // node_modules so there is one copy of each in its build.
-      external: ['earcut', 'svgpath'],
+      // earcut stays a dependency, resolved from the application's own node_modules so there
+      // is one copy of it in the build. It is the only one the engine has.
+      external: ['earcut'],
       output: {
         // One emitted file per source module, rooted at src/ so dist/ mirrors it: src/math/
         // Vector2.ts becomes dist/math/Vector2.js, alongside the .d.ts the same path already

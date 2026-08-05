@@ -1,17 +1,18 @@
-// Normalize an SVG path 'd' string into flat polygon contours. svgpath handles the
-// grammar (absolute coords, smooth->explicit, arc->cubic, and optional matrix baking);
-// we adaptively flatten the resulting cubic/quadratic segments into line points, split
-// into one contour per subpath (closed when the subpath ends with Z).
+// Normalize an SVG path 'd' string into flat polygon contours. pathData.ts handles the grammar
+// and hands over absolute moves, lines and curves with any matrix already baked in; here those
+// curves are adaptively flattened into line points, split into one contour per subpath (closed
+// when the subpath ends with Z).
 
 import type { Vector2Like } from '../math/Vector2'
-import svgpath from 'svgpath'
+import { readPathData } from './pathData'
+import type { Mat2x3 } from './matrix'
 import type { Contour } from '../render/stroke'
 
 export interface FlattenOptions {
   /** Max chord deviation (path units) allowed when flattening curves. Default 0.25. */
   tolerance?: number
   /** 2x3 transform matrix [a,b,c,d,e,f] baked into the points (e.g. an SVG element CTM). */
-  matrix?: [number, number, number, number, number, number]
+  matrix?: Mat2x3
 }
 
 // Perpendicular distance from (px,py) to the line through (ax,ay)-(bx,by).
@@ -73,54 +74,58 @@ export function flattenQuadratic(
 export function flattenPathData(d: string, options: FlattenOptions = {}): Contour[] {
   const tol = options.tolerance ?? 0.25
 
-  let sp = svgpath(d).abs().unshort().unarc()
-  if (options.matrix) sp = sp.matrix(options.matrix).abs()
-
   const contours: Contour[] = []
   let current: Vector2Like[] | null = null
+  // The cursor, in the same space the visitor emits in - the flattener needs a segment's start
+  // point, and a path only names its end.
+  let x = 0
+  let y = 0
+  let startX = 0
+  let startY = 0
 
   const finish = (closed: boolean) => {
     if (current && current.length >= 2) contours.push({ points: current, closed })
     current = null
   }
-  // Start a contour from the current point if a draw command arrives with none open
-  // (e.g. a subpath continuing after Z without an explicit M).
-  const ensure = (x: number, y: number) => {
+  // Start a contour from the cursor when a draw command arrives with none open - a subpath
+  // continuing after Z without an explicit moveto.
+  const ensure = () => {
     if (!current) current = [{ x, y }]
+    return current
   }
 
-  sp.iterate((segment, _index, x, y) => {
-    switch (segment[0]) {
-      case 'M':
+  readPathData(
+    d,
+    {
+      moveTo(nx, ny) {
         finish(false)
-        current = [{ x: segment[1], y: segment[2] }]
-        break
-      case 'L':
-        ensure(x, y)
-        current!.push({ x: segment[1], y: segment[2] })
-        break
-      case 'H':
-        ensure(x, y)
-        current!.push({ x: segment[1], y })
-        break
-      case 'V':
-        ensure(x, y)
-        current!.push({ x, y: segment[1] })
-        break
-      case 'C':
-        ensure(x, y)
-        flattenCubic(x, y, segment[1], segment[2], segment[3], segment[4], segment[5], segment[6], tol, current!)
-        break
-      case 'Q':
-        ensure(x, y)
-        flattenQuadratic(x, y, segment[1], segment[2], segment[3], segment[4], tol, current!)
-        break
-      case 'Z':
-      case 'z':
+        current = [{ x: nx, y: ny }]
+        x = startX = nx
+        y = startY = ny
+      },
+      lineTo(nx, ny) {
+        ensure().push({ x: nx, y: ny })
+        x = nx
+        y = ny
+      },
+      cubicTo(c1x, c1y, c2x, c2y, nx, ny) {
+        flattenCubic(x, y, c1x, c1y, c2x, c2y, nx, ny, tol, ensure())
+        x = nx
+        y = ny
+      },
+      quadraticTo(cx, cy, nx, ny) {
+        flattenQuadratic(x, y, cx, cy, nx, ny, tol, ensure())
+        x = nx
+        y = ny
+      },
+      closePath() {
         finish(true)
-        break
-    }
-  })
+        x = startX
+        y = startY
+      },
+    },
+    options.matrix,
+  )
   finish(false)
 
   return contours
