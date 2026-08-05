@@ -12,10 +12,14 @@
 // that value stays the consumer's too.
 //
 // Two entries, matching the two conditions in package.json's exports: 'index' is the whole
-// engine, 'core' the device-free subset (see src/core.ts). Rollup hoists what they share into a
-// chunk both import, so nothing is duplicated between them, and the one dynamic import in the
-// engine - the WebGL2 fallback - is a chunk of its own that a consumer fetches only if a
-// browser without WebGPU reaches for it.
+// engine, 'core' the device-free subset (see src/core.ts).
+//
+// preserveModules emits one file per source module rather than concatenating them into shared
+// chunks, so dist/ mirrors src/ and a consumer's bundler prunes at module granularity: an
+// application importing Vector2 alone reaches one file and drops the rest. `sideEffects: false`
+// in package.json is the other half of that - it tells a bundler each of these files can be
+// dropped whole when nothing is imported from it. The WebGL2 fallback stays behind its dynamic
+// import, so a browser with WebGPU never fetches it.
 //
 // Vite rather than plain tsc for two things: bundling, and the declaration-file fixups below.
 
@@ -55,9 +59,16 @@ export default defineConfig({
       formats: ['es'],
     },
     rollupOptions: {
-      // Runtime dependencies stay dependencies - bundling them in would give an application
-      // that already has earcut two copies of it.
+      // Runtime dependencies stay dependencies, resolved from the application's own
+      // node_modules so there is one copy of each in its build.
       external: ['earcut', 'svgpath'],
+      output: {
+        // One emitted file per source module, rooted at src/ so dist/ mirrors it: src/math/
+        // Vector2.ts becomes dist/math/Vector2.js, alongside the .d.ts the same path already
+        // carries. The two entries keep the names package.json's exports point at.
+        preserveModules: true,
+        preserveModulesRoot: 'src',
+      },
     },
   },
 })

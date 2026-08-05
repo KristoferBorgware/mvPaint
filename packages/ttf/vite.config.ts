@@ -54,12 +54,23 @@ export default defineConfig({
     lib: {
       entry: here('src/index.ts'),
       formats: ['es'],
-      fileName: () => 'index.js',
+      // Named per module, not per package. preserveModules below turns every source file into
+      // an emitted one, and `name` is its path under src/ - so src/TtfFont.ts becomes
+      // dist/TtfFont.js and the entry becomes dist/index.js, which is what exports points at.
+      fileName: (_format, name) => `${name}.js`,
     },
     rollupOptions: {
       // opentype.js is this package's whole reason to exist and stays a dependency; the engine
       // is a peer, so there is exactly one of it in the application either way.
       external: [/^opentype\.js(\/|$)/, /^@mvpaint\/engine(\/|$)/],
+      output: {
+        // One emitted file per source module, rooted at src/ so dist/ mirrors it - the same
+        // arrangement as the engine, for the same reason: a consumer's bundler prunes per
+        // module. It also names the entry, since src/index.ts maps to dist/index.js, which is
+        // what package.json's exports point at.
+        preserveModules: true,
+        preserveModulesRoot: 'src',
+      },
     },
   },
 })
