@@ -1,5 +1,5 @@
 // MSDF text stress test: four pages of richly, randomly styled lorem ipsum in a 2x2 grid,
-// each paragraph its own Text node - the atlas half of the pair with vectorTextStressScene,
+// each paragraph its own MSDFText node - the atlas half of the pair with vectorTextStressScene,
 // which renders the identical words in the identical styles as tessellated glyph outlines
 // instead.
 //
@@ -13,7 +13,7 @@
 // batcher at the default zoom - the opposite of what a scene meant to stress-test all of them
 // should do.
 
-import { Text, type Scene } from '@mvpaint/engine'
+import { MSDFText, type Scene } from '@mvpaint/engine'
 import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT } from './loremStress'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
@@ -23,7 +23,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
   const layout = loremStressLayout()
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'msdf-stress-title',
       x: -PAGE_WIDTH,
       y: layout.gridTop + 70,
@@ -32,7 +32,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'msdf-stress-note',
       x: -PAGE_WIDTH,
       y: layout.gridTop + 26,
@@ -45,7 +45,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
     const body = addPageFrame(root, i, layout)
     page.paragraphs.forEach((paragraph, pi) => {
       root.addChild(
-        new Text({
+        new MSDFText({
           name: `msdf-stress-page-${i}-para-${pi}`,
           x: body.x,
           y: body.y + paragraph.y,

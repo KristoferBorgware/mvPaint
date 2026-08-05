@@ -195,7 +195,7 @@ async function buildAtlas(
   // An empty set means no atlases. The texture below is created either way - the text
   // pipeline's bind group needs one - but at the 1x1 atlasLayerSize gives for an empty set,
   // with nothing fetched into it and no metrics behind it, so every style is unresolvable and
-  // Text draws nothing until setFonts() is called.
+  // MSDFText draws nothing until setFonts() is called.
   const layerSize = atlasLayerSize(atlases)
 
   const texture = device.createTexture({

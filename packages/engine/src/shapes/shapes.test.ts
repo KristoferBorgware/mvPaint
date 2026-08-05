@@ -22,7 +22,7 @@ import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
 import { nextZIndex, peekZIndex, resetAutoZIndex } from './zOrder'
 import { Layer } from './Layer'
-import { Text } from './Text'
+import { MSDFText } from './MSDFText'
 import { Transformer } from './Transformer'
 import {
   ANCHOR_DIRECTION,
@@ -84,7 +84,7 @@ function corners(node: Shape): Vector2Like[] {
 // exactly what froze text following a curve while its offset advanced every frame.
 it('content epochs: how a lane finds out that a node re-shaped or re-tessellated', () => {
     const rect = new Rect({ width: 10, height: 10 })
-    const text = new Text({ text: 'hello' })
+    const text = new MSDFText({ text: 'hello' })
 
     // A transform is re-uploaded every frame from the world matrix and never packed into the
     // buffers, so moving a node must NOT trigger a rebuild of anything.
@@ -764,7 +764,7 @@ it('Transformer: the frame re-fits itself as the selection changes shape, and do
 
 //
 // It is fitted by the owner once a frame, not here (fitting has to measure the nodes, and
-// measuring a Text needs a font book this shape cannot reach), so between a change to the
+// measuring an MSDFText needs a font book this shape cannot reach), so between a change to the
 // set and the next refit there is nothing valid to report. Saying so is the point: `nodes`
 // and `currentBox` read together must never describe two different selections, or a
 // transform started in that window moves the new selection about the old one's centre.
@@ -956,7 +956,7 @@ it('getAttr/setAttr/attrs: string-keyed access to a node\'s typed fields', () =>
     assert(snapshot.x === 42 && rect.attrs.x === 100, 'attrs is a fresh snapshot each read, not a live view')
 
     // A class that declares a dedicated setFoo() alongside a plain foo field: setAttr must
-    // call it rather than assign foo directly, since some real attributes (TextBlock.runs,
+    // call it rather than assign foo directly, since some real attributes (Text.runs,
     // just below) only exist as a read-only property paired with such a method.
     class Widget extends Node {
       foo = 1
@@ -973,12 +973,12 @@ it('getAttr/setAttr/attrs: string-keyed access to a node\'s typed fields', () =>
     widget.setAttr('foo', 5)
     assert(widget.setFooCalls === 1 && widget.foo === 10, 'setAttr prefers a declared set<Key>() method over a direct assignment')
 
-    // TextBlock.runs is exactly that real case: a getter with no setter, paired with
+    // Text.runs is exactly that real case: a getter with no setter, paired with
     // setRuns() (which also invalidates the shaping cache) - a plain assignment would throw.
-    const text = new Text({ text: 'hello' })
+    const text = new MSDFText({ text: 'hello' })
     assert(text.getAttr('runs') === text.runs, 'getAttr reads a getter-only property too')
     text.setAttr('runs', [{ text: 'world' }])
-    assert(text.runs.length === 1 && text.runs[0].text === 'world', "setAttr('runs', ...) on a TextBlock goes through setRuns()")
+    assert(text.runs.length === 1 && text.runs[0].text === 'world', "setAttr('runs', ...) on a Text goes through setRuns()")
 })
 
 //
@@ -1210,9 +1210,9 @@ it('the stacking counter: what an unset zIndex means', () => {
     assert(second.zIndex === 1, 'the next is at 1, which is in front of it')
     assert(third.zIndex === 2, 'and the counter is shared by every kind of Shape, not one per class')
 
-    // Text is a Shape and draws through a different lane, which is exactly why it has to share
+    // MSDFText is a Shape and draws through a different lane, which is exactly why it has to share
     // the same counter: the two lanes resolve against one depth buffer.
-    assert(new Text({ text: 'x' }).zIndex === 3, 'Text takes its number from the same counter')
+    assert(new MSDFText({ text: 'x' }).zIndex === 3, 'MSDFText takes its number from the same counter')
 
     // The counter is what makes the ordering a promise rather than a coincidence: it only ever
     // goes up, so a shape made now is in front of every shape made before it, whatever else

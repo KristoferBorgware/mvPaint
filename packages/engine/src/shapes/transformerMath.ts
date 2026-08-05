@@ -166,7 +166,7 @@ export function worldCorners(node: Node, bounds: AABB): Vector2Like[] {
  * even though the nodes underneath genuinely were.
  *
  * `boundsOf` supplies each node's LOCAL bounds (Shape.localBounds() for a mesh shape, the
- * shaped text bounds for a Text), returning null for anything with nothing to measure -
+ * shaped text bounds for an MSDFText), returning null for anything with nothing to measure -
  * `nodes[0]` still orients the box even if it happens to be one of those, since
  * orientation only needs its rotation, not its bounds.
  */

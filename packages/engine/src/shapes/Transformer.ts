@@ -289,7 +289,7 @@ export class Transformer extends Container {
    * Commits a new set and announces it. Only ever called with a genuinely different list.
    *
    * The box goes with it, because it was fitted to the set being replaced and cannot be
-   * refitted here: fitting needs to measure the nodes, and measuring a Text needs a font
+   * refitted here: fitting needs to measure the nodes, and measuring an MSDFText needs a font
    * book this shape has no access to (see update(), which the owner calls once a frame).
    *
    * Dropping it is what keeps `nodes` and `currentBox` from disagreeing. Left in place, the
@@ -345,7 +345,7 @@ export class Transformer extends Container {
 
   /**
    * Re-fits the frame to the attached nodes and re-lays its handles out. `box` is
-   * recomputed by the caller (it needs a font book to measure Text), and `zoom` keeps the
+   * recomputed by the caller (it needs a font book to measure MSDFText), and `zoom` keeps the
    * handles a constant size on screen. Call once per frame: the nodes may be moving.
    */
   update(box: OrientedBox | null, zoom: number): void {

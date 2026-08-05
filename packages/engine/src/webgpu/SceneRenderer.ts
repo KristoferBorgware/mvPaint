@@ -40,7 +40,7 @@
 import type { Vector2Like } from '../math/Vector2'
 import { Shape } from '../shapes/Shape'
 import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import { Camera2D } from '../camera/Camera2D'
 import type { CaptureView } from '../render/capture'
 import { Scene } from '../scene/Scene'
@@ -138,7 +138,7 @@ export class SceneRenderer {
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
   // set - so draw() can tell whether culling's output actually changed this frame.
   private visibleMeshShapes: readonly Shape[] = []
-  private visibleTexts: readonly Text[] = []
+  private visibleTexts: readonly MSDFText[] = []
   private visibleImages: readonly Image[] = []
   // Traversal, depth assignment, culling and the overlay/opacity splits - everything the
   // frame decides before it draws anything. It owns last frame's answer and hands it back
@@ -164,7 +164,7 @@ export class SceneRenderer {
     this.frameUniforms = new FrameUniforms(device, frameLayout)
     this.batcher = new MeshBatcher(device, objectLayout)
 
-    // Text lane: its own pipeline (adds the atlas bind group) and batcher, sharing group(0)
+    // text lane: its own pipeline (adds the atlas bind group) and batcher, sharing group(0)
     // frame uniforms, group(1) object storage layout, and the MSAA sample count.
     const textPipelineLayout = createTextPipelineLayout(device, frameLayout, objectLayout, fonts.atlasLayout)
     this.textPipeline = createTextPipeline(device, format, SAMPLE_COUNT, textPipelineLayout)
@@ -181,7 +181,7 @@ export class SceneRenderer {
     this.imageBatcher = new ImageBatcher(device, objectLayout)
 
     // Shadow lane: blurred silhouettes are baked once into a shared atlas (see
-    // webgpu/ShadowAtlas.ts), then drawn as one quad each in a single call. Text is not
+    // webgpu/ShadowAtlas.ts), then drawn as one quad each in a single call. MSDFText is not
     // part of this - it duplicates its glyphs instead (see text/layout.ts).
     this.shadowAtlas = new ShadowAtlas(device)
     const shadowObjectLayout = createObjectBindGroupLayout(device)
@@ -286,7 +286,7 @@ export class SceneRenderer {
 
   /**
    * Every visible, pickable shape meeting a world-space rectangle - what a marquee
-   * selects. Goes through the renderer so Text is measured against the loaded atlases.
+   * selects. Goes through the renderer so MSDFText is measured against the loaded atlases.
    */
   nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
     return nodesInBox(this.scene, from, to, { fonts: this.fonts, ...options })
@@ -297,7 +297,7 @@ export class SceneRenderer {
     this.geometryDirty = true
   }
 
-  /** Force a text-lane geometry rebuild on the next draw (call after adding/removing Text). */
+  /** Force a text-lane geometry rebuild on the next draw (call after adding/removing MSDFText). */
   markTextGeometryDirty(): void {
     this.textGeometryDirty = true
   }
@@ -320,7 +320,7 @@ export class SceneRenderer {
     // Images stay in: an Image emits its quad from buildGeometry() precisely so it has a
     // silhouette to bake, even though the mesh lane does not DRAW it (see the split below).
     // The shadow is the quad's, not the alpha channel's - see Image's header.
-    const meshShapes = ordered.filter((s) => !(s instanceof Text))
+    const meshShapes = ordered.filter((s) => !(s instanceof MSDFText))
     // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
     // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
     this.shadowAtlas.update(encoder, meshShapes)
@@ -388,8 +388,8 @@ export class SceneRenderer {
       {
         scene: this.scene,
         camera,
-        // Culling measures Text, which needs metrics and nothing else - the atlas is not
-        // consulted here (see Text.shaped).
+        // Culling measures MSDFText, which needs metrics and nothing else - the atlas is not
+        // consulted here (see MSDFText.shaped).
         fonts: this.fonts,
         viewWidth,
         viewHeight,

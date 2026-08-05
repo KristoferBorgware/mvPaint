@@ -1,4 +1,4 @@
-// Text shaping: turn styled runs into positioned quads for the text lane. It resolves each run
+// MSDFText shaping: turn styled runs into positioned quads for the text lane. It resolves each run
 // to a font atlas (synthesizing a missing weight/slant as faux bold/italic), lays glyphs out
 // with kerning, letter-spacing, and baseline shift, greedily wraps to an optional max width,
 // breaks on '\n', aligns each line (left/center/right/justify), and emits quads back-to-front:
@@ -32,7 +32,7 @@ export interface TextGradient {
 }
 
 /**
- * Text's drop shadow: a duplicate of the run's glyphs, drawn behind them at an offset in
+ * MSDFText's drop shadow: a duplicate of the run's glyphs, drawn behind them at an offset in
  * the shadow's colour. Deliberately NOT the canvas blur model the mesh lane's Shape.shadow*
  * properties implement - a glyph has no rasterized silhouette to blur here, so text takes
  * the cheap, crisp duplicate instead. `offsetY` is downward-positive, matching Shape's.
@@ -120,18 +120,18 @@ export interface FontProvider {
   resolve(style: FontStyle): ResolvedStyle
 }
 
-/** The family name a Text node gets when it asks for none, and the one every other falls back to. */
+/** The family name an MSDFText node gets when it asks for none, and the one every other falls back to. */
 export const DEFAULT_FONT_FAMILY = 'default'
 
 /**
- * The font families a scene can draw with - what a `Text` node's `fontFamily` is resolved
- * through, and the reason two Text nodes can be different typefaces.
+ * The font families a scene can draw with - what an `MSDFText` node's `fontFamily` is resolved
+ * through, and the reason two MSDFText nodes can be different typefaces.
  *
  * Device-free like FontProvider itself, and for the same reason: shaping reads metrics and an
  * atlas index, so text can be measured, wrapped, culled and hit-tested with no renderer at all.
  * The GPU-owning implementation (webgpu/FontLibrary.ts) adds the textures.
  *
- * A family is named rather than handed over as an object so that a `Text` stays plain data -
+ * A family is named rather than handed over as an object so that an `MSDFText` stays plain data -
  * serializable, settable through setAttr, and constructible before any atlas has finished
  * loading. An unknown name resolves to the default family rather than failing, which is what
  * makes a node built while its atlas is still in flight draw something now and the right thing

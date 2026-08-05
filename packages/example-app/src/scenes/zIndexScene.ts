@@ -7,13 +7,13 @@
 // overriding it:
 //
 //   made later is in front      the default, with nothing set anywhere
-//   the lane does not decide    a mesh shape and a Text obey the same rule as two shapes
+//   the lane does not decide    a mesh shape and an MSDFText obey the same rule as two shapes
 //   one assignment overrides    front.zIndex = back.zIndex + 1
 //   bring one to the front      shape.zIndex = nextZIndex(), live
 //   send one behind everything  a negative value, which the counter can never reach
 //   slot one between two        (a.zIndex + b.zIndex) / 2 - the numbers are not integers
 
-import { Circle, Rect, Text, nextZIndex, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Rect, MSDFText, nextZIndex, type ColorInput, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL, YELLOW, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
@@ -24,17 +24,17 @@ import type { SceneContent } from './types'
 // A panel is 204 tall, measured down from its heading: 17 of heading, a 24 gap, a 130 band of
 // shapes, a 20 gap, then 13 of caption. The two rows are placed so the pair straddles y = 0.
 const PANEL_H = 204
-const ROW = [227, -23] // each row's heading baseline (top edge - Text hangs downwards)
+const ROW = [227, -23] // each row's heading baseline (top edge - MSDFText hangs downwards)
 const COL = [-520, -150, 250] // each column's left edge
 const BODY = -41 // top of the band of shapes, relative to the row
 const BAND = 130 // its height, so the band runs ROW-171 .. ROW-41
 const FOOT = -(PANEL_H - 13) // caption baseline, clear of the band
 
-const heading = (col: number, row: number, text: string): Text =>
-  new Text({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
+const heading = (col: number, row: number, text: string): MSDFText =>
+  new MSDFText({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
 
-const caption = (x: number, row: number, text: string): Text =>
-  new Text({ x, y: ROW[row] + FOOT, text, style: { fontSize: 13, color: SLATE } })
+const caption = (x: number, row: number, text: string): MSDFText =>
+  new MSDFText({ x, y: ROW[row] + FOOT, text, style: { fontSize: 13, color: SLATE } })
 
 /** A card with a white keyline, so an overlap reads as one card over another. */
 const card = (x: number, y: number, width: number, height: number, fill: ColorInput): Rect =>
@@ -55,7 +55,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
   // shows enough of itself to be recognised. Both cells of every pair below use this exact
   // geometry, so the only thing that ever differs between two cells is the stacking.
   const word = (cx: number, row: number) =>
-    new Text({ x: cx - 52, y: ROW[row] + BODY - BAND / 2 + 18, text: 'ABC', style: { fontSize: 34, fontStyle: 'bold', color: NAVY } })
+    new MSDFText({ x: cx - 52, y: ROW[row] + BODY - BAND / 2 + 18, text: 'ABC', style: { fontSize: 34, fontStyle: 'bold', color: NAVY } })
   const disc = (cx: number, row: number, fill: ColorInput) =>
     new Circle({ x: cx + 22, y: ROW[row] + BODY - BAND / 2, radius: 34, fill })
 
@@ -71,7 +71,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
 
   // --- the lane does not decide ---------------------------------------------------------
   //
-  // A Text draws through a different pipeline than a Circle, and would win every overlap if
+  // A MSDFText draws through a different pipeline than a Circle, and would win every overlap if
   // stacking came from the order the lanes happen to be submitted in. It does not: both
   // resolve through one depth buffer, so the two cells differ only in which was made first.
   root.addChild(heading(1, 0, 'The lane does not decide'))

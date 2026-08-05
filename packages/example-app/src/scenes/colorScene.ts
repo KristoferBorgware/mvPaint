@@ -8,7 +8,7 @@
 // The middle column of every pair is the tuple form, so a seam is always between two swatches
 // that are touching.
 
-import { Circle, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -60,7 +60,7 @@ export function buildColorScene(scene: Scene): SceneContent {
   const root = scene.root
 
   root.addChild(
-    new Text({
+    new MSDFText({
       x: -560,
       y: 356,
       text: 'Every colour written two ways',
@@ -68,7 +68,7 @@ export function buildColorScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       x: -560,
       y: 322,
       text: 'each pair is one swatch as a string and the same colour as the tuple - a seam between them would be a parser bug',
@@ -111,7 +111,7 @@ export function buildColorScene(scene: Scene): SceneContent {
     )
 
     root.addChild(
-      new Text({
+      new MSDFText({
         x: x + SWATCH_W * 2 + GAP + 12,
         y: y - 7,
         text: row.written,
@@ -125,19 +125,19 @@ export function buildColorScene(scene: Scene): SceneContent {
   // A string is accepted wherever a colour is, not only on `fill` - so one of each, to prove
   // the property rather than the parser. If any of these had been missed it would draw black.
   const y = -300
-  root.addChild(new Text({ x: -560, y: y + 74, text: 'and everywhere else a colour goes', style: { fontStyle: 'bold', fontSize: 17, color: DARK } }))
+  root.addChild(new MSDFText({ x: -560, y: y + 74, text: 'and everywhere else a colour goes', style: { fontStyle: 'bold', fontSize: 17, color: DARK } }))
 
   root.addChild(
     new Circle({ name: 'c-stroke', x: -470, y: y - 10, radius: 30, fill: 'transparent', stroke: 'seagreen', strokeWidth: 8 }),
   )
-  root.addChild(new Text({ x: -520, y: y - 56, text: 'stroke', style: { fontSize: 13, color: SLATE } }))
+  root.addChild(new MSDFText({ x: -520, y: y - 56, text: 'stroke', style: { fontSize: 13, color: SLATE } }))
 
   const shadowed = new Rect({ name: 'c-shadow', x: -350, y: y + 20, width: 60, height: 60, fill: 'white', cornerRadius: 8 })
   shadowed.shadowColor = 'rgb(0 0 0 / 70%)'
   shadowed.shadowBlur = 14
   shadowed.shadowOffsetY = 8
   root.addChild(shadowed)
-  root.addChild(new Text({ x: -360, y: y - 56, text: 'shadowColor', style: { fontSize: 13, color: SLATE } }))
+  root.addChild(new MSDFText({ x: -360, y: y - 56, text: 'shadowColor', style: { fontSize: 13, color: SLATE } }))
 
   const gradient = new Rect({ name: 'c-gradient', x: -180, y: y + 20, width: 120, height: 60, cornerRadius: 8 })
   gradient.fillPriority = 'linear-gradient'
@@ -148,10 +148,10 @@ export function buildColorScene(scene: Scene): SceneContent {
     { offset: 1, color: '#8a2be2' },
   ]
   root.addChild(gradient)
-  root.addChild(new Text({ x: -180, y: y - 56, text: 'gradient stops', style: { fontSize: 13, color: SLATE } }))
+  root.addChild(new MSDFText({ x: -180, y: y - 56, text: 'gradient stops', style: { fontSize: 13, color: SLATE } }))
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'c-text',
       x: 10,
       y: y + 14,
@@ -165,7 +165,7 @@ export function buildColorScene(scene: Scene): SceneContent {
       },
     }),
   )
-  root.addChild(new Text({ x: 10, y: y - 56, text: 'colour, highlight, shadow', style: { fontSize: 13, color: SLATE } }))
+  root.addChild(new MSDFText({ x: 10, y: y - 56, text: 'colour, highlight, shadow', style: { fontSize: 13, color: SLATE } }))
 
   return {}
 }

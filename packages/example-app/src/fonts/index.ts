@@ -6,7 +6,7 @@
 // decides which faces the application actually draws with. Regenerating does not silently change
 // what ships.
 //
-//   public/fonts/msdf/       one PNG + metrics JSON per style - what `Text` samples
+//   public/fonts/msdf/       one PNG + metrics JSON per style - what `MSDFText` samples
 //   public/fonts/polygons/   one JSON per style, glyph outlines as data - what `VectorText`
 //                            tessellates
 //

@@ -11,22 +11,22 @@
 // Everything sits over a set of bars, because transparency you cannot see through is just a
 // paler colour - the bars are what make the difference visible.
 
-import { Circle, Container, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Container, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
 const PANEL_H = 204
-const ROW = [227, -23] // each row's heading baseline (Text hangs downwards from its y)
+const ROW = [227, -23] // each row's heading baseline (MSDFText hangs downwards from its y)
 const COL = [-520, 40] // each column's left edge
 const BODY = -41 // top of the band of shapes, relative to the row
 const BAND = 130
 const FOOT = -(PANEL_H - 13)
 
-const heading = (col: number, row: number, text: string): Text =>
-  new Text({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
+const heading = (col: number, row: number, text: string): MSDFText =>
+  new MSDFText({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
 
-const caption = (x: number, row: number, text: string): Text =>
-  new Text({ x, y: ROW[row] + FOOT, text, style: { fontSize: 13, color: SLATE } })
+const caption = (x: number, row: number, text: string): MSDFText =>
+  new MSDFText({ x, y: ROW[row] + FOOT, text, style: { fontSize: 13, color: SLATE } })
 
 /**
  * The backdrop a panel's shapes are laid over. Diagonal bars rather than a flat colour: a
@@ -82,7 +82,7 @@ export function buildOpacityScene(scene: Scene): SceneContent {
 
   // --- every lane obeys it, and so does the shadow ------------------------------------------
   //
-  // A mesh shape, a Text and a shadowed shape all at the same opacity. They are drawn by three
+  // A mesh shape, an MSDFText and a shadowed shape all at the same opacity. They are drawn by three
   // different pipelines and the shadow by a fourth, so this is the only panel that proves the
   // property is the object's rather than any one lane's. The shadow fading WITH its caster is
   // the part worth watching: a half-transparent shape casting a solid shadow reads as two
@@ -91,11 +91,11 @@ export function buildOpacityScene(scene: Scene): SceneContent {
   bars(root, 0, 1, 440)
   root.addChild(new Circle({ name: 'lane-mesh', x: COL[0] + 55, y: ROW[1] + BODY - BAND / 2, radius: 52, fill: TEAL, opacity: 0.45 }))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'lane-text',
       x: COL[0] + 130,
       y: ROW[1] + BODY - 34,
-      text: 'Text',
+      text: 'MSDFText',
       style: { fontSize: 62, fontStyle: 'bold', color: NAVY },
       opacity: 0.45,
     }),

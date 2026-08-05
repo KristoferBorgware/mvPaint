@@ -46,7 +46,7 @@ import { imageShaderCode } from '../webgpu/shaders/image.wgsl'
 import { shadowQuadShaderCode } from '../webgpu/shaders/shadowQuad.wgsl'
 import { SceneGather, type GatherInput } from './gather'
 import { Scene } from '../scene/Scene'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import { Camera2D } from '../camera/Camera2D'
 import { msdfFontProvider } from '../text/msdfProvider'
 import type { MsdfFontJson } from '../text/msdfMetrics'
@@ -1031,7 +1031,7 @@ it('the draw order that makes transparency work across lanes', () => {
 // overlay] with the two boundaries in the right place, that culling drops shapes and their
 // depths together, and that the fast path hands back the SAME arrays rather than equal ones.
 it('The gather (render/gather.ts)', () => {
-    // The gather takes a FontLibrary now, not a bare provider: a Text names a family and the
+    // The gather takes a FontLibrary now, not a bare provider: an MSDFText names a family and the
     // library resolves it. One family here, which is what every existing scene has.
     const provider = {
       resolveFamily: () =>
@@ -1057,10 +1057,10 @@ it('The gather (render/gather.ts)', () => {
     {
       const scene = new Scene()
       // Deliberately mixed: a solid rect (opaque), a half-transparent one (translucent), a
-      // Text (its own lane, never opaque) and an overlay handle (the tail).
+      // MSDFText (its own lane, never opaque) and an overlay handle (the tail).
       const solid = new Rect({ width: 10, height: 10, fill: [1, 0, 0, 1] })
       const faded = new Rect({ width: 10, height: 10, fill: [0, 1, 0, 0.4] })
-      const label = new Text({ text: 'hi' })
+      const label = new MSDFText({ text: 'hi' })
       const handle = new Rect({ width: 4, height: 4, fill: [0, 0, 1, 1] })
       handle.overlay = true
       for (const n of [solid, faded, label, handle]) scene.root.addChild(n)
@@ -1068,14 +1068,14 @@ it('The gather (render/gather.ts)', () => {
       const g = new SceneGather().run(input(scene), false)
 
       assert(g.ordered.length === 4, 'the gather ranks every shape in the scene, whatever lane it lands in')
-      assert(g.texts.length === 1 && g.texts[0] === label, 'Text buckets into the text lane')
+      assert(g.texts.length === 1 && g.texts[0] === label, 'MSDFText buckets into the text lane')
       assert(g.images.length === 0, 'nothing buckets into the image lane here')
       assert(
         g.visibleMeshShapes.length === 3 && !g.visibleMeshShapes.includes(label as unknown as Rect),
-        'every other drawable buckets into the mesh lane, and Text does not',
+        'every other drawable buckets into the mesh lane, and MSDFText does not',
       )
 
-      // Ranks are scene-wide: the Text sits at rank 2 of 4 even though it is the only member of
+      // Ranks are scene-wide: the MSDFText sits at rank 2 of 4 even though it is the only member of
       // its own lane, which is what lets the two lanes interleave under one depth test.
       assert(near(g.textDepths[0], depthForRank(2, 4)), "a lane's depths are its members' SCENE-wide ranks")
       assert(g.depths.get(label) === g.textDepths[0], 'the depth map and the lane-aligned array agree')
@@ -1192,7 +1192,7 @@ it('the opacity fields sit in real padding, and collide with nothing', () => {
     assert(OBJECT_OPACITY_OFFSET + 4 <= OBJECT_STOP_COLORS_OFFSET, 'and clear of the stop colours')
     assert(OBJECT_STRIDE === 304, 'the mesh record did not grow')
 
-    // Text mirrors the mesh layout exactly, which is why they share an offset.
+    // MSDFText mirrors the mesh layout exactly, which is why they share an offset.
     assert(TEXT_OBJECT_OPACITY_OFFSET === 132, 'the text opacity sits at 132 too')
     assert(TEXT_OBJECT_STRIDE === 320, 'and the text record did not grow')
 

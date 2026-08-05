@@ -87,7 +87,7 @@ leaf yields nothing.
 `Shape extends Node` adds everything that affects rendering: size, `zIndex`, `visible`,
 `pickable`, `draggable`, `opacity`, `overlay`, the full fill/stroke vocabulary, and the shadow
 fields. It is the base of every drawable — `Rect`, `Circle`, `Polyline`, `Path`, `Image`,
-`CustomShape`, and `TextBlock` with its two subclasses `Text` and `VectorText`.
+`CustomShape`, and `Text` with its two subclasses `MSDFText` and `VectorText`.
 
 `Group extends Container` (`shapes/Group.ts`) draws nothing and emits no geometry.
 It contributes a matrix in the middle of the chain, which world-matrix composition already
@@ -545,7 +545,7 @@ assigned **scene-wide, before culling**, so ranks never shift as content scrolls
 **Bucketing into lanes**, in one pass rather than three filters:
 
 ```ts
-if (shape instanceof Text)       texts.push(shape)
+if (shape instanceof MSDFText)   texts.push(shape)
 else if (shape instanceof Image) images.push(shape)
 else { meshShapes.push(shape); meshDepths.push(depth) }
 ```
@@ -878,7 +878,7 @@ epoch.
 
 ### Text content
 
-`TextBlock.invalidateShaping()` bumps the text epoch and calls the subclass's
+`Text.invalidateShaping()` bumps the text epoch and calls the subclass's
 `dropShapingCache()`. It runs on `setRuns`, `setText`, or `markDirty()` after editing a layout
 option.
 
@@ -898,7 +898,7 @@ only in *which* of their values sit where.
 **Shape** — repacks on everything `buildGeometry()` reads (see above). Free: the transform,
 `zIndex` via depth, `fill` and `stroke` colors, and every gradient parameter.
 
-**Text** — repacks on very nearly everything: the string and its runs; `fontStyle`, `fontSize`,
+**MSDFText** — repacks on very nearly everything: the string and its runs; `fontStyle`, `fontSize`,
 `letterSpacing`, `baselineShift`; `align`, `maxWidth`, `lineHeight`, `direction`,
 `orientation`, `textPath`; `underline`, `strikethrough` and `highlight`, which add and remove
 whole quads; `shadow` and `glow`, which add a duplicate copy of every glyph; faux italic, whose
@@ -908,7 +908,7 @@ transform, `zIndex` via depth, per-run gradient parameters, and `strokeColor`, `
 
 Two properties invert exactly between the lanes:
 
-| | Shape | Text |
+| | Shape | MSDFText |
 | --- | --- | --- |
 | `strokeWidth` | **repacks** — the stroker emits real triangles for the outline | **free** — a distance threshold the fragment shader compares against |
 | fill color | **free** — `fillColor` in the object record | **repacks** — packed into every vertex |
@@ -957,7 +957,7 @@ and casts a blurred shadow baked from the letterforms.
 ### Where glyphs come from
 
 Both paths read **generated assets** and neither parses a font file. The engine's dependency
-list is `earcut` and `svgpath`; turning a `.ttf` into something drawable happens offline in
+list is `earcut` alone; turning a `.ttf` into something drawable happens offline in
 `packages/scripts`.
 
 **Both are the application's, and only one has a fallback.** Atlases are generated from font

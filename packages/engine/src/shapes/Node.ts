@@ -17,7 +17,7 @@
 // getAttr()/setAttr() read and write any of those same typed fields by string key, so code
 // that only knows a property's name at runtime (a change-event dispatcher, a property
 // inspector, deserialization) doesn't need a per-shape-type switch. setAttr() prefers a
-// set<Key>() method when the class declares one - some attributes (TextBlock's runs) are
+// set<Key>() method when the class declares one - some attributes (Text's runs) are
 // read-only properties paired with a method that also invalidates a cache, so a plain
 // assignment would either miss that or throw. attrs is a plain-object snapshot built from
 // attrKeys(), which each class overrides to append its own attribute names to its parent's;

@@ -12,7 +12,7 @@
 // in the same scene-wide order as everything else - none of which is written below, because
 // none of it has to be.
 
-import { CustomShape, Text, type CustomShapeOptions, type Scene, type ShapeContext, type Vector2Like } from '@mvpaint/engine'
+import { CustomShape, MSDFText, type CustomShapeOptions, type Scene, type ShapeContext, type Vector2Like } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -182,12 +182,12 @@ class Wave extends CustomShape {
 
 // --- the scene ---------------------------------------------------------------------------
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 15, color: SLATE } })
+function label(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 15, color: SLATE } })
 }
 
-function caption(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 13, color: SLATE } })
+function caption(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 13, color: SLATE } })
 }
 
 export function buildCustomShapeScene(scene: Scene): SceneContent {
@@ -285,7 +285,7 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   root.addChild(label(40, -368, 'moving or recolouring never re-runs describe()'))
 
   root.addChild(
-    new Text({
+    new MSDFText({
       x: -500,
       y: 344,
       text: 'Custom shapes',
@@ -295,7 +295,7 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   // 56 below the title's own y, not 34: a 40px line reaches ~50 below where it is anchored,
   // so anything closer than that lands in the title's descenders.
   root.addChild(
-    new Text({
+    new MSDFText({
       x: -500,
       y: 288,
       text: 'five classes, each one a CustomShape that draws its own contour',

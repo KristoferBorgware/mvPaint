@@ -10,7 +10,7 @@
 // transformed into world space (a forward transform, no matrix inverse) either clears
 // the point immediately or is followed by the exact (inverse + per-triangle) test - most
 // shapes in a scene are nowhere near a given click, so this skips the expensive path for
-// nearly all of them. Text is tested against its shaped quads' bounding box (glyph-
+// nearly all of them. MSDFText is tested against its shaped quads' bounding box (glyph-
 // accurate hit-testing isn't worth the cost here) - a single bounds check either way, so
 // there's no equivalent cheap/exact split to make there.
 
@@ -22,7 +22,7 @@ import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
 import { Layer } from '../shapes/Layer'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import type { FontFamilies } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
 
@@ -56,7 +56,7 @@ export function hitTestShape(shape: Shape, worldX: number, worldY: number): bool
 }
 
 /**
- * The union of a shaped text's glyph+decoration quads, in the Text node's own local space.
+ * The union of a shaped text's glyph+decoration quads, in the MSDFText node's own local space.
  * All four corners go through the quad's own transform, so italic and curved text are
  * bounded by where their glyphs actually are rather than by the boxes they started as.
  */
@@ -77,14 +77,14 @@ export function textLocalBounds(shaped: { quads: readonly QuadBounds[] }): AABB 
 }
 
 /** True if the world point falls inside the text's shaped bounding box. */
-export function hitTestText(text: Text, fonts: FontFamilies, worldX: number, worldY: number): boolean {
+export function hitTestText(text: MSDFText, fonts: FontFamilies, worldX: number, worldY: number): boolean {
   const bounds = textLocalBounds(text.shaped(fonts.resolveFamily(text.fontFamily)))
   if (!bounds.valid()) return false
   return bounds.contains(worldToLocal(text, worldX, worldY))
 }
 
 /**
- * Every Shape (mesh shape or Text) matching `predicate`, stable-sorted ascending by
+ * Every Shape (mesh shape or MSDFText) matching `predicate`, stable-sorted ascending by
  * zIndex (Array.prototype.sort is stable per spec, so ties keep scene-traversal order).
  * The renderer and pickNode() both build on this so "what's on top" and "what's under
  * the depth test" can never disagree.
@@ -114,7 +114,7 @@ function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean)
 }
 
 /**
- * Every visible Shape (mesh shape or Text) in the scene, ascending by zIndex (ties keep
+ * Every visible Shape (mesh shape or MSDFText) in the scene, ascending by zIndex (ties keep
  * scene order) - rank 0 is furthest back. Includes non-pickable shapes (e.g. a
  * selection-highlight overlay still needs a correct depth to render at).
  *
@@ -144,14 +144,14 @@ export function depthForRank(rank: number, count: number): number {
  * order the renderer derives depth from (see collectZOrder), front-to-back (highest
  * zIndex/rank first), so picking always matches what's visually on top. Invisible and
  * non-pickable nodes (see `pickable`) are skipped. `fonts` may be omitted when the
- * scene has no Text nodes worth testing (e.g. before the atlases have loaded) - text
+ * scene has no MSDFText nodes worth testing (e.g. before the atlases have loaded) - text
  * candidates are then skipped rather than matched.
  */
 export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: FontFamilies): PickableNode | null {
   const ordered = collectSortedShapes(scene, (shape) => shape.visible && shape.pickable)
   for (let i = ordered.length - 1; i >= 0; i--) {
     const node = ordered[i]
-    if (node instanceof Text) {
+    if (node instanceof MSDFText) {
       if (fonts && hitTestText(node, fonts, worldX, worldY)) return node
     } else if (hitTestShape(node, worldX, worldY)) {
       return node
@@ -161,20 +161,20 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: F
 }
 
 /**
- * A node's own local-space bounds: a shape's triangles, a Text's shaped quads, or - for a
+ * A node's own local-space bounds: a shape's triangles, an MSDFText's shaped quads, or - for a
  * Group, which has no extent of its own - whatever it currently holds, measured through
  * this same function so text inside a group is bounded by its glyphs like text anywhere
  * else.
  */
 export function localBoundsOf(node: TransformableNode, fonts: FontFamilies): AABB {
   if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fonts))
-  return node instanceof Text ? textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily))) : shapeLocalBounds(node)
+  return node instanceof MSDFText ? textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily))) : shapeLocalBounds(node)
 }
 
 // The resolver a group measures its contents with. It never sees a nested Group - the
 // group walks into those itself, composing their matrices as it goes - so this only has to
 // answer for leaves, and return null for anything that is not one.
 function nodeLocalBounds(node: Node, fonts: FontFamilies): AABB | null {
-  if (node instanceof Text) return textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily)))
+  if (node instanceof MSDFText) return textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily)))
   return node instanceof Shape ? shapeLocalBounds(node) : null
 }

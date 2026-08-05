@@ -19,16 +19,16 @@
 // width by a number. The ribbon is built through the transform instead, which gets every
 // direction right at once.
 
-import { Circle, Group, Path, Rect, Text, type Scene, type StrokeAlign } from '@mvpaint/engine'
+import { Circle, Group, Path, Rect, MSDFText, type Scene, type StrokeAlign } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 15, color: SLATE } })
+function label(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 15, color: SLATE } })
 }
 
-function caption(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 13, color: SLATE } })
+function caption(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 13, color: SLATE } })
 }
 
 /** A star, centred on its own origin - corners sharp enough to show what a join does. */
@@ -67,7 +67,7 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   const root = scene.root
 
   root.addChild(
-    new Text({ x: -520, y: 340, text: 'Stroke and scale', style: { fontStyle: 'bold', fontSize: 40, color: DARK } }),
+    new MSDFText({ x: -520, y: 340, text: 'Stroke and scale', style: { fontStyle: 'bold', fontSize: 40, color: DARK } }),
   )
   // 56 below the title's own y, not 34: a 40px line reaches ~50 below where it is anchored,
   // so anything closer than that lands in the title's descenders.

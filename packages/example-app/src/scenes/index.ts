@@ -66,14 +66,14 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'text',
     title: 'MSDF text',
     description:
-      'Text lane: four vertices per glyph sampling a shared MSDF atlas. Four Inter styles from one atlas array, per-run styling within a single node (size, colour, gradient, outline, highlight, decorations, baseline shift), wrapping, alignment and justification, RTL and vertical flow.',
+      'text lane: four vertices per glyph sampling a shared MSDF atlas. Four Inter styles from one atlas array, per-run styling within a single node (size, colour, gradient, outline, highlight, decorations, baseline shift), wrapping, alignment and justification, RTL and vertical flow.',
     build: buildTextScene,
   },
   {
     id: 'vector-text',
     title: 'Outline text',
     description:
-      'VectorText: glyph outlines tessellated into the mesh lane rather than sampled from an MSDF atlas. Same shaper as the Text lane, so runs and block layout match; what only this path gives you is a real blurred shadow cast from the letterforms and glyph-accurate hit testing. Outlines come from polygon atlases generated offline (~200 kB, fetched on first open), which is why the engine ships no font parser.',
+      'VectorText: glyph outlines tessellated into the mesh lane rather than sampled from an MSDF atlas. Same shaper as the text lane, so runs and block layout match; what only this path gives you is a real blurred shadow cast from the letterforms and glyph-accurate hit testing. Outlines come from polygon atlases generated offline (~200 kB, fetched on first open), which is why the engine ships no font parser.',
     prepare: prepareVectorTextScene,
     build: buildVectorTextScene,
   },
@@ -89,7 +89,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'text-path',
     title: 'Text on a path',
     description:
-      'Path-driven layout: the curve supplies each glyph a position and a rotation. Circles, arcs and raw SVG path data as the driving curve, decorations and highlights following it, multi-line runs becoming concentric rings. It is a shaping option, so it applies to Text and VectorText alike.',
+      'Path-driven layout: the curve supplies each glyph a position and a rotation. Circles, arcs and raw SVG path data as the driving curve, decorations and highlights following it, multi-line runs becoming concentric rings. It is a shaping option, so it applies to MSDFText and VectorText alike.',
     prepare: prepareTextPathScene,
     build: buildTextPathScene,
   },
@@ -140,7 +140,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'zindex',
     title: 'Stacking order',
     description:
-      'Default order is creation order: every node takes the next value off a running counter as its zIndex. Six panels - the default, the same rule holding across lanes (Text vs mesh), and the four overrides: assignment relative to another node, nextZIndex() to bring to front, a negative value the counter can never reach, and the midpoint of two neighbours, since zIndex is a float.',
+      'Default order is creation order: every node takes the next value off a running counter as its zIndex. Six panels - the default, the same rule holding across lanes (MSDFText vs mesh), and the four overrides: assignment relative to another node, nextZIndex() to bring to front, a negative value the counter can never reach, and the midpoint of two neighbours, since zIndex is a float.',
     build: buildZIndexScene,
   },
   {
@@ -164,7 +164,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'msdf-text-stress',
     title: 'MSDF text stress test',
     description:
-      'Twenty A4 pages of randomly styled lorem ipsum, one Text node per paragraph. Regular, bold, italic and bold-italic share one atlas array, so the wall batches into a single draw call however finely the styles alternate. Same words and styling as the outline-text stress test, for a like-for-like cost comparison. disableCulling is set, so every paragraph reaches the batcher - zoom out for all twenty pages.',
+      'Twenty A4 pages of randomly styled lorem ipsum, one MSDFText node per paragraph. Regular, bold, italic and bold-italic share one atlas array, so the wall batches into a single draw call however finely the styles alternate. Same words and styling as the outline-text stress test, for a like-for-like cost comparison. disableCulling is set, so every paragraph reaches the batcher - zoom out for all twenty pages.',
     disableCulling: true,
     build: buildMsdfStressScene,
   },

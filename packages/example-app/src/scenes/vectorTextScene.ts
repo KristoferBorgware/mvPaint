@@ -1,12 +1,12 @@
 // The other way to draw text: VectorText tessellates each glyph's real outline and sends it
-// through the mesh lane, where MSDF Text samples a distance-field atlas in a lane of its own.
+// through the mesh lane, where MSDFText samples a distance-field atlas in a lane of its own.
 // The engine keeps both; this scene is here to make the difference visible side by side.
 //
 // The left column is styling the two implementations share - they run the same shaper, so
 // runs, sizes, gradients, outlines, decorations and wrapping look the same on either. So do
 // the block-layout features along the bottom and right: every alignment mode, per-run
 // baseline shift, and vertical flow. The middle column is what only this path can do: a real
-// blurred shadow cast from the letterforms (Text has no silhouette to blur, so it duplicates
+// blurred shadow cast from the letterforms (MSDFText has no silhouette to blur, so it duplicates
 // its glyphs instead), and glyph-accurate picking, since the letters ARE the geometry the hit
 // test walks.
 //
@@ -16,7 +16,7 @@
 // application's asset, not the engine's, which ships an MSDF fallback and no outlines at all. A
 // font the atlases do not cover is the other scene: Runtime TTF.
 
-import { Text, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
+import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
 import { loadVectorFonts } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
@@ -41,7 +41,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   const root = scene.root
 
   const label = (x: number, y: number, text: string, maxWidth?: number) =>
-    new Text({ name: `label-${text.slice(0, 12)}`, x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 16, color: SLATE } })
+    new MSDFText({ name: `label-${text.slice(0, 12)}`, x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 16, color: SLATE } })
 
   // --- title: a gradient run, filled by the mesh lane's own gradient rather than a second
   // implementation of one inside a text shader.
@@ -153,7 +153,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   )
   root.addChild(label(LEFT + 430, -152, 'outlines'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'vt-compare-msdf',
       x: LEFT,
       y: -200,
@@ -166,7 +166,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // --- right column: what geometry buys ---------------------------------------------
 
   // A real canvas-style blurred shadow, from Shape's own shadow properties - the letterforms
-  // are baked into the shared shadow atlas like any other silhouette. Text can't do this: it
+  // are baked into the shared shadow atlas like any other silhouette. MSDFText can't do this: it
   // has no rasterized shape to blur, so its shadow is an offset duplicate of the glyphs.
   root.addChild(
     new VectorText({

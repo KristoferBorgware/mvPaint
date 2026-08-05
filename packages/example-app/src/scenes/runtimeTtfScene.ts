@@ -16,7 +16,7 @@
 // input folder rather than copied into src/fonts/: this demo needs a real TTF at runtime, and a
 // TTF is a generator INPUT, not one of the atlases a developer copies out.
 
-import { Text, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
+import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
 import { TtfFontBook } from '@mvpaint/ttf'
 import { CRIMSON, DARK, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
@@ -54,7 +54,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
   const root = scene.root
 
   const label = (x: number, y: number, text: string) =>
-    new Text({ name: `label-${text.slice(0, 12)}`, x, y, text, style: { fontSize: 16, color: SLATE } })
+    new MSDFText({ name: `label-${text.slice(0, 12)}`, x, y, text, style: { fontSize: 16, color: SLATE } })
 
   root.addChild(
     new VectorText({

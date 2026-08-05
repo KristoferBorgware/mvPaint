@@ -1,15 +1,15 @@
-// VectorText - the same styled text as Text, drawn as real geometry instead of sampled
+// VectorText - the same styled text as MSDFText, drawn as real geometry instead of sampled
 // distance fields. It shapes its runs with the SAME shaper (text/layout.ts), then replaces
 // each glyph's textured quad with the glyph's actual contours: filled by earcut and, where a
 // run asks for it, outlined by the shared contour stroker. The result is ordinary mesh-lane
 // geometry, so nothing downstream knows this node is text at all.
 //
-// Because it is a mesh shape, three things come free that Text has to do (or skip) itself:
+// Because it is a mesh shape, three things come free that MSDFText has to do (or skip) itself:
 // hit-testing is per-glyph rather than per-bounding-box, the shadow atlas casts a real
 // blurred shadow from the letterforms, and a run's gradient is the mesh lane's own gradient
 // rather than a second implementation of one. What it costs is triangles - a glyph is a few
 // hundred vertices where the atlas needs four - so this is the path for display text, and
-// Text remains the one for a page of body copy. Neither replaces the other; see
+// MSDFText remains the one for a page of body copy. Neither replaces the other; see
 // text/vectorGlyphs.ts for the full comparison.
 //
 // A run's independent styling survives the trip through a lane that paints one object in one
@@ -27,14 +27,14 @@
 // difference (see text/vectorGlyphs.ts).
 
 import type { Vector2Like } from '../math/Vector2'
-import { TextBlock, type TextBlockOptions } from './TextBlock'
+import { Text, type TextOptions } from './Text'
 import type {MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import type { VectorFonts } from '../text/vectorGlyphs'
 import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
 import { quadCorner, type TextQuad } from '../text/textQuad'
 
-export interface VectorTextOptions extends TextBlockOptions {
+export interface VectorTextOptions extends TextOptions {
   /**
    * The outlines this node draws from - a PolygonFontBook over atlases the application
    * supplies, or any other VectorFonts (see @mvpaint/ttf, which parses a font file at runtime).
@@ -74,7 +74,7 @@ interface ShapingResult {
   quadMaterials: number[]
 }
 
-export class VectorText extends TextBlock {
+export class VectorText extends Text {
   override readonly nodeName: string = 'VectorText'
 
   private fontsValue: VectorFonts
@@ -98,7 +98,7 @@ export class VectorText extends TextBlock {
   }
 
   /**
-   * The outlines this node draws from - this path's equivalent of `Text.fontFamily`, except
+   * The outlines this node draws from - this path's equivalent of `MSDFText.fontFamily`, except
    * that the fonts themselves are handed over rather than named, since they own no GPU resource
    * for a renderer to have to hold.
    */

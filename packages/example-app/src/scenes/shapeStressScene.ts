@@ -20,7 +20,7 @@
 // mean only whatever the camera happens to be framing actually reaches the mesh batcher -
 // true even at the default zoom, since the field is larger than the default view.
 
-import { Circle, Path, Rect, Text, type Vector2Like, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
+import { Circle, Path, Rect, MSDFText, type Vector2Like, type RGBA, type Scene, type Shape } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -133,7 +133,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
   }
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'shape-stress-title',
       x: -FIELD_HALF_WIDTH,
       // Clear of the field, not of its centres: FIELD_HALF_HEIGHT bounds where a shape is
@@ -145,7 +145,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'shape-stress-note',
       x: -FIELD_HALF_WIDTH,
       y: FIELD_HALF_HEIGHT + 110,

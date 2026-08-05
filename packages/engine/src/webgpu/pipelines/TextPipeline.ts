@@ -4,7 +4,7 @@
 // scene/picking.ts), and a pipeline layout that adds the atlas bind group (group 2) to
 // the shared frame/object groups.
 //
-// Text is drawn entirely in the translucent pass, so there is only ever this one variant
+// MSDFText is drawn entirely in the translucent pass, so there is only ever this one variant
 // and it does not write depth. An MSDF glyph's alpha IS its coverage - the shader turns
 // the sampled distance into a soft edge - so every glyph outline is a ring of partial-alpha
 // fragments however solid the run's colour is, and none of them may reject what is behind

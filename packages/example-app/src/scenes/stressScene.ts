@@ -10,7 +10,7 @@
 // exercises the grow-and-repack path a couple of times over - which is worth having a scene
 // for, since that path is otherwise hard to reach by hand.
 
-import { Circle, Rect, Text, type Scene } from '@mvpaint/engine'
+import { Circle, Rect, MSDFText, type Scene } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -53,7 +53,7 @@ export function buildStressScene(scene: Scene): SceneContent {
   }
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'stress-title',
       x: originX,
       // The top row does not stop at originY: every shape carries its own radius and drifts
@@ -64,7 +64,7 @@ export function buildStressScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'stress-note',
       x: originX,
       y: originY + 62,

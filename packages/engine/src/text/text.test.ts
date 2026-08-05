@@ -28,7 +28,7 @@ import type { FontStyle } from './msdfProvider'
 // which would break this file running under plain node.
 import { atlasLayerSize, msdfFontProvider, type StyleJson } from './msdfProvider'
 import { PolygonFontBook, type PolygonFontJson } from './PolygonFont'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import { bumpFontEpoch } from '../shapes/contentEpoch'
 import { VectorText } from '../shapes/VectorText'
 import type { RGBA } from '../render/meshFormat'
@@ -138,28 +138,28 @@ it('metrics: uv rects normalized into [0,1], sane advances, kerning present', ()
 })
 
 //
-// Two Text nodes can be different typefaces. A node names a family, the library resolves it,
+// Two MSDFText nodes can be different typefaces. A node names a family, the library resolves it,
 // and the two mechanisms that has to get right are: an unknown name falls back rather than
 // failing (so a node built before its atlas lands still draws), and changing ONE node's family
 // re-shapes that node and no other - which is the whole reason it goes through
 // invalidateShaping() rather than the font epoch.
-it('a Text node draws in its own family, and changing it re-shapes only that node', () => {
+it('an MSDFText node draws in its own family, and changing it re-shapes only that node', () => {
     // Two families with genuinely different advances, so "which family" is measurable.
     const families: Record<string, MsdfFontJson> = { serif: STYLE_JSONS.regular, slab: STYLE_JSONS.bold }
     const library = {
       resolveFamily: (name: string | undefined) => msdfFontProvider([{ style: 'regular', json: families[name ?? ''] ?? families.serif }]),
     }
 
-    const a = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
-    const b = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'slab' })
+    const a = new MSDFText({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
+    const b = new MSDFText({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'slab' })
     assert(a.fontFamily === undefined && b.fontFamily === 'slab', 'a node carries its own family')
 
-    const shapeIt = (t: Text) => t.shaped(library.resolveFamily(t.fontFamily))
+    const shapeIt = (t: MSDFText) => t.shaped(library.resolveFamily(t.fontFamily))
     const aWide = shapeIt(a).width
     assert(shapeIt(b).width !== aWide, 'two nodes in different families measure differently')
 
     // An unknown family is not an error: it resolves to the default and draws.
-    const missing = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'never-loaded' })
+    const missing = new MSDFText({ text: 'Hamburgefonstiv', style: { fontSize: 40 }, fontFamily: 'never-loaded' })
     assert(shapeIt(missing).width === aWide, 'an unloaded family falls back to the default rather than failing')
 
     // The precise-invalidation claim: switching one node's family drops ITS cache and leaves
@@ -172,8 +172,8 @@ it('a Text node draws in its own family, and changing it re-shapes only that nod
 })
 
 //
-// Loading an atlas at runtime (handle.setFonts) changes the metrics under every Text at once,
-// and Text.shaped() memoizes its layout while ignoring the provider it was handed. Without the
+// Loading an atlas at runtime (handle.setFonts) changes the metrics under every MSDFText at once,
+// and MSDFText.shaped() memoizes its layout while ignoring the provider it was handed. Without the
 // font epoch the lane would repack from those stale caches: the right glyphs at the old
 // advances and the old wrap points, which is the kind of wrong that looks almost right.
 it('replacing the fonts re-shapes text that had already been laid out', () => {
@@ -181,7 +181,7 @@ it('replacing the fonts re-shapes text that had already been laid out', () => {
     // Bold is a genuinely different set of advances, so a stale layout is measurably stale.
     const narrow = msdfFontProvider([{ style: 'regular', json: STYLE_JSONS.bold }])
 
-    const node = new Text({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
+    const node = new MSDFText({ text: 'Hamburgefonstiv', style: { fontSize: 40 } })
     const before = node.shaped(wide)
     assert(node.shaped(wide) === before, 'the layout is memoized - shaping twice returns the same object')
 
@@ -437,7 +437,7 @@ it('drop shadow + soft glow: extra materials and extra glyph quads behind the bo
     assert(shadowed.materials.length === 2, 'a shadow adds a second material')
     assert(shadowed.quads.filter((q) => q.isGlyph).length === 2, 'the shadow adds a second glyph quad')
 
-    // Text's shadow is a plain duplicate of the glyphs - no blur, so it adds no coverage
+    // MSDFText's shadow is a plain duplicate of the glyphs - no blur, so it adds no coverage
     // dilation of its own (unlike the glow below). That is the whole point of the text
     // model: a crisp offset copy, not a rasterized-and-blurred silhouette.
     const shadowMaterial = shadowed.materials[shadowed.materials.length - 1]

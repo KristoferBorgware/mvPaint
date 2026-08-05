@@ -1,8 +1,8 @@
-// TextBatcher - the text lane's counterpart to MeshBatcher. It shapes every Text node into
+// TextBatcher - the text lane's counterpart to MeshBatcher. It shapes every MSDFText node into
 // glyph + decoration quads, packs them into shared vertex/index buffers, and records one
 // material per run (transform + fill/gradient + per-letter stroke) in a per-object storage
 // buffer. Materials (static) are separated from the per-frame transform refresh, so moving or
-// animating a Text updates only the object buffer, never the geometry.
+// animating an MSDFText updates only the object buffer, never the geometry.
 //
 // Quads are emitted in painter order and drawn as ONE range, whatever styles they mix. Every
 // Inter style shares a single texture_2d_array with a layer each, and a run's layer travels in
@@ -10,7 +10,7 @@
 // this lane binds group(2) exactly once and issues exactly one drawIndexed per span of nodes.
 
 import type { Shape } from '../../shapes/Shape'
-import type { Text } from '../../shapes/Text'
+import type { MSDFText } from '../../shapes/MSDFText'
 import type { FontBook } from '../FontBook'
 import type { FontLibrary } from '../FontLibrary'
 import type { TextMaterial } from '../../text/layout'
@@ -40,7 +40,7 @@ import {
 } from '../../render/textFormat'
 
 interface ObjectRecord {
-  node: Text
+  node: MSDFText
   material: TextMaterial
 }
 
@@ -55,7 +55,7 @@ export class TextBatcher {
 
   private indexCount = 0
   private objectRecords: ObjectRecord[] = []
-  // Cumulative index count after each Text handed to rebuild(), aligned with that argument
+  // Cumulative index count after each MSDFText handed to rebuild(), aligned with that argument
   // by position (an invisible node contributes nothing but still takes a slot). This is what
   // lets any run of nodes be drawn on its own, which is how the renderer interleaves the
   // lanes back to front - see SceneRenderer's draw().
@@ -70,12 +70,12 @@ export class TextBatcher {
   }
 
   /**
-   * Shape all Text nodes into the shared buffers, one material (object) per run.
+   * Shape all MSDFText nodes into the shared buffers, one material (object) per run.
    *
    * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
    * into the same buffers and differ only in which texture their draw binds.
    */
-  rebuild(texts: readonly Text[], fonts: FontLibrary): void {
+  rebuild(texts: readonly MSDFText[], fonts: FontLibrary): void {
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isGlyph
     const indices: number[] = []
@@ -171,7 +171,7 @@ export class TextBatcher {
 
   /**
    * Refresh every material's transform, fill/gradient/stroke, and depth into the storage
-   * buffer. `depths` maps each Text node to its zIndex-derived NDC depth (see
+   * buffer. `depths` maps each MSDFText node to its zIndex-derived NDC depth (see
    * scene/picking.ts's collectZOrder/depthForRank) - every material (run) of a node
    * shares that one depth, same as the mesh lane.
    */

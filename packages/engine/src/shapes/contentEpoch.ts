@@ -3,7 +3,7 @@
 // The lanes rebuild their shared GPU buffers only when they have to, and until now the only
 // things that could tell them so were the visible set changing and an explicit dirty call on
 // the renderer. That left a gap a caller falls into easily: invalidating a node - a Circle's
-// radius, a Polyline's points, a Text's runs or its curve - correctly drops that node's own
+// radius, a Polyline's points, an MSDFText's runs or its curve - correctly drops that node's own
 // cache, but nothing told the renderer, so the buffers kept the geometry they were packed
 // with and the change simply did not appear until something unrelated forced a rebuild.
 // Animating a node's content rather than its transform hit it every frame.
@@ -52,15 +52,15 @@ export function textShapingEpoch(): number {
 // when an application loads an atlas at runtime (handle.setFonts) rather than handing one to
 // createSceneRenderer.
 //
-// A separate counter is needed because Text.shaped() memoizes, and its cache is keyed on
+// A separate counter is needed because MSDFText.shaped() memoizes, and its cache is keyed on
 // nothing: it takes a FontProvider as an argument and then ignores it for the life of the
 // cache. That is right for the common case - the fonts never change, and re-shaping a
 // paragraph on every access would be absurd - but it means a new atlas would leave every
-// existing Text drawing a layout measured against the old metrics: right glyphs, wrong
+// existing MSDFText drawing a layout measured against the old metrics: right glyphs, wrong
 // advances, wrong wrap points. Bumping the text epoch alone does not fix it, because that
 // repacks the lane from exactly those stale caches.
 //
-// A counter rather than a walk over the scene, for the usual reason and one more: a Text that
+// A counter rather than a walk over the scene, for the usual reason and one more: an MSDFText that
 // is not in any scene yet, or is in a different one, has to re-shape too, and no walk finds it.
 
 let fontEpochCounter = 0

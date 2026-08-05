@@ -38,7 +38,7 @@ implementation:
 ## Example
 
 ```ts
-import { Circle, Group, Rect, Text, createSceneRenderer } from '@mvpaint/engine'
+import { Circle, Group, Rect, MSDFText, createSceneRenderer } from '@mvpaint/engine'
 
 const handle = await createSceneRenderer('#board', { input: 'editor' })
 
@@ -60,7 +60,7 @@ card.addChild(
 )
 
 card.addChild(
-  new Text({
+  new MSDFText({
     x: 20,
     y: -34,
     text: 'Hello, mvPaint',
@@ -331,7 +331,7 @@ individual run of segments its own colour and thickness.
 
 Two implementations over one shaper:
 
-- **`Text`** draws through the MSDF atlas. Four vertices per glyph.
+- **`MSDFText`** draws through the MSDF atlas. Four vertices per glyph.
 - **`VectorText`** tessellates real glyph outlines through the mesh lane, which gives true
   blurred shadows and per-glyph picking.
 
@@ -340,14 +340,13 @@ height, baseline shift, RTL and vertical flow, per-run colour or gradient,
 underline/strikethrough, highlight, per-letter outline, and text laid along an arbitrary path.
 
 Both read generated assets — a distance-field PNG for one, a polygon atlas of flattened outlines
-for the other — so the engine ships no font parser. Its full dependency list is `earcut` and
-`svgpath`.
+for the other — so the engine ships no font parser. Its only dependency is `earcut`.
 
 **Fonts are the application's.** Generate atlases from your own font files with
 `packages/scripts`, keep them with your other assets, and hand them to the engine:
 
 ```ts
-createSceneRenderer(canvas, { fonts: MSDF_ATLASES })   // what Text samples
+createSceneRenderer(canvas, { fonts: MSDF_ATLASES })   // what MSDFText samples
 new VectorText({ fonts: await loadVectorFonts(), ... }) // what VectorText tessellates
 ```
 

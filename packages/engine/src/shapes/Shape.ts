@@ -1,11 +1,11 @@
 // Shape - the base for every drawable scene-graph node (Rect, Circle, Polyline, Path,
-// Text, VectorText). Carries everything that affects RENDERING and is common to every
+// MSDFText, VectorText). Carries everything that affects RENDERING and is common to every
 // drawable: a settable size (width/height), visibility/pickability, stacking order
 // (zIndex), the complete fill/stroke styling API (flat color or gradient fill; stroke
 // color/width/join/cap/miter limit) and the shadow settings - all in one place rather than
 // split by how a shape happens to be drawn. Concrete shapes only add what's genuinely
 // specific to them (Rect: corner rounding; Circle: radius; Polyline: points; Path:
-// contours; Text/VectorText: runs and block layout).
+// contours; MSDFText/VectorText: runs and block layout).
 //
 // The TRANSFORM is not here: it lives on Node (see that file's header), because placing
 // yourself in your parent is not a drawing concern and a Group does it while drawing
@@ -20,7 +20,7 @@
 // shared buffer from every shape whenever anything changes. The cache only goes stale
 // when markGeometryDirty() is called; subclasses implement buildGeometry() instead of
 // tessellate() directly, since that's the method that only runs on a cache miss.
-// buildGeometry() defaults to emitting nothing - that's what makes it safe for Text
+// buildGeometry() defaults to emitting nothing - that's what makes it safe for MSDFText
 // (which renders through the separate MSDF text lane, not the mesh lane) to inherit it
 // unchanged. VectorText, the other text implementation, overrides it like any mesh shape:
 // it tessellates real glyph outlines, and is therefore picked, bounded and shadowed by
@@ -52,7 +52,7 @@
 //   - Elliptical shapes - Circle, and anything else defined by a radius - are CENTRED on
 //     it. A radius is measured from the middle, so any other origin would be a second,
 //     contradictory reference point.
-//   - Everything else - Rect, Image, Text, VectorText - hangs from its TOP-LEFT corner,
+//   - Everything else - Rect, Image, MSDFText, VectorText - hangs from its TOP-LEFT corner,
 //     extending right and downward. The scene is y-up, so such a shape spans x in
 //     [0, width] and y in [-height, 0] in its own local space.
 //   - Polyline and Path have no implied origin at all: their points and contours are
@@ -76,7 +76,7 @@
 // atlas keyed on local-space geometry + blur + spread, then drawing one textured quad per shadow (see
 // webgpu/ShadowAtlas.ts and webgpu/lanes/ShadowBatcher.ts) - so a shadow costs no per-frame GPU
 // work once its texture is cached, and moving/scaling/spinning a shape never re-bakes it.
-// Text ignores these fields: it carries its own per-run shadow styling instead (an offset
+// MSDFText ignores these fields: it carries its own per-run shadow styling instead (an offset
 // duplicate of the glyphs, see text/layout.ts), since it has no mesh geometry to
 // rasterize a silhouette from. VectorText, which does, honours them like any other mesh
 // shape - a blurred shadow cast from the letterforms themselves.
@@ -718,7 +718,7 @@ export abstract class Shape extends Node {
 
   /**
    * Override to emit this shape's geometry (local space) - called only on a cache miss
-   * (see tessellate()). The default emits nothing: Text (rendered through the separate
+   * (see tessellate()). The default emits nothing: MSDFText (rendered through the separate
    * text lane) relies on exactly that; every mesh-drawn shape overrides this instead.
    */
   protected buildGeometry(_sink: MeshSink): void {}

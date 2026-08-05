@@ -1,7 +1,7 @@
 // Shared content for the two font-rendering stress tests (msdfStressScene, vectorTextStressScene):
 // deterministic "lorem ipsum" pages with randomized per-run styling, plus the 2x2 page-grid
 // layout both scenes place them into. Nothing here is GPU- or implementation-specific - it
-// only returns TextRun[]s and world-space positions, which Text and VectorText both accept -
+// only returns TextRun[]s and world-space positions, which MSDFText and VectorText both accept -
 // so the two scenes can build byte-identical content and differ only in which shape class
 // they hand it to.
 //
@@ -15,7 +15,7 @@
 // Each paragraph is its own node in the scene (its own pick target, its own object in either
 // lane), not one node per page with embedded line breaks - which is why this module also
 // stacks them: every paragraph is measured with the shared shaper BEFORE either scene builds a
-// single Text or VectorText, using msdfFontProvider over this application's own atlases (no
+// single MSDFText or VectorText, using msdfFontProvider over this application's own atlases (no
 // device needed - see FontAtlas.ts), so each one's y-offset is its actual wrapped height, not
 // a guess.
 //
@@ -24,7 +24,7 @@
 // and never spills past its own edge. Word count per page is therefore an outcome, not a
 // setting - which is also why the layout reports the total it actually placed.
 
-import { layoutText, msdfFontProvider, Rect, Text, type Container, type ColorInput, type TextRun, type TextRunStyle, type Vector2Like } from '@mvpaint/engine'
+import { layoutText, msdfFontProvider, Rect, MSDFText, type Container, type ColorInput, type TextRun, type TextRunStyle, type Vector2Like } from '@mvpaint/engine'
 import { msdfAtlases } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 
@@ -76,7 +76,7 @@ const BODY_MAX_HEIGHT = PAGE_HEIGHT - PAGE_PADDING - HEADER_HEIGHT - PAGE_PADDIN
 const GRID_COLS = Math.ceil(Math.sqrt(PAGE_COUNT))
 const GRID_ROWS = Math.ceil(PAGE_COUNT / GRID_COLS)
 
-/** One paragraph's runs, ready for either Text or VectorText's `runs` option, plus where its
+/** One paragraph's runs, ready for either MSDFText or VectorText's `runs` option, plus where its
  * top sits relative to the page's body-start point (0 = first paragraph; more negative =
  * further down the page, matching this scene's y-up space). */
 export interface LoremParagraph {
@@ -295,7 +295,7 @@ export function addPageFrame(root: Container, index: number, layout: LoremLayout
   root.addChild(background)
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: `lorem-page-label-${index}`,
       x: origin.x + PAGE_PADDING,
       y: origin.y - PAGE_PADDING - 14,

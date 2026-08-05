@@ -35,7 +35,7 @@ import {
   Image,
   Path,
   Rect,
-  Text,
+  MSDFText,
   loadSvgDocument,
   svgIntrinsicSize,
   svgViewBox,
@@ -51,7 +51,7 @@ import type { SceneContent } from './types'
 import tigerSvg from '../assets/tiger.svg?raw'
 import tuxSvg from '../assets/Tux.svg?raw'
 
-// Vertical layout. Every y here is a TOP edge, because that is where a Text node's origin is
+// Vertical layout. Every y here is a TOP edge, because that is where an MSDFText node's origin is
 // and where a Rect's is - so a block occupies `y` downwards by however tall it turns out to
 // be, and the constants below are spaced by the measured height of what sits above them.
 // Nothing here re-flows, so a longer caption or one more stats line means re-checking these.
@@ -247,12 +247,12 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
   const textures = rasters
 
   const caption = (x: number, y: number, text: string, color: string) =>
-    new Text({ name: `svg-stress-caption-${text}`, x, y, text, style: { fontStyle: 'bold', fontSize: 17, color } })
+    new MSDFText({ name: `svg-stress-caption-${text}`, x, y, text, style: { fontStyle: 'bold', fontSize: 17, color } })
 
   const stats = (x: number, y: number, lines: readonly string[], key: string) =>
     lines.map(
       (line, i) =>
-        new Text({
+        new MSDFText({
           name: `svg-stress-stat-${key}-${i}`,
           x,
           y: y + STATS_Y - i * STATS_LINE,
@@ -337,7 +337,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
 
   const gridLeft = -COLUMN_X - BOX / 2
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'svg-stress-title',
       x: gridLeft,
       y: TITLE_Y,
@@ -346,7 +346,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'svg-stress-subtitle',
       x: gridLeft,
       y: SUBTITLE_Y,
@@ -358,10 +358,10 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
   )
 
   // Why the two halves of the Tux row do not match, said where it is being looked at. The
-  // lead-in is its own run so it can be bold and coloured without a second node - a Text
+  // lead-in is its own run so it can be bold and coloured without a second node - an MSDFText
   // node's runs are styled independently and shape as one block.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'svg-stress-coverage-note',
       x: gridLeft,
       y: COVERAGE_NOTE_Y,
@@ -382,7 +382,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
   )
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'svg-stress-zoom-note',
       x: gridLeft,
       y: ZOOM_NOTE_Y,

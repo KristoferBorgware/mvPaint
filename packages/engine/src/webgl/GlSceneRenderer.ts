@@ -14,7 +14,7 @@
 // multisampled drawing buffer (antialias: true - see Gl2Context) rather than from a
 // multisampled target this file drives, so this renders
 // straight into the default framebuffer, so mesh edges are aliased where WebGPU's resolve
-// would have smoothed them. Text is unaffected when its lane arrives - an MSDF glyph
+// would have smoothed them. MSDFText is unaffected when its lane arrives - an MSDF glyph
 // antialiases itself in the fragment shader.
 //
 // All four lanes are here. What is missing relative to WebGPU is MSAA, and nothing else.
@@ -34,7 +34,7 @@ import { meshGeometryEpoch } from '../shapes/contentEpoch'
 import { SceneGather, sameMembers } from '../render/gather'
 import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { textShapingEpoch } from '../shapes/contentEpoch'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import type { Image } from '../shapes/Image'
 import type { Gl2Context } from './Gl2Context'
 import type { GlFontLibrary } from './GlFontLibrary'
@@ -93,7 +93,7 @@ export class GlSceneRenderer {
   private builtMeshEpoch = -1
   private builtTextEpoch = -1
   private visibleMeshShapes: readonly Shape[] = []
-  private visibleTexts: readonly Text[] = []
+  private visibleTexts: readonly MSDFText[] = []
   private visibleImages: readonly Image[] = []
 
   constructor(context: Gl2Context, fonts: GlFontLibrary, camera?: Camera2D | null) {
@@ -125,7 +125,7 @@ export class GlSceneRenderer {
     })
     this.meshBatcher = new GlMeshBatcher(this.gl)
 
-    // Text is never opaque - an MSDF glyph's alpha IS its coverage, so every outline is a ring
+    // MSDFText is never opaque - an MSDF glyph's alpha IS its coverage, so every outline is a ring
     // of partial-alpha fragments however solid the run's colour is. One depth-read-only program
     // is all the lane can ever need (see render/opacity.ts).
     this.textProgram = new GlProgram(this.gl, this.stateCache, {
@@ -251,7 +251,7 @@ export class GlSceneRenderer {
     const ordered = collectZOrder(this.scene, this.zSortEnabled)
     // Deliberately NOT culled: a shape just off-screen can still cast a shadow that reaches
     // into view, and keeping its slot baked avoids a stutter the moment it scrolls in.
-    this.shadowAtlas.update(ordered.filter((s) => !(s instanceof Text)))
+    this.shadowAtlas.update(ordered.filter((s) => !(s instanceof MSDFText)))
   }
 
   /** One frame, into the default framebuffer. `width`/`height` are backing-store pixels. */

@@ -35,17 +35,16 @@ import { createSceneRenderer } from '@mvpaint/engine' // everything
 import { STYLE_ORDER, resolveStyle } from '@mvpaint/engine/core' // no device, no assets
 ```
 
-The main entry point carries the fallback MSDF atlas, imported as URLs, so it needs a bundler —
-any application build already is one. `@mvpaint/engine/core` is the subset with no device and no
-assets in it: geometry, glyph metrics, the style ladder and the outline tessellator. Import that
-to shape or measure text under node, in a worker, or before a canvas exists.
+The main entry point is the whole engine. `@mvpaint/engine/core` is the subset with no device in
+it: geometry, glyph metrics, the style ladder and the outline tessellator. Import that to shape
+or measure text under node, in a worker, or before a canvas exists.
 
 ## Text
 
 Two implementations, both drawn from atlases generated ahead of time, so nothing here parses a
 font at runtime:
 
-- **MSDF text** (`Text`, `TextBlock`) — four vertices per glyph, sampled from a distance field,
+- **MSDF text** (`MSDFText`) — four vertices per glyph, sampled from a distance field,
   crisp at any zoom. The default.
 - **Vector text** (`VectorText`) — real letterform geometry, tessellated from outlines. True
   blurred shadows and per-glyph picking, at the cost of triangles.
@@ -63,11 +62,11 @@ new VectorText({ fonts: new PolygonFontBook(sources), text: 'Hello' })
 
 Neither has to be ready before the canvas is, which is what an atlas served from a CDN needs.
 `VectorText` takes its outlines per node, so you simply construct the node once they arrive; the
-MSDF atlas is shared by every `Text`, so it is swapped on the renderer:
+MSDF atlas is shared by every `MSDFText`, so it is swapped on the renderer:
 
 ```ts
-const handle = await createSceneRenderer(canvas)   // draws with the fallback
-await handle.setFonts(await fetchAtlasesFromCdn()) // ...then with yours, text re-shapes
+const handle = await createSceneRenderer(canvas)   // no atlases yet, so no text draws
+await handle.setFonts(await fetchAtlasesFromCdn()) // ...then yours arrive and text shapes
 ```
 
 The engine fetches each PNG from the `url` you give it, so that field is already a CDN URL. The
@@ -80,8 +79,8 @@ Name a family when you load it, and name it on the node:
 
 ```ts
 await handle.setFonts(robotoAtlases, 'roboto')
-scene.root.addChild(new Text({ text: 'Heading', fontFamily: 'roboto' }))
-scene.root.addChild(new Text({ text: 'Body' }))            // the default family
+scene.root.addChild(new MSDFText({ text: 'Heading', fontFamily: 'roboto' }))
+scene.root.addChild(new MSDFText({ text: 'Body' }))            // the default family
 new VectorText({ fonts: robotoOutlines, text: 'Outlined' }) // outlines are handed over directly
 ```
 
@@ -95,7 +94,7 @@ the packed order. A scene in a single family costs exactly what it did before, a
 mixing all four styles is still a single draw.
 
 This package ships **no typeface at all**. Omit `fonts` and the renderer starts with no atlases:
-nothing is fetched, no texture is uploaded, and `Text` draws nothing until you call
+nothing is fetched, no texture is uploaded, and `MSDFText` draws nothing until you call
 `setFonts()`. A scene of rectangles issues no font request at all. A set you supply may be
 partial: give it bold alone and the style ladder synthesizes the rest. Outlines work the same
 way — `VectorText` is always given its own.
@@ -113,7 +112,8 @@ import it never download a font parser.
 
 ## Requirements
 
-A browser with WebGPU or WebGL2, and an ES module bundler. The package ships ES modules and
+A browser with WebGPU or WebGL2. Its only dependency is `earcut`, which is ESM too, so a
+bundler is optional — an import map reaches it. The package ships ES modules and
 type declarations, and no CommonJS build.
 
 ## Licence

@@ -14,7 +14,7 @@
 // different pixel sizes, since choosing that size is the one decision rasterizing a document
 // forces on you.
 
-import { Circle, Image, Rect, Text, type ImageTexture, type Scene, type SceneResources } from '@mvpaint/engine'
+import { Circle, Image, Rect, MSDFText, type ImageTexture, type Scene, type SceneResources } from '@mvpaint/engine'
 import { DARK } from './palette'
 import type { SceneContent } from './types'
 
@@ -120,8 +120,8 @@ function pixelArtPixels(): ImageData {
   return ctx.getImageData(0, 0, canvas.width, canvas.height)
 }
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontStyle: 'bold', fontSize: 15, color: DARK } })
+function label(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontStyle: 'bold', fontSize: 15, color: DARK } })
 }
 
 export function buildImageScene(scene: Scene, { images }: SceneResources): SceneContent {

@@ -14,7 +14,7 @@ import { Transform } from '../math/Transform'
 import { Vector3 } from '../math/Vector3'
 import { Circle } from '../shapes/Circle'
 import { Rect , type RectOptions } from '../shapes/Rect'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import { Shape } from '../shapes/Shape'
 import type { MeshSink } from '../render/meshFormat'
 import { collectZOrder, depthForRank, hitTestShape, pickNode, shapeLocalBounds, textLocalBounds } from './picking'
@@ -226,21 +226,21 @@ it('higher zIndex is in FRONT, end to end', () => {
 //     offset, visible/pickable from the same base as every mesh shape, which is what
 //     makes cross-lane zIndex ordering (a shape in front of text, or vice versa)
 //     possible without picking/depth needing to special-case "which lane" a node is in ---
-it('Text is a Shape now (not a lane-specific special case): it inherits zIndex,', () => {
-    assert(Text.prototype instanceof Shape, 'Text extends Shape, carrying zIndex/offset/pickable like a mesh shape')
+it('MSDFText is a Shape now (not a lane-specific special case): it inherits zIndex,', () => {
+    assert(MSDFText.prototype instanceof Shape, 'MSDFText extends Shape, carrying zIndex/offset/pickable like a mesh shape')
     const beforeText = new Rect({ width: 1, height: 1 })
-    assert(new Text().zIndex > beforeText.zIndex, 'Text takes its zIndex from the same counter every mesh shape does')
-    assert(new Text().pickable, 'Text inherits the pickable default')
+    assert(new MSDFText().zIndex > beforeText.zIndex, 'MSDFText takes its zIndex from the same counter every mesh shape does')
+    assert(new MSDFText().pickable, 'MSDFText inherits the pickable default')
 
     // Shape's full styling vocabulary (width/height/fill/stroke/...) is inherited too, even
-    // though Text's own rich per-run styling doesn't use it - one shared vocabulary instead
+    // though MSDFText's own rich per-run styling doesn't use it - one shared vocabulary instead
     // of the render lane dictating which fields a shape gets.
-    const text = new Text({ fill: [1, 0, 0, 1], stroke: [0, 1, 0, 1], strokeWidth: 2, width: 50 })
-    assert(text.fill[0] === 1 && text.stroke[1] === 1 && text.strokeWidth === 2 && text.width === 50, 'Text inherits Shape fields, not just Shape defaults')
+    const text = new MSDFText({ fill: [1, 0, 0, 1], stroke: [0, 1, 0, 1], strokeWidth: 2, width: 50 })
+    assert(text.fill[0] === 1 && text.stroke[1] === 1 && text.strokeWidth === 2 && text.width === 50, 'MSDFText inherits Shape fields, not just Shape defaults')
 
     let sawVertex = false
     text.tessellate({ vertex: () => ((sawVertex = true), 0), triangle: () => {} })
-    assert(!sawVertex, "Text inherits Shape's no-op tessellate() (it renders through the text lane, not the mesh lane)")
+    assert(!sawVertex, "MSDFText inherits Shape's no-op tessellate() (it renders through the text lane, not the mesh lane)")
 })
 
 it('picking: textLocalBounds unions every quad\'s corners', () => {

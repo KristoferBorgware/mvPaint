@@ -1,4 +1,4 @@
-// The text lane on WebGL2: every Text node's glyph and decoration quads in one buffer pair,
+// The text lane on WebGL2: every MSDFText node's glyph and decoration quads in one buffer pair,
 // one object record per run, drawn as a range of nodes.
 //
 // The same shaping, the same quads and the same 320-byte record as webgpu/lanes/TextBatcher.ts -
@@ -6,13 +6,13 @@
 // What differs is the same three things as the mesh lane: records go into a texture, integer
 // fields are written as floats, and a VAO carries the vertex layout.
 //
-// Unlike the mesh lane there is no per-slot cache. Text records are per RUN - hundreds, where
+// Unlike the mesh lane there is no per-slot cache. MSDFText records are per RUN - hundreds, where
 // mesh records run to tens of thousands - and every one of them is rewritten whenever anything
 // re-shapes anyway, so the whole set uploads in one call. That is what the WebGPU text batcher
 // does too, for the same reason.
 
 import type { Shape } from '../../shapes/Shape'
-import type { Text } from '../../shapes/Text'
+import type { MSDFText } from '../../shapes/MSDFText'
 import type { TextMaterial } from '../../text/layout'
 import { quadCorner } from '../../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from '../../render/meshFormat'
@@ -44,7 +44,7 @@ import type { GlFontBook } from '../GlFontBook'
 import type { GlFontLibrary } from '../GlFontLibrary'
 
 interface ObjectRecord {
-  node: Text
+  node: MSDFText
   material: TextMaterial
 }
 
@@ -69,12 +69,12 @@ export class GlTextBatcher {
   }
 
   /**
-   * Shape all Text nodes into the shared buffers, one object record per run.
+   * Shape all MSDFText nodes into the shared buffers, one object record per run.
    *
    * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
    * into the same buffers and differ only in which texture their draw binds.
    */
-  rebuild(texts: readonly Text[], fonts: GlFontLibrary): void {
+  rebuild(texts: readonly MSDFText[], fonts: GlFontLibrary): void {
     const gl = this.gl
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = []

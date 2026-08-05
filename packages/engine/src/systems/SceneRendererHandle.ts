@@ -62,7 +62,7 @@ export interface SceneRendererHandle extends SceneResources {
    */
   scene: Scene
   /**
-   * Replace the MSDF atlases `Text` draws from, at any point - the runtime half of the `fonts`
+   * Replace the MSDF atlases `MSDFText` draws from, at any point - the runtime half of the `fonts`
    * option, so an application whose fonts live on a CDN is not forced to have them in hand
    * before the canvas exists.
    *
@@ -72,8 +72,8 @@ export interface SceneRendererHandle extends SceneResources {
    * ```
    *
    * Pass a `family` name to load a SECOND typeface rather than replace the default, which is
-   * what lets two `Text` nodes draw in different faces: `setFonts(roboto, 'roboto')`, then
-   * `new Text({ fontFamily: 'roboto' })`. Within one family it replaces rather than merges, so
+   * what lets two `MSDFText` nodes draw in different faces: `setFonts(roboto, 'roboto')`, then
+   * `new MSDFText({ fontFamily: 'roboto' })`. Within one family it replaces rather than merges, so
    * an application never silently ends up half its own typeface and half the fallback; to add a
    * style, spread what is already loaded: `setFonts([...handle.getFonts(), extra])`.
    *
@@ -242,12 +242,12 @@ export interface CreateSceneRendererOptions {
    */
   camera?: Camera2D
   /**
-   * The MSDF atlases `Text` draws from - one entry per style, each a generated metrics JSON
+   * The MSDF atlases `MSDFText` draws from - one entry per style, each a generated metrics JSON
    * plus a URL for its PNG. Generate them with `packages/scripts` and keep them with your
    * application's other assets.
    *
    * The engine ships NO typeface. Omit this and the renderer starts with no atlases: nothing
-   * is fetched, no texture is uploaded, and `Text` draws nothing until `setFonts()` supplies a
+   * is fetched, no texture is uploaded, and `MSDFText` draws nothing until `setFonts()` supplies a
    * set. For a working set to copy, see
    * packages/example-app: its Inter atlases are served from `public/`, the shape an
    * application's own asset folder takes.

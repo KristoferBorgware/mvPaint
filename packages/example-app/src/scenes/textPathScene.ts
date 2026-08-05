@@ -1,4 +1,4 @@
-// Text on a path: a curve decides where each glyph sits and which way it faces.
+// MSDFText on a path: a curve decides where each glyph sits and which way it faces.
 //
 // Covers the badge case a circle is usually wanted for (a run across the top and another
 // along the bottom, both reading the right way up), an arc, a curve taken straight from SVG
@@ -12,7 +12,7 @@
 import {
   Circle,
   Path,
-  Text,
+  MSDFText,
   VectorText,
   arcPath,
   circlePath,
@@ -57,8 +57,8 @@ function guide(path: TextPathGeometry, name: string): Path {
 
 // `maxWidth` is for the top row, where four demos share the width and a caption long enough
 // to outrun its own column has to wrap inside it rather than reach under the demo next door.
-function label(x: number, y: number, text: string, maxWidth?: number): Text {
-  return new Text({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
+function label(x: number, y: number, text: string, maxWidth?: number): MSDFText {
+  return new MSDFText({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
 }
 
 export function buildTextPathScene(scene: Scene): SceneContent {
@@ -83,7 +83,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   // counter that only ever counts up from zero.
   root.addChild(new Circle({ name: 'tp-badge-disc', x: badgeCenter.x, y: badgeCenter.y, radius: badgeRadius - 34, fill: '#f0f2f7', zIndex: -1 }))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-badge-top',
       text: 'MVPAINT ENGINE',
       style: { fontStyle: 'bold', fontSize: 26, color: NAVY, letterSpacing: 2 },
@@ -91,7 +91,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-badge-bottom',
       text: 'WEBGPU 2D',
       style: { fontStyle: 'bold', fontSize: 22, color: CRIMSON, letterSpacing: 3 },
@@ -109,7 +109,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const arch = arcPath(150, Math.PI * 0.92, -Math.PI * 0.84, { center: archCenter })
   root.addChild(guide(arch, 'tp-arch-guide'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-arch',
       text: 'along an arc',
       style: { fontSize: 34, color: TEAL },
@@ -122,7 +122,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const shortArc = arcPath(120, Math.PI, -Math.PI / 2, { center: { x: 200, y: 130 } })
   root.addChild(guide(shortArc, 'tp-clip-guide'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-clipped',
       text: 'this sentence is far longer than the curve it was given',
       style: { fontSize: 22, color: DARK },
@@ -140,7 +140,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const wave = TextPathGeometry.fromContours(flattenPathData('M -470 -120 C -330 0, -190 -230, -40 -110 S 210 20, 360 -100'))
   root.addChild(guide(wave, 'tp-wave-guide'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-wave',
       text: 'a curve taken straight from SVG path data',
       style: { fontSize: 26, color: NAVY },
@@ -157,7 +157,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const decorated = circlePath(115, { center: ringCenter })
   root.addChild(guide(decorated, 'tp-decor-guide'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-decorated',
       runs: [
         { text: 'underlined ', style: { fontSize: 21, color: NAVY, underline: true } },
@@ -176,7 +176,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const rings = circlePath(120, { center: ringsCenter })
   root.addChild(guide(rings, 'tp-rings-guide'))
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-two-lines',
       text: 'first line\nsecond line',
       style: { fontSize: 19, color: TEAL },
@@ -210,7 +210,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const marqueeRing = circlePath(125, { center: { x: 370, y: 190 } })
   root.addChild(guide(marqueeRing, 'tp-marquee-guide'))
   const marquee = root.addChild(
-    new Text({
+    new MSDFText({
       name: 'tp-marquee',
       text: 'travelling around the curve  .  ',
       style: { fontSize: 20, color: DARK },

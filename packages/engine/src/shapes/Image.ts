@@ -6,7 +6,7 @@
 // tiling, flipping, a wrap mode for what happens past the edges, filtering, and a tint that
 // multiplies the sampled colour - whose alpha is the image's opacity.
 //
-// It DOES emit its quad from buildGeometry(), unlike Text, and that one decision is what
+// It DOES emit its quad from buildGeometry(), unlike MSDFText, and that one decision is what
 // gives it three things for nothing: an exact hit test, correct local bounds for the
 // transformer to frame, and a real silhouette for the shadow lane to bake. The renderer
 // leaves it out of the mesh DRAW - the image lane paints those pixels - while still handing

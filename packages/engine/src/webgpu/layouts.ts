@@ -74,7 +74,7 @@ export function createAtlasBindGroupLayout(
   })
 }
 
-/** Text-lane pipeline layout: shared frame + per-object material (groups 0/1) plus the atlas. */
+/** text-lane pipeline layout: shared frame + per-object material (groups 0/1) plus the atlas. */
 export function createTextPipelineLayout(
   device: GPUDevice,
   frameLayout: GPUBindGroupLayout,

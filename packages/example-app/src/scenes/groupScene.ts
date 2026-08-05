@@ -8,7 +8,7 @@
 // visibility governing a whole subtree, a group whose extent changes as its contents do,
 // and the one case where a group is deliberately NOT the thing you grab.
 
-import { Circle, Group, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Group, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
@@ -16,8 +16,8 @@ import type { SceneContent } from './types'
 // own assembly, and left to run on one line the first two are wider than the gap to the next
 // anchor and reach into the column beside them. Wrapping each inside its own column is the
 // placement that survives the caption text changing.
-function label(x: number, y: number, text: string, maxWidth?: number): Text {
-  return new Text({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
+function label(x: number, y: number, text: string, maxWidth?: number): MSDFText {
+  return new MSDFText({ x, y, text, maxWidth, lineHeight: 1.25, style: { fontSize: 15, color: SLATE } })
 }
 
 /** A little robot: a body, a head, two eyes and two legs, built around its own origin. */

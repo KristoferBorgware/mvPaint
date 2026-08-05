@@ -10,16 +10,16 @@
 //   bottom right  a layer's transform reaches its contents, and `enabled` never touches a
 //                 shape's own `visible`
 
-import { Circle, Group, Layer, Polyline, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Group, Layer, Polyline, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
-function label(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 15, color: SLATE } })
+function label(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 15, color: SLATE } })
 }
 
-function caption(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 13, color: SLATE } })
+function caption(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 13, color: SLATE } })
 }
 
 export function buildLayerScene(scene: Scene): SceneContent {

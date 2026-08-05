@@ -8,7 +8,7 @@
 // idle) as well as a GPU one. Compare against msdfStressScene's near-zero cost for the exact
 // same content.
 //
-// Captions and the page chrome stay plain MSDF Text throughout, same as in vectorTextScene -
+// Captions and the page chrome stay plain MSDFText throughout, same as in vectorTextScene -
 // they're UI, not the content being stress-tested, so there's no reason to pay tessellation
 // cost for them.
 //
@@ -17,7 +17,7 @@
 // batcher at the default zoom - the opposite of what a scene meant to stress-test all of them
 // should do.
 
-import { Text, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
+import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
 import { loadVectorFonts } from '../fonts'
 import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT } from './loremStress'
 import { DARK, SLATE } from './palette'
@@ -39,7 +39,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
   const layout = loremStressLayout()
 
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'vector-stress-title',
       x: -PAGE_WIDTH,
       y: layout.gridTop + 70,
@@ -48,7 +48,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     }),
   )
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'vector-stress-note',
       x: -PAGE_WIDTH,
       y: layout.gridTop + 26,

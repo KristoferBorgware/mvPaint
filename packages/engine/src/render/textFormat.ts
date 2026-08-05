@@ -1,7 +1,7 @@
 // Formats for the text (MSDF) lane: its interleaved vertex layout (adds a UV into the atlas
 // on top of the mesh lane's position+color), and a per-object material record that mirrors the
 // mesh object record (transform + fill/gradient) and extends it with a per-letter stroke
-// (outline color + width) and the atlas's distance range. Text glyph quads and solid text
+// (outline color + width) and the atlas's distance range. MSDFText glyph quads and solid text
 // decorations (underline, strikethrough, highlight) all flow through this one layout.
 
 import { MAX_GRADIENT_STOPS } from './meshFormat'

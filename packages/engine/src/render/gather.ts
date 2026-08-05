@@ -27,7 +27,7 @@ import type { Camera2D } from '../camera/Camera2D'
 import type { Scene } from '../scene/Scene'
 import { Image } from '../shapes/Image'
 import { Shape } from '../shapes/Shape'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import type { FontFamilies } from '../text/layout'
 import { collectZOrder, depthForRank } from '../scene/picking'
 import { isShapeOnScreen, isTextOnScreen } from '../scene/culling'
@@ -41,7 +41,7 @@ export interface GatherResult {
   depths: ReadonlyMap<Shape, number>
   /** The mesh-lane candidates after culling, before the overlay/opacity splits. */
   meshShapes: readonly Shape[]
-  texts: readonly Text[]
+  texts: readonly MSDFText[]
   textDepths: readonly number[]
   images: readonly Image[]
   imageDepths: readonly number[]
@@ -58,7 +58,7 @@ export interface GatherResult {
 export interface GatherInput {
   scene: Scene
   camera: Camera2D
-  /** Needed to measure Text for culling - metrics only, no atlas (see Text.shaped). */
+  /** Needed to measure MSDFText for culling - metrics only, no atlas (see MSDFText.shaped). */
   fonts: FontFamilies
   /** The canvas's LOGICAL size: the camera is sized in CSS pixels, not backing-store ones. */
   viewWidth: number
@@ -113,7 +113,7 @@ export class SceneGather {
     const { scene, camera, fonts, viewWidth, viewHeight } = input
 
     // One combined traversal + zIndex sort drives BOTH lanes' depth, so a mesh shape and a
-    // Text can interleave correctly under the depth test regardless of which lane's draw call
+    // MSDFText can interleave correctly under the depth test regardless of which lane's draw call
     // runs first (see scene/picking.ts). Depth ranks are scene-wide (based on EVERY shape),
     // not affected by culling below.
     const ordered = collectZOrder(scene, input.zSortEnabled)
@@ -123,14 +123,14 @@ export class SceneGather {
     // picks up in the same frame. See Shape.refreshStrokeGauge for why it has to be a sweep.
     refreshStrokeGauges(ordered)
     const depths = new Map<Shape, number>()
-    // Text is the only Shape kind that doesn't tessellate for the mesh lane (its tessellate()
+    // MSDFText is the only Shape kind that doesn't tessellate for the mesh lane (its tessellate()
     // is the inherited no-op) - everything else belongs to the mesh batcher, VectorText very
     // much included: it is text drawn AS mesh geometry, so it wants the mesh lane, not this
     // filter's other side. One pass buckets both instead of filtering `ordered` twice - same
     // result, half the iteration. meshDepths is built alongside meshShapes, parallel by
     // position - see MeshBatcher.updateObjects for why that's worth doing instead of a
     // shape-keyed Map lookup per object.
-    const texts: Text[] = []
+    const texts: MSDFText[] = []
     const images: Image[] = []
     const meshShapes: Shape[] = []
     const meshDepths: number[] = []
@@ -141,7 +141,7 @@ export class SceneGather {
       // An Image has mesh geometry - that is what its shadow and its hit test are made of -
       // but the image lane paints those pixels, so it is bucketed out of the mesh draw here
       // rather than excluded from having geometry at all.
-      if (shape instanceof Text) texts.push(shape)
+      if (shape instanceof MSDFText) texts.push(shape)
       else if (shape instanceof Image) images.push(shape)
       else {
         meshShapes.push(shape)

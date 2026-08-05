@@ -8,7 +8,7 @@
 //
 //   x, y     the world point at the viewport's TOP-LEFT corner. The scene is y-up, so the
 //            view extends right and DOWNWARD from there - the same origin convention Rect,
-//            Image and Text follow (see Shape's header).
+//            Image and MSDFText follow (see Shape's header).
 //   zoom     viewport pixels per world unit. 1 means one world unit is one CSS pixel.
 //   rotation radians, about the view's CENTRE, turning what you see counter-clockwise.
 //

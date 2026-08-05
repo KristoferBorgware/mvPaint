@@ -7,7 +7,7 @@
 // falls on the card behind it and is hidden by the card in front, resolved per-pixel by the
 // depth test rather than by draw order.
 
-import { Circle, Polyline, Rect, Text, type ColorInput, type Scene } from '@mvpaint/engine'
+import { Circle, Polyline, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -19,7 +19,7 @@ const CARD_FILL: ColorInput[] = [
 
 function label(scene: Scene, x: number, y: number, text: string): void {
   scene.root.addChild(
-    new Text({ name: `label-${text}`, x, y, text, style: { fontSize: 20, color: SLATE } }),
+    new MSDFText({ name: `label-${text}`, x, y, text, style: { fontSize: 20, color: SLATE } }),
   )
 }
 
@@ -27,7 +27,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
   const root = scene.root
 
   scene.root.addChild(
-    new Text({
+    new MSDFText({
       name: 'shadow-title',
       x: -430,
       y: 330,

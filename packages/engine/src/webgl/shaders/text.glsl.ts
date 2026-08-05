@@ -87,7 +87,7 @@ void main() {
   uint id = a_packedId & OBJECT_ID_MASK;
   mat4 model = mat4(obj(id, 0), obj(id, 1), obj(id, 2), obj(id, 3));
   vec4 clip = u_viewProjection * model * vec4(a_position, 0.0, 1.0);
-  // Text sits at local z = 0 like every other lane's geometry; its stacking order is injected
+  // MSDFText sits at local z = 0 like every other lane's geometry; its stacking order is injected
   // here so a shape can sit in front of text rather than one lane always winning.
   clip.z = (${field(TEXT_OBJECT_DEPTH_OFFSET)} * 2.0 - 1.0) * clip.w;
   gl_Position = clip;

@@ -1,4 +1,4 @@
-// Text-lane shader (MSDF). Each vertex carries a local position, an atlas UV, a color, and a
+// text-lane shader (MSDF). Each vertex carries a local position, an atlas UV, a color, and a
 // packed id (object/material index + an "is glyph" flag). Glyph fragments recover coverage
 // from the multi-channel signed distance field (median of RGB) and anti-alias it in screen
 // space via the field's screen-pixel range (derived with fwidth, so it stays crisp at any
@@ -67,7 +67,7 @@ fn vs_main(input : VertexInput) -> VertexOutput {
   let model = objects[objectId].model;
   var out : VertexOutput;
   out.clip = frame.viewProjection * model * vec4<f32>(input.position, 0.0, 1.0);
-  // Text sits at local/world z=0 like every mesh-lane shape - its stacking order (from
+  // MSDFText sits at local/world z=0 like every mesh-lane shape - its stacking order (from
   // its zIndex, see scene/picking.ts) is injected here the same way, so a shape can sit
   // in front of text (or vice versa) instead of the text lane always winning.
   out.clip.z = objects[objectId].depth * out.clip.w;

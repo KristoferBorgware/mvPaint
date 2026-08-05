@@ -1,92 +1,107 @@
-// Text - a drawable Shape rendered through the MSDF text lane rather than the mesh lane
-// (it has no tessellate() / fill geometry; TextBatcher shapes it directly from its
-// runs). It inherits position/scale/rotation/offset/visible/pickable/zIndex from Shape and
-// its styled runs plus block-layout options from TextBlock, caching the shaped result
-// (glyph + decoration quads and per-run materials) until its content changes. Its transform
-// is applied in the vertex shader like every other node, so moving or scaling a Text never
-// re-shapes it; only editing the runs or layout does.
+// Text - everything the engine's two text implementations have in common: a list of styled
+// runs, the block-level layout options the shaper takes, and the cache-invalidation protocol
+// around them. Abstract: a scene draws one of the two concrete classes, each named for where
+// its glyphs come from. MSDFText samples a distance-field atlas through the text lane;
+// VectorText tessellates real outlines through the mesh lane. Both extend this, which is what
+// makes them interchangeable at the call site - swapping one for the other is a change of
+// constructor and nothing else.
 //
-// VectorText is the same content drawn the other way - real glyph outlines through the mesh
-// lane. The two share this class's whole public surface via TextBlock, so which one a scene
-// uses is a choice of constructor; see text/vectorGlyphs.ts for what actually differs.
+// The base deliberately does NOT own the shaped result: what "shaped" means differs (one
+// needs a FontBook of atlases, the other a book of parsed outlines), so each subclass keeps
+// its own cache and says how to drop it via invalidateShaping(). Everything that can
+// invalidate shaping - replacing the runs, replacing the text, or editing a layout option
+// in place and calling markDirty() - funnels through that one hook.
 
-import { TextBlock, type TextBlockOptions } from './TextBlock'
-import { layoutText, type FontProvider, type ShapedText } from '../text/layout'
-import { fontEpoch } from './contentEpoch'
+import { Shape, type ShapeOptions } from './Shape'
+import { bumpTextShapingEpoch } from './contentEpoch'
+import type { TextAlign, TextDirection, TextLayoutOptions, TextOrientation, TextRun, TextRunStyle } from '../text/layout'
+import type { TextPathOptions } from '../text/textPath'
 
-export interface TextOptions extends TextBlockOptions {
-  /**
-   * Which font family to draw with - a name the renderer resolves through its loaded families
-   * (see handle.setFonts). Omitted, or naming a family that is not loaded, draws with the
-   * default family, so a node built while its atlas is still being fetched shows text now and
-   * the right face once it arrives.
-   *
-   * A node-level choice, not a per-run one: a paragraph is one family, and mixing families
-   * within a node is not supported. Two nodes can be different families freely - the text lane
-   * splits its draw where the family changes, so that costs a draw call and nothing else.
-   */
-  fontFamily?: string
+/** Constructor options shared by every text kind: styled content plus block layout. */
+export interface TextOptions extends ShapeOptions, TextLayoutOptions {
+  /** Styled segments. Provide this, or `text` (+ optional `style`) for a single run. */
+  runs?: TextRun[]
+  text?: string
+  style?: TextRunStyle
 }
 
-export class Text extends TextBlock {
-  override readonly nodeName: string = 'Text'
+export abstract class Text extends Shape {
+  align: TextAlign
+  maxWidth: number | undefined
+  lineHeight: number
+  direction: TextDirection
+  orientation: TextOrientation
+  /** A curve for the text to follow; undefined lays it out on a straight baseline. */
+  textPath: TextPathOptions | undefined
 
-  private familyName: string | undefined
-  private shapedCache: ShapedText | null = null
-  private shapedFontEpoch = -1
+  protected runsData: TextRun[]
 
   constructor(options: TextOptions = {}) {
     super(options)
-    this.familyName = options.fontFamily
+    this.align = options.align ?? 'left'
+    this.maxWidth = options.maxWidth
+    this.lineHeight = options.lineHeight ?? 1
+    this.direction = options.direction ?? 'ltr'
+    this.orientation = options.orientation ?? 'horizontal'
+    this.textPath = options.textPath
+    this.runsData = options.runs ?? (options.text !== undefined ? [{ text: options.text, style: options.style }] : [])
   }
 
   protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'fontFamily']
+    return [...super.attrKeys(), 'runs', 'align', 'maxWidth', 'lineHeight', 'direction', 'orientation', 'textPath']
   }
 
-  /** The family this node draws with; undefined means the default. */
-  get fontFamily(): string | undefined {
-    return this.familyName
+  get runs(): readonly TextRun[] {
+    return this.runsData
   }
 
-  /**
-   * Draw with a different family.
-   *
-   * Goes through invalidateShaping(), which drops THIS node's cached layout and marks the lane
-   * stale - so only this node re-shapes, and every other node's quads are repacked from the
-   * caches they already have. Deliberately not the font epoch, which is for a family's atlases
-   * being replaced underneath every node at once and re-shapes all of them.
-   */
-  set fontFamily(family: string | undefined) {
-    if (this.familyName === family) return
-    this.familyName = family
+  /** Replace all runs (invalidates the cached shaping). */
+  setRuns(runs: TextRun[]): void {
+    this.runsData = runs
     this.invalidateShaping()
   }
 
   /**
-   * Shape the runs into quads + materials, cached until the content, the layout or the FONTS
-   * change.
+   * Drops the cached shaping and announces it lane-wide.
    *
-   * The parameter is a FontProvider rather than the GPU-owning FontBook because shaping
-   * reads metrics and an atlas INDEX and nothing else - no texture, no device. Keeping it
-   * at that width is what lets text be measured, culled and hit-tested with no renderer at
-   * all (see text/msdfProvider.ts, which is how the self-tests shape under node).
-   *
-   * The cache cannot be keyed on that argument - callers pass whatever provider is to hand,
-   * and two of them may be different objects over the same metrics - so it is keyed on the
-   * global font epoch instead. An application replacing its atlases at runtime bumps that, and
-   * every Text re-shapes on next access rather than keeping a layout measured against metrics
-   * that are gone.
+   * Both halves are needed. The subclass hook clears what THIS node cached; the epoch is
+   * what the renderer can actually see, since it packs every text node into shared buffers
+   * and has no way to ask each one whether it re-shaped. Without the second half a node
+   * whose content changes in place - runs replaced, or a layout option edited and markDirty
+   * called - keeps drawing its old glyphs until something unrelated forces a rebuild.
    */
-  shaped(fonts: FontProvider): ShapedText {
-    if (!this.shapedCache || this.shapedFontEpoch !== fontEpoch()) {
-      this.shapedCache = layoutText(this.runsData, this.layoutOptions(), fonts)
-      this.shapedFontEpoch = fontEpoch()
-    }
-    return this.shapedCache
+  protected invalidateShaping(): void {
+    bumpTextShapingEpoch()
+    this.dropShapingCache()
   }
 
-  protected override dropShapingCache(): void {
-    this.shapedCache = null
+  /** Replace the content with a single styled run (invalidates the cached shaping). */
+  setText(text: string, style?: TextRunStyle): void {
+    this.runsData = [{ text, style }]
+    this.invalidateShaping()
   }
+
+  /** Force a re-shape on the next access (after mutating layout options in place). */
+  markDirty(): void {
+    this.invalidateShaping()
+  }
+
+  /** The block options as the shaper takes them. */
+  protected layoutOptions(): TextLayoutOptions {
+    return {
+      align: this.align,
+      maxWidth: this.maxWidth,
+      lineHeight: this.lineHeight,
+      direction: this.direction,
+      orientation: this.orientation,
+      textPath: this.textPath,
+    }
+  }
+
+  /**
+   * Drop whatever the subclass cached from the last shaping. Called for every content or
+   * layout change; a subclass whose geometry is derived from the shaping (VectorText) also
+   * invalidates that here.
+   */
+  protected abstract dropShapingCache(): void
 }

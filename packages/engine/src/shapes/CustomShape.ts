@@ -27,6 +27,31 @@
 // property the outline depends on and call markGeometryDirty() to ask for a fresh run - the
 // same call Circle.radius or Polyline.points needs, for the same reason.
 //
+// NAMING A SUBCLASS FIELD. Node and Shape hand down about fifty accessors - x, y, rotation,
+// fill, strokeWidth and the rest. A subclass field of the same name SHADOWS one. The field
+// declaration defines an own data property on the instance, and an own property sits in front
+// of a prototype accessor for writes as much as for reads. The accessor is untouched, every
+// other instance still reaches it, and on this one instance it is unreachable.
+//
+// That holds for the life of the object rather than for its initial value alone. Later
+// assignments - `ring.x = 200`, from a method or a caller - land on the own property as well,
+// so the accessor's backing store keeps its default, the epoch bump that tells the renderer
+// something moved never happens, and reads report whatever was last written. The shape stays
+// where it started and the two views of `x` disagree quietly.
+//
+// Assignment is not the thing to avoid; declaration is. `this.x = 100` in a constructor, in a
+// method, or from a caller all resolve along the prototype chain and run the setter. Declare
+// fields for names of your own, and assign for names you inherit:
+//
+//   class Ring extends CustomShape {
+//     private thickness = 4                    // a name of its own: a field is right
+//     constructor() { super(); this.x = 100 }  // an inherited accessor: assign through it
+//   }
+//
+// TypeScript reports this as TS2610, so `tsc` catches it. A build that only runs a bundler
+// does not typecheck, and neither does JavaScript. Whether a field declaration defines or
+// assigns follows the consumer's `useDefineForClassFields`, on by default from target ES2022.
+//
 // The other half of the API is on the context: see ShapeContext for the path vocabulary, and
 // for style(), which gives an individual run of segments its own colour and thickness.
 

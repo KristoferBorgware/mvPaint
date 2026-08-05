@@ -20,7 +20,7 @@
 // The bottom row is shadows, which are on the receiving end of the same question: a shadow
 // never writes depth either, but it is still tested against what the opaque pass wrote.
 
-import { Circle, Image, Rect, Text, type Scene, type SceneResources } from '@mvpaint/engine'
+import { Circle, Image, Rect, MSDFText, type Scene, type SceneResources } from '@mvpaint/engine'
 import { NAVY, SLATE } from './palette'
 import type { SceneContent } from './types'
 
@@ -28,12 +28,12 @@ import type { SceneContent } from './types'
  * behind it is unmistakable rather than a subtle shift. */
 const FRONT_ALPHA = 0.4
 
-function label(x: number, y: number, text: string, color = SLATE): Text {
-  return new Text({ x, y, text, style: { fontSize: 14, color } })
+function label(x: number, y: number, text: string, color = SLATE): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 14, color } })
 }
 
-function heading(x: number, y: number, text: string): Text {
-  return new Text({ x, y, text, style: { fontSize: 17, fontStyle: 'bold', color: NAVY } })
+function heading(x: number, y: number, text: string): MSDFText {
+  return new MSDFText({ x, y, text, style: { fontSize: 17, fontStyle: 'bold', color: NAVY } })
 }
 
 /** A solid checkerboard - opaque everywhere, so it works as a BACK object. */
@@ -114,7 +114,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
-      new Text({
+      new MSDFText({
         name: `text-blend-${i}`,
         x: -230 + i * 30,
         y: rowY - 30 - i * 26,
@@ -164,7 +164,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       return new Circle({ name, x: cx, y: cy, radius: 56, fill: [...rgb, alpha] })
     }
     if (kind === 'text') {
-      return new Text({
+      return new MSDFText({
         name,
         x: cx - 72,
         y: cy + 24,

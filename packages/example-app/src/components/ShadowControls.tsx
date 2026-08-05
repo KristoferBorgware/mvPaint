@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Box, FormControlLabel, Slider, Stack, Switch, Typography } from '@mui/material'
 import BlurOnIcon from '@mui/icons-material/BlurOn'
-import { parseColor, Text, type RGBA, type Shape } from '@mvpaint/engine'
+import { parseColor, MSDFText, type RGBA, type Shape } from '@mvpaint/engine'
 
 /** The shadow fields this panel edits, in UI units (colour as a hex string). */
 interface ShadowUi {
@@ -40,13 +40,13 @@ function rgbToHex(color: RGBA): string {
 }
 
 /**
- * Reads a node's current shadow back into UI terms. Text keeps its shadow as per-run
+ * Reads a node's current shadow back into UI terms. MSDFText keeps its shadow as per-run
  * styling rather than on the shape-level shadow* properties, so it reads from its first
  * run - and has no blur, spread or stroke option of its own, which stay at whatever the
  * panel last showed rather than snapping to a default the node never had.
  */
 function readShadow(node: Shape, fallback: ShadowUi): ShadowUi {
-  if (node instanceof Text) {
+  if (node instanceof MSDFText) {
     const shadow = node.runs[0]?.style?.shadow
     if (!shadow) return { ...fallback, enabled: false }
     return {
@@ -74,7 +74,7 @@ function readShadow(node: Shape, fallback: ShadowUi): ShadowUi {
 
 function applyShadow(node: Shape, ui: ShadowUi): void {
   const color = hexToRgb(ui.color)
-  if (node instanceof Text) {
+  if (node instanceof MSDFText) {
     node.setRuns(
       node.runs.map((run) => ({
         ...run,
@@ -100,7 +100,7 @@ function applyShadow(node: Shape, ui: ShadowUi): void {
 
 interface ShadowControlsProps {
   selected: readonly Shape[]
-  /** Called after editing a Text node, whose runs need the text lane to re-shape them. */
+  /** Called after editing an MSDFText node, whose runs need the text lane to re-shape them. */
 }
 
 /**
@@ -128,7 +128,7 @@ export function ShadowControls({ selected }: ShadowControlsProps) {
     setUi(readShadow(first, uiRef.current))
   }, [selected])
 
-  // Controls -> selection, on user edits only. Editing a Text rewrites its runs, which the
+  // Controls -> selection, on user edits only. Editing an MSDFText rewrites its runs, which the
   // engine notices on its own - the host used to have to poke the renderer afterwards.
   useEffect(() => {
     if (editSeq === 0) return
@@ -141,7 +141,7 @@ export function ShadowControls({ selected }: ShadowControlsProps) {
   }, [])
 
   const empty = selected.length === 0
-  const textOnly = !empty && selected.every((node) => node instanceof Text)
+  const textOnly = !empty && selected.every((node) => node instanceof MSDFText)
 
   return (
     <Stack spacing={1}>
@@ -250,7 +250,7 @@ export function ShadowControls({ selected }: ShadowControlsProps) {
           />
           <Typography variant="caption" color="text.secondary">
             Off casts the shadow from the fill only, skipping the stroke ring - a thick
-            decorative outline otherwise widens the shadow with it. No effect on Text, which
+            decorative outline otherwise widens the shadow with it. No effect on MSDFText, which
             duplicates its glyphs rather than blurring a silhouette.
           </Typography>
         </Stack>

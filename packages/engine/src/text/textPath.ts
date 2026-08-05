@@ -1,4 +1,4 @@
-// Text on a path: a curve that drives where each glyph sits and which way it faces.
+// MSDFText on a path: a curve that drives where each glyph sits and which way it faces.
 //
 // The shaper lays a block out on a straight baseline first, exactly as it always does, and
 // this bends the result afterwards. Each glyph keeps its own metrics, kerning and styling;

@@ -16,7 +16,7 @@
 // layout it was made against.
 //
 // Resolution never fails. An unknown family - a typo, or an atlas still in flight - falls back
-// to the default, so a Text built before its family finished loading draws in the meantime and
+// to the default, so an MSDFText built before its family finished loading draws in the meantime and
 // switches over on the next repack. That is deliberate: text vanishing or throwing because a
 // network request has not landed yet is a worse failure than text in the wrong face for a
 // moment.
@@ -90,7 +90,7 @@ export class FontLibrary implements FontFamilies {
     // against it; they have to re-shape now that the real thing exists. The epoch is global, so
     // this re-shapes every text node and not just those - over-broad, and worth it here: adding
     // a family is a deliberate, rare act, and the alternative is asking each node which family
-    // it names on every access. A node changing ITS OWN family stays precise (Text.fontFamily).
+    // it names on every access. A node changing ITS OWN family stays precise (MSDFText.fontFamily).
     bumpFontEpoch()
     bumpTextShapingEpoch()
   }

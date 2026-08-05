@@ -10,7 +10,7 @@ import { Vector2 } from '../math/Vector2'
 import { Container } from '../shapes/Container'
 import { Node } from '../shapes/Node'
 import { Rect , type RectOptions } from '../shapes/Rect'
-import { Text } from '../shapes/Text'
+import { MSDFText } from '../shapes/MSDFText'
 import type { AttrChangeEvent, ChildEvent, MarqueeEvent } from './sceneEvents'
 import { deviceFor, eventNamesFor, HOVER_EVENTS, POINTER_ACTIONS } from './eventNames'
 import { hasHoverListeners, listenerCount, resetListenerCensus } from './listenerCensus'
@@ -744,7 +744,7 @@ it('attribute change events', () => {
 
     // A change routed through a dedicated setter still reports.
     const runs: AttrChangeEvent[] = []
-    const text = root.addChild(new Text({ text: 'a' }))
+    const text = root.addChild(new MSDFText({ text: 'a' }))
     text.on('runsChange', (e) => runs.push(e as AttrChangeEvent))
     text.setAttr('runs', [{ text: 'b' }])
     assert(runs.length === 1 && text.runs[0].text === 'b', 'an attribute written through its own setter reports too')

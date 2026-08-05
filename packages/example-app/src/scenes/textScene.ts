@@ -1,12 +1,12 @@
-// Text-lane showcase: the four Inter styles, mixed sizes within one node, a gradient-filled
+// text-lane showcase: the four Inter styles, mixed sizes within one node, a gradient-filled
 // run, per-letter outlined glyphs, underline + strikethrough, a highlighted run, wrapped and
 // aligned blocks, baseline shift, faux styles, the glyph-duplicate drop shadow and glow,
 // justification, right-to-left flow and vertical orientation.
 //
-// Positions are in world px (y-up); each Text lays its first line out at its own origin and
+// Positions are in world px (y-up); each MSDFText lays its first line out at its own origin and
 // flows downward.
 
-import { Text, type Scene } from '@mvpaint/engine'
+import { MSDFText, type Scene } from '@mvpaint/engine'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL, YELLOW } from './palette'
 import type { SceneContent } from './types'
 
@@ -16,7 +16,7 @@ export function buildTextScene(scene: Scene): SceneContent {
   const root = scene.root
   // Gradient-filled title (a single run whose fill is a linear gradient across its width).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-title',
       x: LEFT,
       y: 340,
@@ -39,7 +39,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // The four styles in one rich-text node (per-run font style + solid color).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-styles',
       x: LEFT,
       y: 250,
@@ -54,7 +54,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Mixed sizes within one line - one atlas serves every size.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-sizes',
       x: LEFT,
       y: 190,
@@ -68,7 +68,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Per-letter stroke (outline): a light fill with a dark outline around each glyph.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-outline',
       x: LEFT,
       y: 120,
@@ -79,7 +79,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Underline and strikethrough (font-derived placement/thickness).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-decorations',
       x: LEFT,
       y: 30,
@@ -92,7 +92,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Highlighted run (a background color drawn behind the glyphs).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-highlight',
       x: LEFT,
       y: -40,
@@ -106,7 +106,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Word-wrapped paragraph (greedy wrap to maxWidth, custom line height).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-paragraph',
       x: LEFT,
       y: -90,
@@ -121,7 +121,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Baseline shift: a superscript exponent and a subscript.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-baseline',
       x: 90,
       y: 340,
@@ -137,7 +137,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Faux weight/slant synthesized on top of the regular atlas (dilation + shear).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-faux',
       x: 90,
       y: 285,
@@ -152,7 +152,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Drop shadow: an offset, softened copy behind the glyphs.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-shadow',
       x: 90,
       y: 225,
@@ -168,7 +168,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Soft glow: a dilated halo copy behind the glyphs.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-glow',
       x: 90,
       y: 155,
@@ -179,7 +179,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Justified paragraph (spaces stretch so every non-final line fills the width).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-justify',
       x: 90,
       y: 95,
@@ -193,7 +193,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Right-to-left flow (mechanical mirror; the first character lands rightmost).
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-rtl',
       x: 90,
       y: -15,
@@ -206,7 +206,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Center-aligned block with hard line breaks.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-centered',
       x: 90,
       y: -70,
@@ -222,7 +222,7 @@ export function buildTextScene(scene: Scene): SceneContent {
   // having on hand: an axis-aligned box around differently-turned members shears them
   // when it is scaled non-uniformly, which is the hardest thing the transformer does.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-rotated',
       x: 470,
       y: -140,
@@ -234,7 +234,7 @@ export function buildTextScene(scene: Scene): SceneContent {
 
   // Vertical orientation: glyphs stack top-to-bottom in right-to-left columns.
   root.addChild(
-    new Text({
+    new MSDFText({
       name: 'text-vertical',
       // Clear of the justified block's 360-wide measure, which reaches x 450: vertical columns
       // run right to left, so this node's glyphs sit to the LEFT of where it is anchored.

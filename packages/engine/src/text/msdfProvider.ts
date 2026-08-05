@@ -113,7 +113,7 @@ export function resolveStyle<T>(
  * A FontProvider over MSDF metrics alone - no device, no fetch, no texture, just the same JSON
  * a FontBook would eventually feed into its atlases. For running the shaper (layoutText)
  * synchronously wherever a real FontBook isn't available yet - e.g. a scene measuring how tall
- * a paragraph of Text will wrap, to place the next node below it, without waiting on WebGPU
+ * a paragraph of MSDFText will wrap, to place the next node below it, without waiting on WebGPU
  * initialization to do so.
  *
  * `styles` must be the set you render with. Metrics differ between atlases, and a layout is

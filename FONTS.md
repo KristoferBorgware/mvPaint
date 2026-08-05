@@ -26,19 +26,19 @@ File paths are relative to the repository root. For the renderer as a whole see
 Both draw the same styled runs through the same shaper. They differ in what a glyph *becomes*
 after shaping.
 
-| | `Text` | `VectorText` |
+| | `MSDFText` | `VectorText` |
 | --- | --- | --- |
 | Glyph representation | textured quad sampling a distance field | tessellated outline |
 | Render lane | text | mesh |
 | Cost per glyph | 4 vertices, 2 triangles | hundreds of vertices |
 | Asset | MSDF atlas: PNG + metrics JSON | polygon atlas: flattened outlines JSON |
 | Supplied by | the renderer, per family name | the node, as an object |
-| Engine ships one? | yes, Inter, as a fallback | no |
+| Engine ships one? | no | no |
 | Blurred drop shadow | offset duplicate of the glyphs | real silhouette through the shadow atlas |
 | Hit testing | bounding box of the shaped quads | per-glyph, against the real triangles |
 
-Neither path parses a font file at runtime. The engine's dependencies are `earcut` and
-`svgpath`. Runtime parsing is opt-in through [`@mvpaint/ttf`](packages/ttf).
+Neither path parses a font file at runtime. The engine's only dependency is `earcut`. Runtime
+parsing is opt-in through [`@mvpaint/ttf`](packages/ttf).
 
 ---
 
@@ -123,15 +123,13 @@ packages/scripts/out/            generated atlases (gitignored)
         ↓ copied by hand
 <your app>/fonts/msdf/           PNG + JSON per style
 <your app>/fonts/polygons/       outlines JSON per style
-packages/engine/src/text/fonts/  Inter MSDF only — the fallback the engine ships
 ```
 
-The engine bundles exactly one asset: the Inter MSDF atlas, so `Text` renders before an
-application has chosen a typeface. It is a fallback, not the way to select a font, and there is
-no outline equivalent — `VectorText` is always given its outlines.
+The engine bundles no font of either kind. `MSDFText` draws once `fonts` supplies atlases, and
+`VectorText` is always given its outlines.
 
-`packages/example-app/src/fonts/` is a working example of the application side, including the
-loader module.
+`packages/example-app` is a working example of the application side: the atlases live in
+`public/fonts/` and `src/fonts/index.ts` is the loader module.
 
 ---
 
@@ -149,7 +147,8 @@ atlas needs no special handling.
 const handle = await createSceneRenderer(canvas, { fonts: interAtlases })
 ```
 
-Omitting `fonts` loads the bundled fallback. A set may be **partial**: a style's index in
+Omitting `fonts` loads no atlases at all, and `MSDFText` draws nothing until `setFonts()`
+supplies some. A set may be **partial**: a style's index in
 `STYLE_ORDER` *is* its texture array layer, so unsupplied styles leave their layers zeroed and
 the style ladder resolves through whatever is present.
 
@@ -274,7 +273,7 @@ shape may claim several material records — one per distinct paint.
 ### Per node
 
 ```ts
-new Text({ text: 'Heading', fontFamily: 'roboto' })   // MSDF: a name
+new MSDFText({ text: 'Heading', fontFamily: 'roboto' })   // MSDF: a name
 node.fontFamily = 'inter'
 
 new VectorText({ fonts: robotoOutlines, text: '…' })  // vector: the object
@@ -324,7 +323,7 @@ visible set.
 | Counter | Bumped by | Effect |
 | --- | --- | --- |
 | Mesh geometry epoch | `Shape.markGeometryDirty()` | repack the mesh lane |
-| Text shaping epoch | `TextBlock.invalidateShaping()` | repack the text lane |
+| Text shaping epoch | `Text.invalidateShaping()` | repack the text lane |
 | Font epoch | a family's atlases replaced, or a new family loaded | drop **every** cached text layout |
 
 **A lane repack is not a re-shape.** `TextBatcher.rebuild` calls `text.shaped(book)` per node and
@@ -361,7 +360,7 @@ triangles are derived from the shaping.
 
 Two properties invert between the paths:
 
-| | `Text` | `VectorText` |
+| | `MSDFText` | `VectorText` |
 | --- | --- | --- |
 | `strokeWidth` | free — a shader threshold | repacks — the stroker emits triangles |
 | fill color | repacks — packed per vertex | free — `fillColor` in the object record |
