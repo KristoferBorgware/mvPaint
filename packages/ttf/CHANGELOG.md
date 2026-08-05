@@ -1,5 +1,38 @@
 # @mvpaint/ttf
 
+## 1.0.0
+
+### Patch Changes
+
+- 9c941ee: Ship `src/` alongside `dist/`, so Go to Definition lands on the real TypeScript. Both packages emit declaration maps, and every one of them names a path under `src/` — following that path from an editor reaches the file it names. The source is where this codebase's documentation lives, so reading it is the point of jumping to it. `@mvpaint/ttf` emits declaration maps for the first time here.
+
+  `src/**/*.test.ts` stays out through a negated pattern in `files`. Nothing in `src/` reaches an application's bundle: `exports` lists only the package entry points and routes each to `dist/`, so `src/` is never in the module graph and occupies disk in `node_modules` only. The engine's tarball goes from 644 kB to 893 kB packed; ttf's adds four files.
+
+- 68d7ba8: Prune down to what an application imports. Two changes together: `sideEffects: false` in both manifests, which tells a bundler a file can be dropped whole when nothing is imported from it, and `preserveModules` in both builds, which emits one file per source module rather than concatenating them into shared chunks. `dist/` now mirrors `src/` in each package, so a bundler prunes at module granularity instead of at chunk granularity.
+
+  Measured with esbuild against the real tarball, ESM and minified:
+
+  | Consumer import                                  | before | after  |
+  | ------------------------------------------------ | ------ | ------ |
+  | `import { Vector2 } from '@mvpaint/engine'`      | 23 kB  | 1 kB   |
+  | `import { Vector2 } from '@mvpaint/engine/core'` | 14 kB  | 1 kB   |
+  | `import { Rect }`                                | 58 kB  | 38 kB  |
+  | `import * as E`                                  | 273 kB | 283 kB |
+
+  Importing the whole surface grows by 10 kB, because per-module boundaries leave less for a bundler to hoist across. Everything narrower shrinks. What remains behind `Rect` is its own dependency cone — `Node`, `Shape`, the stroke builder and the math types.
+
+  `@mvpaint/ttf` measures the same either way at its current size; it emits three modules so that the property holds as the package grows rather than being noticed later.
+
+  No API change, and no change to what is exported from any entry point. The WebGL2 fallback is still reached through a dynamic import and still lands in its own chunk in a consumer's build.
+
+- Updated dependencies [61c0880]
+- Updated dependencies [9c941ee]
+- Updated dependencies [8a441b1]
+- Updated dependencies [1eada49]
+- Updated dependencies [68d7ba8]
+- Updated dependencies [61c0880]
+  - @mvpaint/engine@1.0.0
+
 ## 0.1.2
 
 ### Patch Changes
