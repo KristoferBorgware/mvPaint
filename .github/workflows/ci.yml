@@ -58,7 +58,7 @@ jobs:
         run: npm test
 
       # Not just `npm run build:packages`: this proves the tarballs npm would actually upload
-      # are complete. The entry points, the type declarations and the fallback atlas all have to
+      # are complete. The entry points, the type declarations and the engine's src/ all have to
       # be in them, and `files` in package.json is easy to get subtly wrong.
       #
       # Packed through the same strip the release runs, so what is inspected below is the shape
@@ -77,11 +77,12 @@ jobs:
             tar -tzf "$t" | sed 's|^package/||' | sort
           done
 
-      # The condition that broke every Vite consumer of 0.2.0: "development" points at src/, which
-      # `files` does not ship, so a bundler matching it resolves to nothing. Publishing is supposed
-      # to strip it - assert that on the packed manifest, because the failure is invisible here
-      # (this repo wants the condition) and only shows up in someone else's dev server. The same
-      # strip drops prepublishOnly, which runs a path that does not exist outside this repo.
+      # "development" points every entry at src/, which is how this workspace resolves itself
+      # with no build step in between. Publishing strips it, so a consumer resolves to dist/ in
+      # every condition - dev and production from the same artifact. Asserted on the packed
+      # manifest because the failure is invisible here (this repo wants the condition) and shows
+      # up only in someone else's dev server. The same strip drops prepublishOnly, which runs a
+      # path that does not exist outside this repo.
       - name: Check the packed manifests carry no development condition
         run: |
           cd /tmp/packed
@@ -104,15 +105,77 @@ jobs:
             '
           done
 
-      # Four, not eight: glyph outlines are an application's asset and the engine ships none.
-      # What is left is the Inter MSDF FALLBACK, one PNG per style - what an application gets
-      # when it passes no `fonts` to createSceneRenderer, so that Text draws with no setup.
-      - name: Check the packed engine carries its fallback atlas
+      # Both packages ship code and nothing else. Fonts of every kind - MSDF atlases, glyph
+      # outlines, the TTFs @mvpaint/ttf parses - are an application's assets, so a font file in
+      # either tarball means something has been imported back into a package's module graph.
+      #
+      # Tests are excluded through a negated `files` pattern, and src/ IS shipped, so the two are
+      # checked together: a pattern that stops excluding tests is otherwise invisible until
+      # someone unpacks the tarball.
+      - name: Check the packed packages ship code, no assets and no tests
         run: |
-          cd /tmp/packed && tar -xzf mvpaint-engine-*.tgz
-          count=$(ls package/dist/assets | wc -l)
-          echo "assets in tarball: $count"
-          test "$count" -eq 4
+          cd /tmp/packed
+          for t in *.tgz; do
+            rm -rf package && tar -xzf "$t"
+            name=$(node -p "require('./package/package.json').name")
+            assets=$(find package \( -name '*.png' -o -name '*.ttf' -o -name '*.otf' \) | wc -l)
+            tests=$(find package \( -name '*.test.*' -o -name '*.spec.*' \) | wc -l)
+            sources=$(find package/src -name '*.ts' | wc -l)
+            echo "$name: font files $assets | test files $tests | src files $sources"
+            test "$assets" -eq 0
+            test "$tests" -eq 0
+            test "$sources" -gt 0
+          done
+
+      # src/ is shipped for the declaration maps: every .d.ts.map names a path under it, and an
+      # editor follows that path for Go to Definition. A map naming a file `files` does not
+      # carry resolves to nothing, which no build or typecheck reports.
+      - name: Check every declaration map resolves to shipped source
+        run: |
+          cd /tmp/packed
+          for t in *.tgz; do
+          rm -rf package && tar -xzf "$t"
+          node -e '
+            const fs = require("fs"), path = require("path")
+            const walk = (d, out = []) => {
+              for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+                const p = path.join(d, e.name)
+                e.isDirectory() ? walk(p, out) : out.push(p)
+              }
+              return out
+            }
+            const maps = walk("package/dist").filter((f) => f.endsWith(".d.ts.map"))
+            const dangling = []
+            for (const m of maps) {
+              for (const s of JSON.parse(fs.readFileSync(m, "utf8")).sources ?? []) {
+                const target = path.resolve(path.dirname(m), s)
+                if (!fs.existsSync(target)) dangling.push(`${m} -> ${s}`)
+              }
+            }
+            const name = JSON.parse(fs.readFileSync("package/package.json", "utf8")).name
+            console.log(`${name}: declaration maps ${maps.length}, dangling sources ${dangling.length}`)
+            if (!maps.length) { console.error("no declaration maps found"); process.exit(1) }
+            if (dangling.length) { console.error(dangling.slice(0, 10).join("\n")); process.exit(1) }
+          '
+          done
+
+      # Vite injects its module-preload helper around dynamic imports as `const __vitePreload`,
+      # a fixed name, and inlines it into the emitting chunk. build.lib suppresses that - both
+      # packages set it - and this holds the line: a consumer bundling a dist that carries the
+      # helper declares a second one in the same scope, and on Vite 8 that is a hard parse error
+      # in their build rather than in this one.
+      - name: Check the packed packages carry no Vite internals
+        run: |
+          cd /tmp/packed
+          for t in *.tgz; do
+            rm -rf package && tar -xzf "$t"
+            name=$(node -p "require('./package/package.json').name")
+            if grep -rlE '__vite[A-Za-z_]*' package/dist --include='*.js'; then
+              echo "$name: Vite internals reached the tarball - is build.lib still set?"
+              exit 1
+            fi
+            echo "$name: no Vite internals in dist"
+          done
 
       # Not `npm run build`: build:packages ran above, and this resolves the workspace deps to
       # that fresh dist. Unconditional, so a pull request finds out that the app no longer

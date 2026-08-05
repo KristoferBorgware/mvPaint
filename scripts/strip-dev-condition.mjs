@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // The "development" export condition points every entry at src/, which is how the packages in
-// this repo resolve each other with no build step in between (see README, "Setup"). src/ is not
-// in the tarball, so the condition must not reach the registry: a bundler that matches
-// "development" - Vite does, in dev, out of the box - resolves the package to a file that does
-// not exist and fails with "Failed to resolve entry for package".
+// this repo resolve each other with no build step in between (see README, "Setup"). It is an
+// arrangement for this workspace only and must not reach the registry.
+//
+// @mvpaint/engine does ship its src/, for declaration maps and Go to Definition (see its
+// package.json "files"), so a consumer whose bundler matched "development" - Vite does, in dev,
+// out of the box - would resolve the package to raw TypeScript and compile it with their own
+// toolchain. That gives them a dev build and a production build made from different inputs,
+// under a target and a tsconfig the engine was never checked against. Published packages
+// resolve to dist/ in every condition.
 //
 // The strip has to happen BEFORE `changeset publish` starts rather than inside each package's
 // prepack. npm builds the manifest it sends to the registry from the package.json it read before
