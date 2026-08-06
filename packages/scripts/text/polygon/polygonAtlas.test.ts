@@ -1,6 +1,7 @@
 // Self-test for the polygon atlas generator: that what it writes is what the engine reads,
-// that the engine reading it gets the same letterforms a live parse would, and that the atlases
-// the example app has copied in are actually the ones this tool produces today.
+// that the engine reading it gets the same letterforms a live parse would, that a face handed
+// over as woff2 gives the same atlas as the same face as sfnt, and that the atlases the example
+// app has copied in are the ones this tool produces today.
 //
 // The last of those is the one that matters most in practice, and it is the price of the
 // generator's output being copied rather than imported. out/ is transient and gitignored; the
@@ -12,13 +13,15 @@
 //   npx vitest run packages/scripts/text/polygon/polygonAtlas.test.ts
 
 import { expect, it } from 'vitest'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { compress } from 'wawoff2'
 import { TtfFont } from '@mvpaint/ttf'
 import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 import { buildPolygonAtlas } from './genPolygonAtlas'
-import { FONT_SRC, readFontSources } from '../fontSources'
+import { CHARSET } from '../charset'
+import { FONT_SRC, readFontFaces, toSfnt } from '../fontSources'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 // The example app's copy: the committed artifact, and the only one there is now that the
@@ -40,7 +43,7 @@ const fontData = async (name: string): Promise<ArrayBuffer> => {
 
 
 it('the document the generator writes', async () => {
-    const atlas = await buildPolygonAtlas('Inter-Regular', await fontData('Inter-Regular.ttf'))
+    const atlas = await buildPolygonAtlas('inter-regular', [{ data: await fontData('Inter-400-normal.ttf') }])
 
     assert(atlas.format === POLYGON_ATLAS_FORMAT, 'the document names the format the engine expects')
     assert(atlas.unitsPerEm > 0 && atlas.base > 0 && atlas.lineHeight > atlas.base, 'vertical metrics are coherent')
@@ -79,8 +82,8 @@ it('the document the generator writes', async () => {
 // testing arithmetic - it is testing that nothing is lost or transposed in between: the
 // serialization, the rounding, and the engine's own reading of the document.
 it('what the engine reads back is what a live parse would have produced', async () => {
-    const data = await fontData('Inter-Regular.ttf')
-    const atlas = await buildPolygonAtlas('Inter-Regular', data)
+    const data = await fontData('Inter-400-normal.ttf')
+    const atlas = await buildPolygonAtlas('inter-regular', [{ data }])
     const baked = new PolygonFont(atlas)
     const live = await TtfFont.parse(data)
 
@@ -117,19 +120,70 @@ it('what the engine reads back is what a live parse would have produced', async 
     assert(bakedPairs === livePairs, 'every kerning pair the font has over the charset is baked in')
 })
 
-// Every font in the folder, not a list kept here: the generator enumerates fonts/, so adding a
-// face means this check covers it without anyone editing the test - and means a face added but
-// never copied into the app fails here rather than going unnoticed.
-it('the atlases the app has copied in are the ones this tool produces', async () => {
-    const sources = await readFontSources()
-    assert(sources.length > 0, 'there are fonts to generate from')
+// A .woff2 is the same sfnt under brotli, with glyf and loca re-encoded. Packing one here and
+// reading it back through the folder's own loader tests that round trip against a face whose
+// atlas the rest of this file already pins down, rather than against whatever the fonts folder
+// happens to hold today.
+it('a face handed over as woff2 gives the same atlas as the sfnt inside it', async () => {
+    const sfnt = await fontData('Inter-400-normal.ttf')
+    const packed = await compress(new Uint8Array(sfnt))
+    assert(Buffer.from(packed.buffer, packed.byteOffset, 4).toString('latin1') === 'wOF2', 'the test data really is woff2')
 
-    for (const { base, file } of sources) {
-      const rebuilt = `${JSON.stringify(await buildPolygonAtlas(file.replace(/\.(ttf|otf)$/i, ''), await fontData(file)))}\n`
-      const committed = await readFile(join(ATLAS_DIR, `${base}.polygons.json`), 'utf8')
+    const unpacked = await toSfnt('Inter-400-normal.woff2', packed)
+    const fromWoff2 = await buildPolygonAtlas('inter-regular', [{ data: unpacked }])
+    const fromSfnt = await buildPolygonAtlas('inter-regular', [{ data: sfnt }])
+
+    assert(JSON.stringify(fromWoff2) === JSON.stringify(fromSfnt), 'the container the face arrived in leaves no trace in its atlas')
+})
+
+// Splitting one font across two sources is the shape a latin/latin-ext pair arrives in, with
+// the difference between the files taken out: whatever routing the assembly does, the glyphs
+// have to come out the same. Kerning is the one thing that does not survive the split, and
+// that is the rule rather than a loss - a pair is a fact one file holds about two glyphs it
+// draws itself, so a pair split across two files has no entry to find.
+it('a face drawn from several files draws the same glyphs as one file would', async () => {
+    const data = await fontData('Inter-400-normal.ttf')
+    const half = Math.floor(CHARSET.length / 2)
+    const front = CHARSET.slice(0, half)
+    const back = CHARSET.slice(half)
+
+    const split = await buildPolygonAtlas('inter-regular', [{ data, provides: front }, { data, provides: back }])
+    const whole = await buildPolygonAtlas('inter-regular', [{ data }])
+
+    assert(JSON.stringify(split.glyphs) === JSON.stringify(whole.glyphs), 'every glyph is the one the single-file atlas has')
+    assert(split.unitsPerEm === whole.unitsPerEm && split.base === whole.base, 'and the metrics come from the first file')
+
+    const pairs = new Set(whole.kernings.map(([first, second]) => `${first},${second}`))
+    assert(
+      split.kernings.every(([first, second]) => pairs.has(`${first},${second}`)),
+      'the kerning it keeps is kerning the font has',
+    )
+    const spans = ([first, second]: readonly number[]) => front.includes(first) !== front.includes(second)
+    assert(
+      split.kernings.every((kerning) => !spans(kerning)) && whole.kernings.some(spans),
+      'and the pairs it drops are the ones whose two glyphs come from different files',
+    )
+})
+
+// Driven by what the app has copied in rather than by what the fonts folder holds: the folder
+// is a library a developer adds to, and an application draws with the part of it that it has
+// chosen. A copied atlas going stale is what this catches - the face it was generated from
+// changing, the charset widening, the tolerance moving.
+it('the atlases the app has copied in are the ones this tool produces', async () => {
+    const { faces } = await readFontFaces()
+    const copied = (await readdir(ATLAS_DIR)).filter((name) => name.endsWith('.polygons.json'))
+    assert(copied.length > 0, 'the app has atlases copied in')
+
+    for (const name of copied) {
+      const base = name.slice(0, -'.polygons.json'.length)
+      const face = faces.find((candidate) => candidate.base === base)
+      assert(face !== undefined, `${name} has a face in ${FONT_SRC} to have been generated from`)
+
+      const rebuilt = `${JSON.stringify(await buildPolygonAtlas(base, face!.sources))}\n`
+      const committed = await readFile(join(ATLAS_DIR, name), 'utf8')
       assert(
         rebuilt === committed,
-        `${base}.polygons.json is up to date with the font and this generator - if this fails, run ` +
+        `${name} is up to date with the font and this generator - if this fails, run ` +
           'npm run gen:polygons and copy packages/scripts/out/polygons/ into the app',
       )
     }

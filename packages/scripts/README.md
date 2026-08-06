@@ -13,13 +13,26 @@ npm test               # the polygon generator's self-test
 ## In and out
 
 **Input is the `fonts/` folder, enumerated.** Neither tool holds a list of typefaces. Drop a
-font file in and the next run generates atlases for it; take one out and it stops. Name files
-`<Family>-<Style>.ttf` (or `.otf`), where `<Style>` is `Regular`, `Bold`, `Italic` or
-`BoldItalic` — the four the renderer selects between per text run. Case and separators are
-ignored, and a file with no style suffix is taken as Regular. The output basename is
-`<family>-<style>`, so `Inter-BoldItalic.ttf` becomes `inter-bold-italic`.
+`.ttf`, `.otf` or `.woff2` in and the next run generates atlases for it; take one out and it
+stops. A `.woff2` is unpacked to the sfnt inside it in memory, so a face works the same whichever
+container it arrives in.
 
-Inter is simply what this repository keeps in the folder, and its licence sits there with it.
+**A file says which face it is.** The family comes from the font's `name` table and the style
+from `head.macStyle`, so `Poppins-700-italic-latin.woff2` and `Poppins-BoldItalic.ttf` both come
+out as `poppins-bold-italic`. Filenames are only ever used to report which file something came
+from. A font whose family name carries a weight word names itself that way: `Quicksand Light`
+becomes `quicksand-light-regular`.
+
+**Files that agree on family and style are one face.** Subset files — a `latin` slice beside a
+`latin-ext` one — collect into one atlas. The file covering most of the charset goes first and
+supplies the metrics, ties going to the weight nearest the style's own; the rest fill in what it
+lacks, and a file that adds nothing is named in a line the run prints. See
+[FONTS.md](../../FONTS.md#1-source-fonts) for the full ordering.
+
+What the folder holds is a developer's choice, not the tools'. Four Inter faces are committed,
+with their licence beside them: the self-tests parse them and the example app's atlases are
+generated from them, so a fresh clone can run the tests and the dev server. Everything else
+dropped in is gitignored — a local library to generate from, not part of the repository.
 
 **Output is `out/`, and it is gitignored.** Copying what you want from there into your
 application is a deliberate step, and that is the point: an atlas is the *application's* asset.
@@ -51,7 +64,10 @@ cannot be imported by accident, and the engine's dependency list is `earcut` and
 
 `genMsdfAtlas.ts` packs a distance-field glyph atlas per face: one PNG plus the BMFont-shaped
 metrics JSON the shaper reads, with the underline/strikethrough metrics added. This is the
-default text path's asset — cheap, four vertices per glyph, crisp at any zoom.
+default text path's asset — four vertices per glyph, crisp at any zoom.
+
+The packer takes one font file per call, so a face spread over subset files is packed in several
+passes, each one adding its glyphs to the page the last left behind.
 
 ## text/polygon
 
@@ -66,5 +82,7 @@ that, and — since `out/` is transient — that the atlases the example app has
 ones this tool produces today. Change the fonts or the charset without re-copying and it says
 so.
 
-Both tools take the same charset (printable ASCII) deliberately: a scene that switches between
-the two text paths should not find different characters missing.
+Both tools take the same charset (printable ASCII, in `text/charset.ts`) deliberately: a scene
+that switches between the two text paths should not find different characters missing. It is
+also the set a face's files are each asked to draw part of, so widening it is what makes a
+subset file contribute.

@@ -647,15 +647,23 @@ it('decorations, highlights and outlines are separate materials and separate geo
     assert(recordGeometry(plain).verts.every((v) => v.isFill), 'an unoutlined run emits only fill vertices')
 
     // Round joins are VectorText's default because letterforms have far sharper corners than
-    // the shapes the miter default was chosen for - the apexes of A and W grow spikes well
-    // above the cap height at any appreciable stroke width.
-    const spiky = { text: 'AWM', style: { fontSize: 60, strokeColor: [0, 0, 0, 1] as RGBA, strokeWidth: 8 } }
-    const round = new VectorText({ fonts: vectorFonts, ...spiky })
-    const mitred = new VectorText({ fonts: vectorFonts, lineJoin: 'miter', ...spiky })
-    assert(round.lineJoin === 'round', 'VectorText defaults to round joins')
+    // the shapes the miter default was chosen for - a stroked apex grows a spike well past the
+    // glyph at any appreciable stroke width.
+    //
+    // Which letter shows it is a property of the typeface, not of the join: whether the peak of
+    // an A or the corners of a Z come to a point depends on how that cut builds its outlines, and
+    // a face whose apexes are flattened spikes somewhere else instead. So this asks a set of
+    // sharp-cornered capitals for one that does, rather than naming a letter the font in the
+    // folder happens to draw sharply today.
+    const spiky = (text: string) => ({ text, style: { fontSize: 60, strokeColor: [0, 0, 0, 1] as RGBA, strokeWidth: 16 } })
     const height = (shape: VectorText) => shape.localBounds().max.y - shape.localBounds().min.y
-    assert(height(mitred) > height(round) * 1.3, 'miter joins spike far past the letterforms')
-    assert(new VectorText({ fonts: vectorFonts, lineJoin: 'bevel', ...spiky }).lineJoin === 'bevel', 'an explicit join still wins')
+    const spikes = (text: string) =>
+      height(new VectorText({ fonts: vectorFonts, lineJoin: 'miter', ...spiky(text) })) >
+      height(new VectorText({ fonts: vectorFonts, ...spiky(text) })) * 1.15
+
+    assert(new VectorText({ fonts: vectorFonts, ...spiky('AWM') }).lineJoin === 'round', 'VectorText defaults to round joins')
+    assert(['A', 'W', 'M', 'V', 'X', 'Z', 'K'].some(spikes), 'miter joins spike far past the letterforms')
+    assert(new VectorText({ fonts: vectorFonts, lineJoin: 'bevel', ...spiky('A') }).lineJoin === 'bevel', 'an explicit join still wins')
 
     // Faux bold thickens the letterform, so its ring must take the FILL colour (and any
     // gradient), not the stroke slot - which a real outline may be using at the same time.

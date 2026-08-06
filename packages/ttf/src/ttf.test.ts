@@ -91,7 +91,7 @@ it('contour extraction from raw command streams (no font file involved)', () => 
 // This is the one thing a parser does that an atlas cannot: a font has thousands of glyphs and
 // a label uses a dozen, so nothing is measured until some text asks for it.
 it('glyphs and kerning are measured on demand, not up front', async () => {
-    const font = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-Regular.ttf') }])).fontByIndex(0)!
+    const font = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-400-normal.ttf') }])).fontByIndex(0)!
     assert(font.metrics.glyphs.size === 0, 'a freshly parsed font has measured nothing')
     font.ensure('Ao ')
     assert(font.metrics.glyphs.size === 3, 'ensure() measures exactly the characters asked for')
@@ -112,7 +112,7 @@ it('glyphs and kerning are measured on demand, not up front', async () => {
 
 it('kerning comes from GPOS, which needs the positioning engine initialized', async () => {
     const pair = (regularJson as unknown as MsdfFontJson).kernings.find((k) => k.amount !== 0)!
-    const font = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-Regular.ttf') }])).fontByIndex(0)!
+    const font = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-400-normal.ttf') }])).fontByIndex(0)!
     font.ensure(String.fromCodePoint(pair.first) + String.fromCodePoint(pair.second))
     const mine = kerningFor(font.metrics, pair.first, pair.second) / font.metrics.size
     assert(mine !== 0, 'GPOS kerning is found (the positioning engine was initialized)')
@@ -123,7 +123,7 @@ it('kerning comes from GPOS, which needs the positioning engine initialized', as
 })
 
 it('cached glyph meshes, and the same geometry the polygon atlas ships', async () => {
-    const book = await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-Regular.ttf') }])
+    const book = await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-400-normal.ttf') }])
     const font = book.fontByIndex(0)!
     font.ensure('oI ')
 
@@ -170,8 +170,8 @@ it('cached glyph meshes, and the same geometry the polygon atlas ships', async (
 
 it('a book resolves styles, synthesizing what it was not given', async () => {
     const book = await TtfFontBook.load([
-      { style: 'regular', data: ttf('Inter-Regular.ttf') },
-      { style: 'bold', data: ttf('Inter-Bold.ttf') },
+      { style: 'regular', data: ttf('Inter-400-normal.ttf') },
+      { style: 'bold', data: ttf('Inter-700-normal.ttf') },
     ])
     assert(book.indexOf('italic') === 2, 'a style has its stable index whether or not it is loaded')
 
@@ -185,7 +185,7 @@ it('a book resolves styles, synthesizing what it was not given', async () => {
     assert(boldItalic.atlasIndex === 1 && boldItalic.fauxItalic, 'bold-italic keeps the real bold and fakes the slant')
 
     // A book with no regular at all still resolves - to whatever it does have.
-    const only = await TtfFontBook.load([{ style: 'bold', data: ttf('Inter-Bold.ttf') }])
+    const only = await TtfFontBook.load([{ style: 'bold', data: ttf('Inter-700-normal.ttf') }])
     const fallback = only.resolve('regular')
     assert(fallback.atlasIndex === 1 && only.fontByIndex(1) !== undefined, 'a one-style book falls back to that style')
 
@@ -195,8 +195,8 @@ it('a book resolves styles, synthesizing what it was not given', async () => {
 })
 
 it('a curve tolerance that is coarser produces fewer points, and is honoured per book', async () => {
-    const coarse = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-Regular.ttf') }], { curveToleranceEm: 1 / 20 })).fontByIndex(0)!
-    const fine = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-Regular.ttf') }], { curveToleranceEm: 1 / 2000 })).fontByIndex(0)!
+    const coarse = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-400-normal.ttf') }], { curveToleranceEm: 1 / 20 })).fontByIndex(0)!
+    const fine = (await TtfFontBook.load([{ style: 'regular', data: ttf('Inter-400-normal.ttf') }], { curveToleranceEm: 1 / 2000 })).fontByIndex(0)!
     coarse.ensure('o')
     fine.ensure('o')
     assert(coarse.mesh(111)!.contours[0].points.length < fine.mesh(111)!.contours[0].points.length, 'a tighter tolerance keeps more of the curve')

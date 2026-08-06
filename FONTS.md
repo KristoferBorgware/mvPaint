@@ -44,31 +44,55 @@ parsing is opt-in through [`@mvpaint/ttf`](packages/ttf).
 
 ## 1. Source fonts
 
-Font files live in `packages/scripts/fonts/`. The directory is enumerated — no tool holds a list
-of typefaces — so adding a face means dropping a file in.
+Font files live in `packages/scripts/fonts/` as `.ttf`, `.otf` or `.woff2`. The directory is
+enumerated — no tool holds a list of typefaces — so adding a face means dropping a file in.
 
-Files are named `<Family>-<Style>.ttf` (or `.otf`). The style suffix must resolve to one of the
-four the renderer selects between; case and separators are ignored, and a file with no suffix is
-treated as `Regular`:
+A `.woff2` is a brotli-compressed sfnt whose `glyf` and `loca` tables are stored re-encoded.
+Both generators are handed the TTF/OTF bytes inside it, unpacked in memory by `wawoff2`, so
+nothing downstream knows which container a face arrived in.
 
-| Suffix | Style |
+**The file says which face it is.** A font names its own family in the `name` table and marks
+bold and italic in `head.macStyle`, and that is what the generators read — filenames are used
+only to report which file something came from:
+
+| Read from | Gives |
 | --- | --- |
-| `Regular`, or none | `regular` |
-| `Bold` | `bold` |
-| `Italic` | `italic` |
-| `BoldItalic`, `ItalicBold` | `bold-italic` |
+| `name` ID 16, else ID 1 | the family, lowercased with every run of non-alphanumerics as one dash |
+| `head.macStyle` bits 0 and 1, corroborated by `OS/2.fsSelection` bits 5 and 0 | one of `regular`, `bold`, `italic`, `bold-italic` |
 
-The output basename is `<family>-<style>`, lowercased: `Inter-BoldItalic.ttf` →
-`inter-bold-italic`. A file whose style cannot be parsed is a hard error rather than a silently
-skipped face. Parsing and enumeration live in `packages/scripts/text/fontSources.ts`.
+So `Poppins-700-italic-latin.woff2` and `Poppins-BoldItalic.ttf` both resolve to
+`poppins-bold-italic`. Weight class stays out of the style: a face at semibold usually says so
+in its family name rather than in the bold bit, so `Quicksand Light` becomes the family
+`quicksand-light` and its atlas is `quicksand-light-regular`. A font that declares no family
+name is a hard error rather than a silently skipped face.
+
+**Several files can be one face.** Subset files — a `latin` slice beside a `latin-ext` one —
+carry the same family and style and different parts of the character set, so they collect into
+one face and one atlas. The first file that has a code point draws it, and the first file also
+supplies the face's metrics and its `unitsPerEm` (which the others must match). A file that adds
+nothing an earlier one already provides is left out, and the run prints a line naming it and the
+file that beat it.
+
+Sources are ordered by, in turn:
+
+1. **How much of the charset each covers** — a whole typeface leads a subset of it.
+2. **How near `OS/2.usWeightClass` is to the style's own weight** (400, or 700 for the bold
+   pair). A family whose files all give the same typographic family name arrives as several
+   weights competing for four slots: Space Grotesk ships 300, 400, 500 and 600 all naming
+   themselves `Space Grotesk` Regular, and 400 is the regular of that set.
+3. **How many glyphs the file holds**, then **its name**, so the order never depends on the
+   order the folder happens to be read in.
+
+Enumeration, identification and grouping live in `packages/scripts/text/fontSources.ts`.
 
 ---
 
 ## 2. Atlas generation
 
-Two generators read the same directory and the same charset — **printable ASCII, U+0020–U+007E**.
-Both paths cover identical characters deliberately: switching a node between them must not change
-which glyphs are missing.
+Two generators read the same directory and the same charset — **printable ASCII, U+0020–U+007E**,
+declared once in `text/charset.ts`. Both paths cover identical characters deliberately: switching
+a node between them must not change which glyphs are missing. The charset is also what decides
+how a face is assembled, since it is the set each of a face's files is asked to draw part of.
 
 ```bash
 npm run gen:msdf       # -> packages/scripts/out/msdf/
@@ -78,7 +102,7 @@ npm run gen:fonts      # both
 
 ### MSDF atlas — `text/msdf/genMsdfAtlas.ts`
 
-Wraps `msdf-bmfont-xml`. Per style it emits a PNG and a JSON:
+Wraps `msdf-bmfont-xml`. Per face it emits a PNG and a JSON:
 
 - **`<base>.png`** — a multi-channel signed distance field. Each texel stores three signed
   distances to the nearest edge; the median of the three reconstructs a distance that preserves
@@ -91,12 +115,18 @@ Generation parameters: `fontSize` 42 px, `distanceRange` 4 px, texture 512×512 
 The charset must fit one page; spilling to a second is an error rather than a silent multi-page
 atlas.
 
+The packer takes one font file per call, so a face spread over subset files is packed in several
+passes. Each pass after the first is handed the packer state and the page the last one wrote, and
+adds its glyphs to both: the page grows to fit, and what is already on it keeps the position it
+was packed at.
+
 ### Polygon atlas — `text/polygon/genPolygonAtlas.ts`
 
-Emits one JSON per style. Per glyph: the outline flattened to closed rings of **integer font
+Emits one JSON per face. Per glyph: the outline flattened to closed rings of **integer font
 units**, plus box, advance, and — per file — `unitsPerEm`, vertical metrics, the decoration
 block, and every non-zero kerning pair over the charset (95 characters is 9,025 ordered pairs,
-of which a few hundred kern).
+of which a few hundred kern). A pair whose two glyphs come from different files of the same face
+has no entry to find — kerning is a fact one file holds about two glyphs it draws itself.
 
 Coordinates are whole font units. At Inter's 2048 units/em that quantization is 1/2048 em, well
 below the curve-flattening tolerance the outline was produced at, and it keeps the file a
@@ -391,7 +421,8 @@ the same `VectorFonts` interface, at the cost of a parser in the bundle.
 
 | Concern | Files |
 | --- | --- |
-| Source enumeration and naming | `packages/scripts/text/fontSources.ts` |
+| Source enumeration, face identity, woff2 unpacking | `packages/scripts/text/fontSources.ts` |
+| The charset both atlases cover | `packages/scripts/text/charset.ts` |
 | Generators | `packages/scripts/text/msdf/`, `packages/scripts/text/polygon/` |
 | Shaper | `packages/engine/src/text/layout.ts` |
 | MSDF metrics, style ladder | `packages/engine/src/text/msdfMetrics.ts`, `msdfProvider.ts` |

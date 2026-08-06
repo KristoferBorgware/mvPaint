@@ -13,7 +13,9 @@
   "dependencies": {
     "@mvpaint/engine": "*",
     "@mvpaint/ttf": "*",
-    "msdf-bmfont-xml": "^2.8.0"
+    "msdf-bmfont-xml": "^2.8.0",
+    "opentype.js": "2.0.0",
+    "wawoff2": "^2.0.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
