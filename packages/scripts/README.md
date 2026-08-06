@@ -82,7 +82,27 @@ that, and — since `out/` is transient — that the atlases the example app has
 ones this tool produces today. Change the fonts or the charset without re-copying and it says
 so.
 
-Both tools take the same charset (printable ASCII, in `text/charset.ts`) deliberately: a scene
-that switches between the two text paths should not find different characters missing. It is
-also the set a face's files are each asked to draw part of, so widening it is what makes a
-subset file contribute.
+## The charset
+
+Both tools take the same set, from `text/charset.ts`, deliberately: a scene that switches
+between the two text paths should not find different characters missing. It is also the set a
+face's files are each asked to draw part of, so widening it is what makes a subset file
+contribute.
+
+```bash
+npm run gen:fonts                             # the default: latin1, 191 code points
+npm run gen:fonts -- --charset ascii          # ascii | latin1 | latin
+npm run gen:fonts -- --charset U+0020-007E,U+00C0-00FF
+npm run gen:fonts -- --charset @chars.txt     # the characters in a UTF-8 file
+```
+
+The default is `latin1` — ASCII plus the Latin-1 Supplement, so `å ä ö`, `æ ø` and `é ü ñ ç ß`
+are letters the atlases carry rather than gaps. It is also what the example app's committed
+atlases were built with, which the self-test checks by rebuilding them, so **the shipped set is
+the constant in `charset.ts` and the flag is for experiments**.
+
+A code point no font in a face has is left out and spaced by the shaper rather than drawn as a
+tofu box, so widening the set can only add letters. What it costs is texture: an MSDF page grows
+with the set, and it has to stay one page per style, because the layer a glyph samples from is
+its style and there is no second page to address. See
+[FONTS.md](../../FONTS.md#2-atlas-generation) for the ceiling and what it holds.

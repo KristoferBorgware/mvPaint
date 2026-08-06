@@ -5,7 +5,8 @@
 // it once, here, and writes the result out as data the engine reads - no font parser and no
 // curve flattening in the browser.
 //
-//   npm run gen:polygons        (or: npx tsx text/polygon/genPolygonAtlas.ts)
+//   npm run gen:polygons                        the default charset (see ../charset.ts)
+//   npm run gen:polygons -- --charset latin     a named set, code points, or @a file of characters
 //
 // Input is the fonts/ FOLDER, enumerated (see ../fontSources.ts) - this tool knows about no
 // particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to out/polygons/,
@@ -34,7 +35,7 @@ import { fileURLToPath } from 'node:url'
 import { TtfFont, DEFAULT_CURVE_TOLERANCE_EM } from '@mvpaint/ttf'
 import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/core'
 import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
-import { CHARSET, charsetText } from '../charset'
+import { DEFAULT_CHARSET, charsetText, charsetFromArgv, describeCharset, resolveCharset } from '../charset'
 import { OUT_DIR, describeSources, readFontFaces, reportSkipped } from '../fontSources'
 
 const OUT = join(OUT_DIR, 'polygons')
@@ -74,7 +75,7 @@ export async function buildPolygonAtlas(
   options: PolygonAtlasOptions = {},
 ): Promise<PolygonFontJson> {
   if (sources.length === 0) throw new Error(`${face}: no font data to build an atlas from.`)
-  const charset = options.charset ?? CHARSET
+  const charset = options.charset ?? DEFAULT_CHARSET
   const curveToleranceEm = options.curveToleranceEm ?? DEFAULT_CURVE_TOLERANCE_EM
 
   const fonts = await Promise.all(sources.map((source) => TtfFont.parse(source.data, { curveToleranceEm })))
@@ -131,10 +132,11 @@ export async function buildPolygonAtlas(
   }
 
   // Every ordered pair over the charset, keeping the ones that actually kern. The runtime
-  // cannot ask the font a question later, so the question is asked exhaustively now: 95
-  // characters is 9,025 pairs, which takes a few milliseconds and yields a few hundred. A pair
-  // whose two glyphs come from different files has no entry to find - kerning is a fact one
-  // file holds about two glyphs it draws itself.
+  // cannot ask the font a question later, so the question is asked exhaustively now - which is
+  // quadratic in the charset: 95 characters is 9,025 pairs and 191 is 36,481, both a few
+  // milliseconds, and both yielding a few hundred. A pair whose two glyphs come from different
+  // files has no entry to find - kerning is a fact one file holds about two glyphs it draws
+  // itself.
   const kernings: [number, number, number][] = []
   for (const first of charset) {
     const font = drawnBy.get(first)
@@ -165,14 +167,18 @@ function round(value: number): number {
   return rounded === 0 ? 0 : rounded
 }
 
-async function main(): Promise<void> {
-  const { faces, skipped } = await readFontFaces()
+export async function main(argv: readonly string[] = process.argv): Promise<void> {
+  const spec = charsetFromArgv(argv)
+  const charset = await resolveCharset(spec)
+  const { faces, skipped } = await readFontFaces(charset)
   await mkdir(OUT, { recursive: true })
+
+  console.log(`Charset: ${describeCharset(spec, charset)}`)
 
   for (const face of faces) {
     process.stdout.write(`Generating ${face.base}.polygons.json ... `)
 
-    const atlas = await buildPolygonAtlas(face.base, face.sources)
+    const atlas = await buildPolygonAtlas(face.base, face.sources, { charset })
     const text = `${JSON.stringify(atlas)}\n`
     await writeFile(join(OUT, `${face.base}.polygons.json`), text)
 

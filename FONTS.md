@@ -89,16 +89,42 @@ Enumeration, identification and grouping live in `packages/scripts/text/fontSour
 
 ## 2. Atlas generation
 
-Two generators read the same directory and the same charset — **printable ASCII, U+0020–U+007E**,
-declared once in `text/charset.ts`. Both paths cover identical characters deliberately: switching
-a node between them must not change which glyphs are missing. The charset is also what decides
-how a face is assembled, since it is the set each of a face's files is asked to draw part of.
+Two generators read the same directory and the same charset, declared once in `text/charset.ts`.
+Both paths cover identical characters deliberately: switching a node between them must not change
+which glyphs are missing. The charset is also what decides how a face is assembled, since it is
+the set each of a face's files is asked to draw part of.
 
 ```bash
 npm run gen:msdf       # -> packages/scripts/out/msdf/
 npm run gen:polygons   # -> packages/scripts/out/polygons/
-npm run gen:fonts      # both
+npm run gen:fonts      # both, over one charset
+
+npm run gen:fonts -- --charset latin        # a named set
+npm run gen:fonts -- --charset U+0020-007E,U+00C0-00FF
+npm run gen:fonts -- --charset @chars.txt   # the characters in a UTF-8 file
 ```
+
+### The charset
+
+`--charset` takes a name, explicit code points, or `@path` to a file whose characters are the
+set. Given nothing it uses `DEFAULT_CHARSET`, which is the one the committed atlases were built
+with — so **the shipped set is the constant in `charset.ts`, and the flag is for experiments**.
+Change the constant and the polygon self-test will tell you the app's copies are stale.
+
+| Name | Code points | Covers |
+| --- | --- | --- |
+| `ascii` | 95 | Printable ASCII, U+0020–U+007E |
+| `latin1` **(default)** | 191 | ASCII + Latin-1 Supplement — `å ä ö`, `æ ø`, `é ü ñ ç ß`. Every face in `fonts/` draws all of it |
+| `latin` | 388 | `latin1` + Latin Extended-A + punctuation, currency and symbols |
+
+A code point no font in a face has is left out of the atlas and **spaced by the shaper rather
+than drawn as a tofu box**, so widening the set is additive — it can only add letters. Coverage
+past Latin-1 is a property of the typeface: of the families in `fonts/`, Permanent Marker has 10
+of Latin Extended-A's 128 and Poppins 107, so `latin` leaves real holes in Central and Eastern
+European text for those faces.
+
+A wider set means a larger page. The MSDF packer shrinks each page to the glyphs it was given —
+`ascii` packs to around 300×300, `latin1` to 476×469, `latin` to 661×655 — against a 2048 cap.
 
 ### MSDF atlas — `text/msdf/genMsdfAtlas.ts`
 
@@ -111,9 +137,19 @@ Wraps `msdf-bmfont-xml`. Per face it emits a PNG and a JSON:
   `decoration` block: underline and strikethrough offset and thickness as em fractions, read
   from the font tables through `@mvpaint/ttf` so both paths place rules identically.
 
-Generation parameters: `fontSize` 42 px, `distanceRange` 4 px, texture 512×512 with `smartSize`.
-The charset must fit one page; spilling to a second is an error rather than a silent multi-page
-atlas.
+Generation parameters: `fontSize` 42 px, `distanceRange` 4 px, `smartSize` against a 2048×2048
+cap. The cap is not a size — `smartSize` shrinks each page to the glyphs it was given, so ASCII
+packs to 300×300 whether the cap says 512 or 2048 — and 2048 is WebGL2's guaranteed
+`MAX_TEXTURE_SIZE`, so a larger page would work on most machines and fail on the ones that only
+promise the minimum. At roughly 1,200 texels a glyph it holds some 3,400 of them.
+
+**The charset must fit one page.** Spilling to a second is an error, because the array layer a
+glyph samples from *is* its style: there is no second page to address, and page-1 glyphs would
+silently take page-0's texels. Widening past what fits means narrowing the charset or moving
+that face to the vector path, which has no such ceiling.
+
+Texture memory is `pageWidth × pageHeight × 4 bytes × 4 layers` per family — four layers are
+always allocated, sized to the family's largest style. At `latin1` that is 3.4 MB a family.
 
 The packer takes one font file per call, so a face spread over subset files is packed in several
 passes. Each pass after the first is handed the packer state and the page the last one wrote, and
@@ -124,9 +160,10 @@ was packed at.
 
 Emits one JSON per face. Per glyph: the outline flattened to closed rings of **integer font
 units**, plus box, advance, and — per file — `unitsPerEm`, vertical metrics, the decoration
-block, and every non-zero kerning pair over the charset (95 characters is 9,025 ordered pairs,
-of which a few hundred kern). A pair whose two glyphs come from different files of the same face
-has no entry to find — kerning is a fact one file holds about two glyphs it draws itself.
+block, and every non-zero kerning pair over the charset. That pass is quadratic in the charset —
+95 characters is 9,025 ordered pairs and 191 is 36,481 — of which a few hundred kern. A pair
+whose two glyphs come from different files of the same face has no entry to find: kerning is a
+fact one file holds about two glyphs it draws itself.
 
 Coordinates are whole font units. At Inter's 2048 units/em that quantization is 1/2048 em, well
 below the curve-flattening tolerance the outline was produced at, and it keeps the file a
@@ -437,10 +474,10 @@ the same `VectorFonts` interface, at the cost of a parser in the bundle.
 
 | | Value |
 | --- | --- |
-| Charset | U+0020–U+007E (printable ASCII), both generators |
+| Charset | `latin1` (191 code points), both generators; `--charset` overrides |
 | MSDF generation size | 42 px |
 | MSDF distance range | 4 px |
-| MSDF page size | 512×512, one page per style |
+| MSDF page cap | 2048×2048, one page per style (476×469 at `latin1`) |
 | Styles per family | 4 — `regular`, `bold`, `italic`, `bold-italic` (`STYLE_ORDER`) |
 | Text vertex stride | 36 bytes |
 | Text object record | 320 bytes |

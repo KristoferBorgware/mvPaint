@@ -20,7 +20,7 @@ import { compress } from 'wawoff2'
 import { TtfFont } from '@mvpaint/ttf'
 import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 import { buildPolygonAtlas } from './genPolygonAtlas'
-import { CHARSET } from '../charset'
+import { DEFAULT_CHARSET } from '../charset'
 import { FONT_SRC, readFontFaces, toSfnt } from '../fontSources'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -47,7 +47,15 @@ it('the document the generator writes', async () => {
 
     assert(atlas.format === POLYGON_ATLAS_FORMAT, 'the document names the format the engine expects')
     assert(atlas.unitsPerEm > 0 && atlas.base > 0 && atlas.lineHeight > atlas.base, 'vertical metrics are coherent')
-    assert(atlas.glyphs.length === 95, 'the printable-ASCII charset is covered')
+
+    // Every code point of the default charset the font has a glyph for, and no others. Inter
+    // draws all of it but the soft hyphen, which is a formatting character rather than a letter.
+    const drawn = new Set(atlas.glyphs.map((glyph) => glyph.codePoint))
+    assert(atlas.glyphs.every((glyph) => DEFAULT_CHARSET.includes(glyph.codePoint)), 'the atlas holds nothing outside the charset')
+    assert(drawn.size === atlas.glyphs.length, 'and holds each code point once')
+    for (const char of ['A', 'z', '0', '~', 'å', 'ä', 'ö', 'Å', 'Ä', 'Ö', 'é', 'ü', 'ñ', 'ß']) {
+      assert(drawn.has(char.codePointAt(0)!), `'${char}' is in the atlas`)
+    }
 
     // Coordinates are whole font units - the reason the file is a fraction of the size it would
     // be as floats, and a rounding error far under the tolerance the curves were flattened at.
@@ -112,8 +120,8 @@ it('what the engine reads back is what a live parse would have produced', async 
     // Kerning: every pair the live font has over the charset is in the atlas, and vice versa.
     const bakedPairs = atlas.kernings.length
     let livePairs = 0
-    for (let first = 0x20; first <= 0x7e; first++) {
-      for (let second = 0x20; second <= 0x7e; second++) {
+    for (const first of DEFAULT_CHARSET) {
+      for (const second of DEFAULT_CHARSET) {
         if (live.kerning(first, second) !== 0) livePairs++
       }
     }
@@ -143,9 +151,9 @@ it('a face handed over as woff2 gives the same atlas as the sfnt inside it', asy
 // draws itself, so a pair split across two files has no entry to find.
 it('a face drawn from several files draws the same glyphs as one file would', async () => {
     const data = await fontData('Inter-400-normal.ttf')
-    const half = Math.floor(CHARSET.length / 2)
-    const front = CHARSET.slice(0, half)
-    const back = CHARSET.slice(half)
+    const half = Math.floor(DEFAULT_CHARSET.length / 2)
+    const front = DEFAULT_CHARSET.slice(0, half)
+    const back = DEFAULT_CHARSET.slice(half)
 
     const split = await buildPolygonAtlas('inter-regular', [{ data, provides: front }, { data, provides: back }])
     const whole = await buildPolygonAtlas('inter-regular', [{ data }])

@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url'
 import opentype, { type Font } from 'opentype.js'
 import { decompress } from 'wawoff2'
 import type { FontStyle } from '@mvpaint/engine/core'
-import { CHARSET } from './charset'
+import { DEFAULT_CHARSET } from './charset'
 
 /** The folder both generators read. Everything in it that is a font file is generated. */
 export const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fonts')
@@ -171,7 +171,7 @@ interface Candidate {
  * because the alternative is a face that never gets an atlas and never says why.
  */
 export async function readFontFaces(
-  charset: readonly number[] = CHARSET,
+  charset: readonly number[] = DEFAULT_CHARSET,
   dir: string = FONT_SRC,
 ): Promise<FontFolder> {
   const entries = await readdir(dir, { withFileTypes: true })

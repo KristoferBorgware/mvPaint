@@ -508,9 +508,16 @@ it('the atlas is in font units, and its vertical metrics are coherent', () => {
 })
 
 it('an atlas arrives measured: every glyph in the charset, no parsing, no on-demand step', () => {
+    // Whatever charset the atlas was generated over arrives complete, rather than a glyph at a
+    // time as something asks for it. The count is the generator's business (see
+    // packages/scripts/text/charset.ts); what this pins is that reading the file is the whole
+    // of the work, and that the set reaches past ASCII into the accented letters.
     const glyphs = regularVector.metrics.glyphs
-    assert(glyphs.size === 95, 'the whole printable-ASCII charset is present the moment the file is read')
+    assert(glyphs.size > 95, 'the file arrives measured, and covers more than printable ASCII')
     assert(glyphs.has(65) && glyphs.has(111) && glyphs.has(32), 'A, o and space among them')
+    for (const char of ['å', 'ä', 'ö', 'ß']) {
+      assert(glyphs.has(char.codePointAt(0)!), `'${char}' among them too, with no parsing step`)
+    }
 
     // A blank glyph has no box but still advances the pen - otherwise spaces would collapse.
     const space = glyphs.get(32)!
@@ -531,8 +538,9 @@ it('an atlas arrives measured: every glyph in the charset, no parsing, no on-dem
 
     // ensure() exists so an atlas book and a parsing one are interchangeable; here it is a no-op
     // rather than a measurement step, and must not disturb what is already measured.
+    const measured = regularVector.metrics.glyphs.size
     regularVector.ensure('anything at all, including \u{1F600}')
-    assert(regularVector.metrics.glyphs.size === 95, 'ensure() on an atlas-backed font changes nothing')
+    assert(regularVector.metrics.glyphs.size === measured, 'ensure() on an atlas-backed font changes nothing')
 })
 
 it('kerning came out of the font\'s GPOS table and matches what the MSDF generator found', () => {
