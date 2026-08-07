@@ -175,7 +175,11 @@ void main() {
   } else {
     // Stored as a float rather than reinterpreted u32 bits - see GlObjectTexture.ts.
     float fillType = ${field(OBJECT_FILL_TYPE_OFFSET)};
-    if (fillType < 0.5) {
+    if (fillType > 2.5) {
+      // FILL_NONE: nothing to fill with. The triangles stay - picking runs against them -
+      // and come out transparent. See FillPriority in render/meshFormat.ts.
+      color = vec4(0.0);
+    } else if (fillType < 0.5) {
       color = obj(id, ${OBJECT_FILL_COLOR_OFFSET / 16});
     } else {
       float t;

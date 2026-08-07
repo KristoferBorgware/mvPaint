@@ -94,36 +94,36 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   // from the counter and each object therefore lands in front of the one before it. A lane
   // packs its shapes back-to-front, so every overlap is a real blend. If any of these three
   // cells looks wrong, nothing below it means anything.
-  const rowY = 330
-  root.addChild(heading(-540, rowY + 40, 'One lane at a time - every overlap should blend'))
+  const rowY = -330
+  root.addChild(heading(-540, rowY - 40, 'One lane at a time - every overlap should blend'))
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
       new Circle({
         name: `mesh-blend-${i}`,
         x: -470 + i * 46,
-        y: rowY - 60 + (i % 2) * 30,
+        y: rowY + 60 - (i % 2) * 30,
         radius: 46,
         fill: [i === 0 ? 0.9 : 0.1, i === 1 ? 0.75 : 0.15, i === 2 ? 0.9 : 0.2, 0.55],
       }),
     )
   }
-  // rowY - 180, not -160: the image cells hang 110 below their own y, so a caption any higher
+  // rowY + 180, not +160: the image cells hang 110 below their own y, so a caption any higher
   // than this sits inside the pictures it is naming.
-  root.addChild(label(-500, rowY - 180, 'mesh lane'))
+  root.addChild(label(-500, rowY + 180, 'mesh lane'))
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
       new MSDFText({
         name: `text-blend-${i}`,
         x: -230 + i * 30,
-        y: rowY - 30 - i * 26,
+        y: rowY + 30 + i * 26,
         text: 'BLEND',
         style: { fontSize: 46, fontStyle: 'bold', color: [i === 0 ? 0.9 : 0.15, i === 1 ? 0.7 : 0.2, i === 2 ? 0.9 : 0.25, 0.55] },
       }),
     )
   }
-  root.addChild(label(-230, rowY - 180, 'text lane'))
+  root.addChild(label(-230, rowY + 180, 'text lane'))
 
   for (let i = 0; i < 3; i++) {
     root.addChild(
@@ -131,14 +131,14 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
         name: `image-blend-${i}`,
         texture: checker,
         x: 60 + i * 50,
-        y: rowY - 60 + (i % 2) * 30,
+        y: rowY + 60 - (i % 2) * 30,
         width: 110,
         height: 110,
         tint: [i === 0 ? 1 : 0.4, i === 1 ? 1 : 0.4, i === 2 ? 1 : 0.5, 0.55],
       }),
     )
   }
-  root.addChild(label(60, rowY - 180, 'image lane'))
+  root.addChild(label(60, rowY + 180, 'image lane'))
 
   // --- row 2: the same two objects in two lanes, stacked both ways ----------------------
   //
@@ -148,8 +148,8 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   // back object should show through. If one half of a pair looks different from the other,
   // that difference is the lane order, because nothing else about them differs - and the
   // point of the pairing is that it should not.
-  const midY = 20
-  root.addChild(heading(-540, midY + 100, 'Across two lanes - in every cell the back object should show through'))
+  const midY = -20
+  root.addChild(heading(-540, midY - 100, 'Across two lanes - in every cell the back object should show through'))
 
   type LaneKind = 'mesh' | 'text' | 'image'
 
@@ -167,7 +167,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       return new MSDFText({
         name,
         x: cx - 72,
-        y: cy + 24,
+        y: cy - 24,
         text: 'ABC',
         style: { fontSize: 54, fontStyle: 'bold', color: [...rgb, alpha] },
       })
@@ -176,7 +176,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       name,
       texture: checker,
       x: cx - CELL_W / 2,
-      y: cy + CELL_H / 2,
+      y: cy - CELL_H / 2,
       width: CELL_W,
       height: CELL_H,
       tint: [1, 1, 1, alpha],
@@ -194,12 +194,12 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   /** Two objects at one centre: `back` opaque and behind, `front` translucent and over it. */
   const cell = (id: string, cx: number, cy: number, back: LaneKind, front: LaneKind) => {
     // Made back first, so the front one takes the higher number and lands over it.
-    root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy + 20, 1))
-    root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy - 20, FRONT_ALPHA))
-    root.addChild(label(cx - 96, cy - 96, `${front} over ${back}`, NAVY))
+    root.addChild(makeObject(back, `pair-${id}-back-${back}`, cx - 26, cy - 20, 1))
+    root.addChild(makeObject(front, `pair-${id}-front-${front}`, cx + 26, cy + 20, FRONT_ALPHA))
+    root.addChild(label(cx - 96, cy + 96, `${front} over ${back}`, NAVY))
     // Two words, not a sentence: the cells are 180 apart, and the fuller wording this used to
     // carry ran ~230 wide and reached into the next cell's caption.
-    root.addChild(label(cx - 96, cy - 116, `back: ${passOf(back, 1)} pass`))
+    root.addChild(label(cx - 96, cy + 116, `back: ${passOf(back, 1)} pass`))
   }
 
   ;([
@@ -217,8 +217,8 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
   //
   // A shadow is merged into the translucent pass half a depth step behind the shape casting
   // it, so it lands on whatever is below and its own caster paints over it.
-  const lowY = -236
-  root.addChild(heading(-540, lowY + 96, 'Shadows'))
+  const lowY = 236
+  root.addChild(heading(-540, lowY - 96, 'Shadows'))
 
   // A shadow cast by one shape, with a translucent panel laid over where it falls.
   root.addChild(
@@ -238,13 +238,13 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
     new Rect({
       name: 'shadow-over-panel',
       x: -380,
-      y: lowY - 10,
+      y: lowY + 10,
       width: 150,
       height: 90,
       fill: [0.95, 0.75, 0.2, FRONT_ALPHA],
     }),
   )
-  root.addChild(label(-470, lowY - 116, 'a shadow under a translucent panel'))
+  root.addChild(label(-470, lowY + 116, 'a shadow under a translucent panel'))
 
   // The same shadow, but the thing laid over it is an image with real holes in it. An
   // alpha-0 texel still produces a fragment; whether it writes depth decides whether the
@@ -267,12 +267,12 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       name: 'shadow-over-holes',
       texture: holed,
       x: -60,
-      y: lowY - 10,
+      y: lowY + 10,
       width: 150,
       height: 90,
     }),
   )
-  root.addChild(label(-150, lowY - 116, 'and under an image with transparent holes'))
+  root.addChild(label(-150, lowY + 116, 'and under an image with transparent holes'))
 
   // Two shadows overlapping each other, which is the case the shadow lane is built for:
   // it draws last and never writes depth, so shadows accumulate rather than clip.
@@ -281,7 +281,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       new Circle({
         name: `shadow-stack-${i}`,
         x: 240 + i * 54,
-        y: lowY + (i % 2) * 26,
+        y: lowY - (i % 2) * 26,
         radius: 40,
         fill: [0.35 + i * 0.2, 0.4, 0.75, 0.6],
         shadowColor: '#00000080',
@@ -291,7 +291,7 @@ export function buildTransparencyScene(scene: Scene, resources?: SceneResources)
       }),
     )
   }
-  root.addChild(label(220, lowY - 116, 'translucent shapes, each casting its own shadow'))
+  root.addChild(label(220, lowY + 116, 'translucent shapes, each casting its own shadow'))
 
   // Both textures are built per load and belong to this scene alone - a switch away is the
   // last anything sees of them, so this is where they go back to the GPU.

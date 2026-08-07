@@ -33,20 +33,20 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // layer rather than asking each of its shapes about its ancestors.
   const plate = root.addChild(new Layer({ name: 'plate' }))
   plate.addChild(
-    new Rect({ x: -470, y: 280, width: 380, height: 170, fill: '#edf2f5', cornerRadius: 10 }),
+    new Rect({ x: -470, y: -280, width: 380, height: 170, fill: '#edf2f5', cornerRadius: 10 }),
   )
-  plate.addChild(new Circle({ x: -370, y: 175, radius: 42, fill: '#c7dee6' }))
-  plate.addChild(new Rect({ x: -230, y: 250, width: 110, height: 60, fill: '#d9e3db', cornerRadius: 6 }))
+  plate.addChild(new Circle({ x: -370, y: -175, radius: 42, fill: '#c7dee6' }))
+  plate.addChild(new Rect({ x: -230, y: -250, width: 110, height: 60, fill: '#d9e3db', cornerRadius: 6 }))
 
   const routes = root.addChild(new Layer({ name: 'routes' }))
   routes.addChild(
     new Polyline({
       points: [
-        { x: -460, y: 140 },
-        { x: -380, y: 190 },
-        { x: -280, y: 165 },
-        { x: -190, y: 215 },
-        { x: -100, y: 200 },
+        { x: -460, y: -140 },
+        { x: -380, y: -190 },
+        { x: -280, y: -165 },
+        { x: -190, y: -215 },
+        { x: -100, y: -200 },
       ],
       stroke: TEAL,
       strokeWidth: 5,
@@ -57,10 +57,10 @@ export function buildLayerScene(scene: Scene): SceneContent {
   routes.addChild(
     new Polyline({
       points: [
-        { x: -410, y: 275 },
-        { x: -350, y: 200 },
-        { x: -330, y: 130 },
-        { x: -240, y: 120 },
+        { x: -410, y: -275 },
+        { x: -350, y: -200 },
+        { x: -330, y: -130 },
+        { x: -240, y: -120 },
       ],
       stroke: '#d98c33',
       strokeWidth: 5,
@@ -71,15 +71,15 @@ export function buildLayerScene(scene: Scene): SceneContent {
 
   const pins = root.addChild(new Layer({ name: 'pins' }))
   for (const [x, y] of [
-    [-380, 190],
-    [-280, 165],
-    [-190, 215],
+    [-380, -190],
+    [-280, -165],
+    [-190, -215],
   ]) {
     pins.addChild(new Circle({ x, y, radius: 9, fill: CRIMSON, stroke: '#fff', strokeWidth: 3 }))
   }
 
-  root.addChild(caption(-470, 104, 'plate / routes / pins'))
-  root.addChild(label(-470, 84, 'three layers of one picture - each switches its slice off'))
+  root.addChild(caption(-470, -104, 'plate / routes / pins'))
+  root.addChild(label(-470, -84, 'three layers of one picture - each switches its slice off'))
 
   // --- two layers, one stack ------------------------------------------------------------
   //
@@ -99,7 +99,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
       new Rect({
         name: `card-${i}`,
         x: 90 + i * 58,
-        y: 270,
+        y: -270,
         width: 120,
         height: 150,
         fill: even ? COOL : WARM,
@@ -113,8 +113,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
     )
   }
 
-  root.addChild(caption(90, 104, 'cool layer added first, warm second'))
-  root.addChild(label(90, 84, 'they alternate anyway - zIndex decides, not the layer'))
+  root.addChild(caption(90, -104, 'cool layer added first, warm second'))
+  root.addChild(label(90, -84, 'they alternate anyway - zIndex decides, not the layer'))
 
   // --- a group is a unit; a layer is not ------------------------------------------------
   //
@@ -122,8 +122,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // is selected and framed, and a drag moves all four; click one in the layer and you get
   // that block alone. Nothing in the app treats them differently - closestGroup() and
   // outermostGroup() simply walk straight past a Layer, because a Layer is not a Group.
-  const asGroup = root.addChild(new Group({ name: 'as-a-group', x: -430, y: -110 }))
-  const asLayer = root.addChild(new Layer({ name: 'as-a-layer', x: -430, y: -230 }))
+  const asGroup = root.addChild(new Group({ name: 'as-a-group', x: -430, y: 110 }))
+  const asLayer = root.addChild(new Layer({ name: 'as-a-layer', x: -430, y: 230 }))
 
   for (let i = 0; i < 4; i++) {
     const shared = { y: 0, width: 62, height: 62, cornerRadius: 8 }
@@ -131,9 +131,9 @@ export function buildLayerScene(scene: Scene): SceneContent {
     asLayer.addChild(new Rect({ name: `layered-${i}`, ...shared, x: i * 74, fill: TEAL }))
   }
 
-  root.addChild(caption(-130, -140, 'in a Group: click one, get all four'))
-  root.addChild(caption(-130, -260, 'in a Layer: click one, get that one'))
-  root.addChild(label(-470, -300, 'the same four blocks in each container - click them and compare'))
+  root.addChild(caption(-130, 140, 'in a Group: click one, get all four'))
+  root.addChild(caption(-130, 260, 'in a Layer: click one, get that one'))
+  root.addChild(label(-470, 300, 'the same four blocks in each container - click them and compare'))
 
   // --- the transform reaches the contents, and `enabled` is the layer's own --------------
   //
@@ -141,15 +141,15 @@ export function buildLayerScene(scene: Scene): SceneContent {
   // every Node does. The blinking dot is the second point: `enabled` is a property OF THE
   // LAYER and is never written onto its children, so when the layer comes back the dot is in
   // whatever state its own `visible` is in, rather than being forced back on with the rest.
-  const drifting = root.addChild(new Layer({ name: 'drifting', x: 235, y: -180 }))
-  drifting.addChild(new Rect({ x: -20, y: 40, width: 250, height: 80, fill: '#e6e8ed', cornerRadius: 12 }))
+  const drifting = root.addChild(new Layer({ name: 'drifting', x: 235, y: 180 }))
+  drifting.addChild(new Rect({ x: -20, y: -40, width: 250, height: 80, fill: '#e6e8ed', cornerRadius: 12 }))
   const dots: Circle[] = []
   for (let i = 0; i < 3; i++) {
     dots.push(drifting.addChild(new Circle({ x: 30 + i * 75, y: 0, radius: 22, fill: i === 1 ? CRIMSON : DARK })))
   }
   const blinker = dots[1]
 
-  root.addChild(label(160, -300, 'the strip slides; the red dot keeps its own visible'))
+  root.addChild(label(160, 300, 'the strip slides; the red dot keeps its own visible'))
 
   let t = 0
   return {

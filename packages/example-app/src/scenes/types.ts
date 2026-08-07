@@ -2,10 +2,16 @@
 // metadata the picker lists it with, so adding one means adding a file and an entry in
 // index.ts - nothing in the canvas or the app shell needs to know about it.
 
-import type { Scene, SceneResources } from '@mvpaint/engine'
+import type { Node, Scene, SceneResources } from '@mvpaint/engine'
 
 /** What a scene hands back to the frame loop after building itself. */
 export interface SceneContent {
+  /**
+   * Nodes the app must NOT make draggable when it opts this scene's content in (see
+   * WebGPUCanvas). For a scene whose subject IS `draggable: false` - there is one - the
+   * blanket pass would undo the very thing being shown.
+   */
+  keepDragOptOut?: Node[]
   /**
    * Called once per frame when the scene animates. `speed` is the app's rotation-speed
    * control; a scene that ignores it simply never reads it. Scenes own their own animation

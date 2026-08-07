@@ -50,7 +50,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-title',
       x: LEFT,
-      y: 350,
+      y: -350,
       text: 'Outline text',
       style: {
         fontStyle: 'bold',
@@ -70,7 +70,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
 
   // Wrapped inside the left column: run on one line this reaches x 180, which is past where
   // the right column starts and straight through the top of the shadowed word there.
-  root.addChild(label(LEFT, 290, 'Every glyph below is real geometry, triangulated from an outline - not a sampled field.', 500))
+  root.addChild(label(LEFT, -290, 'Every glyph below is real geometry, triangulated from an outline - not a sampled field.', 500))
 
   // --- the four styles, one node, one run each.
   root.addChild(
@@ -78,7 +78,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-styles',
       x: LEFT,
-      y: 250,
+      y: -250,
       runs: [
         { text: 'Regular ', style: { fontStyle: 'regular', fontSize: 32, color: NAVY } },
         { text: 'Bold ', style: { fontStyle: 'bold', fontSize: 32, color: NAVY } },
@@ -95,7 +95,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-runs',
       x: LEFT,
-      y: 190,
+      y: -190,
       runs: [
         { text: 'colour ', style: { fontSize: 30, color: CRIMSON } },
         { text: 'size ', style: { fontSize: 20, color: TEAL } },
@@ -112,7 +112,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-outline',
       x: LEFT,
-      y: 130,
+      y: -130,
       runs: [
         { text: 'Stroked', style: { fontStyle: 'bold', fontSize: 44, color: '#fff', strokeColor: NAVY, strokeWidth: 2.5 } },
         { text: ' glyphs', style: { fontStyle: 'bold', fontSize: 44, color: NAVY } },
@@ -127,7 +127,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-paragraph',
       x: LEFT,
-      y: 60,
+      y: -60,
       maxWidth: 420,
       align: 'justify',
       lineHeight: 1.15,
@@ -140,28 +140,28 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   )
 
   // --- the same string both ways, stacked, so the comparison is direct.
-  root.addChild(label(LEFT, -110, 'The same line, drawn each way:'))
+  root.addChild(label(LEFT, 110, 'The same line, drawn each way:'))
   root.addChild(
     new VectorText({
       fonts: book,
       name: 'vt-compare-vector',
       x: LEFT,
-      y: -140,
+      y: 140,
       text: 'Hamburgefonstiv 38px',
       style: { fontSize: 38, color: NAVY },
     }),
   )
-  root.addChild(label(LEFT + 430, -152, 'outlines'))
+  root.addChild(label(LEFT + 430, 152, 'outlines'))
   root.addChild(
     new MSDFText({
       name: 'vt-compare-msdf',
       x: LEFT,
-      y: -200,
+      y: 200,
       text: 'Hamburgefonstiv 38px',
       style: { fontSize: 38, color: NAVY },
     }),
   )
-  root.addChild(label(LEFT + 430, -212, 'MSDF atlas'))
+  root.addChild(label(LEFT + 430, 212, 'MSDF atlas'))
 
   // --- right column: what geometry buys ---------------------------------------------
 
@@ -173,7 +173,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-shadow',
       x: RIGHT,
-      y: 330,
+      y: -330,
       text: 'Blurred',
       style: { fontStyle: 'bold', fontSize: 64, color: '#fff' },
       shadowColor: NAVY,
@@ -188,7 +188,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-shadow-spread',
       x: RIGHT,
-      y: 250,
+      y: -250,
       text: 'shadows',
       style: { fontStyle: 'bold', fontSize: 64, color: CRIMSON },
       shadowColor: '#e63352',
@@ -197,7 +197,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       shadowOpacity: 0.55,
     }),
   )
-  root.addChild(label(RIGHT, 190, 'shadowBlur and spread, cast from the letterforms.'))
+  root.addChild(label(RIGHT, -190, 'shadowBlur and spread, cast from the letterforms.'))
 
   // Faux bold and a glow, both of which are dilations of the outline here - a ring stroked
   // around the glyph's own contours rather than a distance-field threshold shift.
@@ -206,7 +206,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-glow',
       x: RIGHT,
-      y: 150,
+      y: -150,
       runs: [
         { text: 'glow ', style: { fontSize: 40, color: DARK, glow: { color: HIGHLIGHT, radius: 5 } } },
         { text: 'faux bold', style: { fontSize: 40, color: TEAL, fauxBold: true } },
@@ -221,26 +221,26 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-pick',
       x: RIGHT,
-      y: 40,
+      y: -40,
       text: 'CLICK O',
       style: { fontStyle: 'bold', fontSize: 88, color: NAVY },
     }),
   )
-  root.addChild(label(RIGHT, -45, "Picking is per-glyph: the O's counter is a hole, not a hit."))
+  root.addChild(label(RIGHT, 45, "Picking is per-glyph: the O's counter is a hole, not a hit."))
 
   // Turning and growing under the animation - geometry, so it stays exact at any size.
   const spun = new VectorText({
     fonts: book,
     name: 'vt-spun',
     x: RIGHT + 190,
-    y: -140,
+    y: 140,
     offsetX: 95,
     offsetY: 0,
     text: 'zoom in',
     style: { fontStyle: 'bold-italic', fontSize: 46, color: '#6138db' },
   })
   root.addChild(spun)
-  root.addChild(label(RIGHT, -208, 'Scroll to zoom: outlines have no resolution to run out of.'))
+  root.addChild(label(RIGHT, 208, 'Scroll to zoom: outlines have no resolution to run out of.'))
 
   // Baseline shift, per run: the shaper moves the pen origin, and the outline follows it, so
   // a superscript is a real raised glyph rather than a smaller one nudged by eye.
@@ -249,7 +249,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'vt-baseline',
       x: RIGHT,
-      y: -240,
+      y: 240,
       runs: [
         { text: 'E = mc', style: { fontSize: 34, color: NAVY } },
         { text: '2', style: { fontSize: 20, color: CRIMSON, baselineShift: 15 } },
@@ -261,18 +261,18 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
       ],
     }),
   )
-  root.addChild(label(RIGHT, -285, 'baselineShift, in world px: + raises a run, - lowers it.'))
+  root.addChild(label(RIGHT, 285, 'baselineShift, in world px: + raises a run, - lowers it.'))
 
   // --- vertical flow: glyphs stack downward, columns advance right-to-left ------------
   // A pragmatic subset, the same one the MSDF path implements: no wrapping, justification or
   // decorations in this orientation, but faux styles, shadows and glows all still apply.
-  root.addChild(label(VERTICAL - 150, 372, 'orientation: vertical'))
+  root.addChild(label(VERTICAL - 150, -372, 'orientation: vertical'))
   root.addChild(
     new VectorText({
       fonts: book,
       name: 'vt-vertical',
       x: VERTICAL,
-      y: 340,
+      y: -340,
       text: 'VERTICAL\nFLOW',
       orientation: 'vertical',
       lineHeight: 1.05,
@@ -281,7 +281,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   )
 
   // --- alignment: one wrapped block per mode, side by side -----------------------------
-  root.addChild(label(LEFT, -320, 'align, over a 220px wrap width:'))
+  root.addChild(label(LEFT, 320, 'align, over a 220px wrap width:'))
   const ALIGNMENTS = [
     { align: 'left', color: NAVY },
     { align: 'center', color: TEAL },
@@ -290,13 +290,13 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   ] as const
   ALIGNMENTS.forEach(({ align, color }, i) => {
     const x = LEFT + i * 255
-    root.addChild(label(x, -350, align))
+    root.addChild(label(x, 350, align))
     root.addChild(
       new VectorText({
         fonts: book,
         name: `vt-align-${align}`,
         x,
-        y: -375,
+        y: 375,
         maxWidth: 220,
         align,
         lineHeight: 1.2,
@@ -310,7 +310,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   return {
     onFrame: (dt, speed) => {
       angle += dt * speed * 0.4
-      spun.rotation = Math.sin(angle) * 0.25
+      spun.rotation = Math.sin(angle) * 14
     },
   }
 }

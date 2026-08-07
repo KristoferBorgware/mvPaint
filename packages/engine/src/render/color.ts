@@ -1,10 +1,11 @@
 // Colours: the tuple the engine works in, and the strings it will accept instead.
 //
-// Everything downstream of a scene node - the batchers, the object records, the shaders - works
-// in straight-alpha RGBA with each channel in 0..1, because that is what a shader wants and
-// converting per frame would be absurd. So a string is an INPUT format, never a stored one:
-// parseColor turns it into the tuple once, at the point of assignment, and nothing past that
-// knows a string was ever involved.
+// Everything below a scene node - the batchers, the object records, the shaders - works in
+// straight-alpha RGBA with each channel in 0..1, because that is what a shader wants and
+// converting per frame would be absurd. parseColor turns a string into the tuple once, at the
+// point of assignment, and nothing on the render path sees a string. A node keeps the value it
+// was handed beside the tuple so it can be read back in the form it was written (see
+// Shape.fillInput); that copy is for the reader, and never reaches a buffer.
 //
 // What is accepted:
 //
@@ -20,6 +21,13 @@
 // Case and surrounding whitespace do not matter. Anything else THROWS rather than falling back
 // to a default: a mistyped colour that silently renders black is a bug that looks like a design
 // decision, and the message costs nothing at the one place it can be raised usefully.
+//
+// THE TUPLE IS CHECKED, not assumed. isRGBA tests for four finite numbers rather than for
+// "not a string", so a number, null, or a three-element array is rejected here instead of
+// being handed on as though it were a colour. What that guard admits, the object record
+// writes: `f32.set` ignores a scalar entirely and takes only as many channels as a short
+// array holds, leaving the rest of the record at whatever the previous object left there -
+// so an unchecked value renders as some other shape's colour, with nothing to trace it to.
 
 /** Straight-alpha RGBA, each channel 0..1. What everything below the scene graph works in. */
 export type RGBA = readonly [number, number, number, number]
@@ -35,6 +43,20 @@ export interface ColorStopInput {
   offset: number
   color: ColorInput
 }
+
+/**
+ * A whole stop list, in either of the two shapes one is written in: a list of stops, or the
+ * same offsets and colours flattened into one array - `[0, 'red', 1, 'blue']`. See parseStops.
+ */
+export type ColorStopsInput = readonly ColorStopInput[] | readonly (number | ColorInput)[]
+
+/**
+ * How many stops one gradient may carry. The per-object storage record holds the positions
+ * and colours inline, so the record's size is fixed by this and a longer list has nowhere to
+ * go. parseStops raises it rather than keeping the first eight - a gradient quietly missing
+ * its last four colours still draws, and looks like a colour-picking mistake.
+ */
+export const MAX_GRADIENT_STOPS = 8
 
 /**
  * #54B435 - the mv green, and the default for every piece of editor furniture the engine
@@ -92,8 +114,8 @@ const NAMED: Record<string, number> = {
 const TRANSPARENT: RGBA = [0, 0, 0, 0]
 
 /** True for the tuple form, which is passed through rather than parsed. */
-export function isRGBA(value: ColorInput): value is RGBA {
-  return typeof value !== 'string'
+export function isRGBA(value: unknown): value is RGBA {
+  return Array.isArray(value) && value.length === 4 && value.every((c) => typeof c === 'number' && Number.isFinite(c))
 }
 
 /**
@@ -105,7 +127,10 @@ export function isRGBA(value: ColorInput): value is RGBA {
  * Throws on a string it cannot read. See the file header for why that is better than a default.
  */
 export function parseColor(input: ColorInput): RGBA {
-  if (isRGBA(input)) return input
+  if (typeof input !== 'string') {
+    if (isRGBA(input)) return input
+    throw new Error(`A colour is a string or four finite numbers, not ${describe(input)}.`)
+  }
 
   const text = input.trim().toLowerCase()
   if (text === 'transparent') return TRANSPARENT
@@ -127,13 +152,57 @@ export function parseColor(input: ColorInput): RGBA {
 }
 
 /**
- * Every stop of a gradient, converted. Separate only because the mapping is the same three
- * lines in each of the places that hold a stop list.
+ * Every stop of a gradient, converted.
+ *
+ * Both written forms arrive here: a list of `{offset, color}`, or one flat array alternating
+ * the two - `[0, 'red', 0.5, 'blue']`. A leading number is what tells them apart, which is
+ * unambiguous because a stop object is never a number.
+ *
+ * Each offset must be a finite number. Nothing downstream can tell a missing offset from a
+ * real one: the object record is a Float32Array, `undefined` lands in it as NaN, and a NaN
+ * stop position makes the whole gradient interpolate to nothing several layers from here.
  */
-export function parseStops<T extends { offset: number; color: ColorInput }>(
-  stops: readonly T[],
-): { offset: number; color: RGBA }[] {
-  return stops.map((stop) => ({ offset: stop.offset, color: parseColor(stop.color) }))
+export function parseStops(stops: ColorStopsInput): { offset: number; color: RGBA }[] {
+  const parsed = isFlatStops(stops) ? flatStops(stops) : objectStops(stops)
+  if (parsed.length > MAX_GRADIENT_STOPS) {
+    throw new Error(`A gradient takes at most ${MAX_GRADIENT_STOPS} colour stops; this one has ${parsed.length}.`)
+  }
+  return parsed
+}
+
+/** The flat form is the one that opens with an offset; a list of stops opens with an object. */
+function isFlatStops(stops: ColorStopsInput): stops is readonly (number | ColorInput)[] {
+  return typeof stops[0] === 'number'
+}
+
+function flatStops(stops: readonly (number | ColorInput)[]): { offset: number; color: RGBA }[] {
+  if (stops.length % 2 !== 0) {
+    throw new Error(`A flat stop list pairs each offset with a colour, so its length is even; this one is ${stops.length}.`)
+  }
+  const out: { offset: number; color: RGBA }[] = []
+  for (let i = 0; i < stops.length; i += 2) {
+    out.push({ offset: stopOffset(stops[i]), color: parseColor(stops[i + 1] as ColorInput) })
+  }
+  return out
+}
+
+function objectStops(stops: readonly ColorStopInput[]): { offset: number; color: RGBA }[] {
+  return stops.map((stop) => ({ offset: stopOffset(stop?.offset), color: parseColor(stop?.color) }))
+}
+
+function stopOffset(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`A gradient stop's offset is a finite number, not ${describe(value)}.`)
+  }
+  return value
+}
+
+/** A value named in an error, short enough to read at the end of a sentence. */
+function describe(value: unknown): string {
+  if (value === null) return 'null'
+  if (value === undefined) return 'undefined'
+  if (Array.isArray(value)) return `an array of ${value.length}`
+  return `${typeof value} ${JSON.stringify(value)}`
 }
 
 function fromHexNumber(hex: number, alpha: number): RGBA {

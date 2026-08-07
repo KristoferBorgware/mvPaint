@@ -68,12 +68,12 @@ export class Group extends Container {
   visible = true
 
   /** Whether a drag starting on a descendant moves this group. See the header. */
-  draggable = true
+  draggable = false
 
   constructor(options: GroupOptions = {}) {
     super(options)
     this.visible = options.visible ?? true
-    this.draggable = options.draggable ?? true
+    this.draggable = options.draggable ?? false
   }
 
   protected override attrKeys(): readonly string[] {

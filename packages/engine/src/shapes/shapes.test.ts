@@ -9,6 +9,8 @@ import type { Vector2Like } from '../math/Vector2'
 import { listenerCount, resetListenerCensus } from '../events/listenerCensus'
 import type { NodeEvent } from '../events/NodeEvent'
 import { AABB } from '../math/AABB'
+import { radToDeg } from '../math/angle'
+import { Camera2D } from '../camera/Camera2D'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Vector3 } from '../math/Vector3'
 import { Container } from './Container'
@@ -57,7 +59,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
  * which is the frame the geometry below is written in.
  */
 const centredRect = (options: RectOptions = {}): Rect =>
-  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: (options.height ?? 1) / 2 })
 
 const localBoundsOf = (node: TransformableNode): AABB | null =>
   node instanceof Group ? node.bounds() : node.localBounds()
@@ -130,7 +132,7 @@ it('where each shape\'s origin sits', () => {
 
     const rect = new Rect({ width: 40, height: 20 })
     assert(near(b(rect).min.x, 0) && near(b(rect).max.x, 40), 'a rect starts at its origin in x and runs right')
-    assert(near(b(rect).max.y, 0) && near(b(rect).min.y, -20), 'and starts at its origin in y and hangs down')
+    assert(near(b(rect).min.y, 0) && near(b(rect).max.y, 20), 'and starts at its origin in y and hangs down')
 
     // The position places that corner, so the shape is entirely below and right of it.
     const placed = new Rect({ x: 100, y: 200, width: 40, height: 20 })
@@ -152,13 +154,13 @@ it('where each shape\'s origin sits', () => {
 
     // Which makes the pivot differ, and that is the part worth stating out loud: turning a
     // rect half a turn swings it about its corner, while a circle only spins in place.
-    const turned = new Rect({ x: 0, y: 0, width: 40, height: 20, rotation: Math.PI })
-    const swung = turned.worldMatrix().transformPoint(new Vector3(40, -20, 0))
-    assert(near(swung.x, -40) && near(swung.y, 20), 'a rect turns about its corner, swinging its body across the origin')
+    const turned = new Rect({ x: 0, y: 0, width: 40, height: 20, rotation: 180 })
+    const swung = turned.worldMatrix().transformPoint(new Vector3(40, 20, 0))
+    assert(near(swung.x, -40) && near(swung.y, -20), 'a rect turns about its corner, swinging its body across the origin')
 
     // Unless it is told otherwise - the documented way to get the old behaviour back.
-    const pivoted = new Rect({ x: 0, y: 0, width: 40, height: 20, offsetX: 20, offsetY: -10, rotation: Math.PI })
-    const stayed = pivoted.worldMatrix().transformPoint(new Vector3(20, -10, 0))
+    const pivoted = new Rect({ x: 0, y: 0, width: 40, height: 20, offsetX: 20, offsetY: 10, rotation: 180 })
+    const stayed = pivoted.worldMatrix().transformPoint(new Vector3(20, 10, 0))
     assert(near(stayed.x, 0) && near(stayed.y, 0), 'a centring offset puts the pivot back in the middle')
     const pb = pivoted.localBounds()
     assert(near(pb.min.x, 0) && near(pb.max.x, 40), 'and changes nothing about the geometry it emits')
@@ -171,22 +173,22 @@ it('where each shape\'s origin sits', () => {
 // border that must not change a box's footprint is an inside stroke, and nothing else.
 it('strokeAlign changes the geometry, and so changes what the node measures', () => {
     const boxed = (align: StrokeAlign) => {
-      const rect = new Rect({ width: 100, height: 60, fill: [1, 1, 1, 1], strokeWidth: 20, strokeAlign: align })
+      const rect = new Rect({ width: 100, height: 60, fill: [1, 1, 1, 1], stroke: 'black', strokeWidth: 20, strokeAlign: align })
       const b = rect.localBounds()
       return { width: b.max.x - b.min.x, height: b.max.y - b.min.y, minX: b.min.x, maxY: b.max.y }
     }
 
     const centred = boxed('center')
     assert(near(centred.width, 120) && near(centred.height, 80), 'a centred stroke grows the node by half its width on each side')
-    assert(near(centred.minX, -10) && near(centred.maxY, 10), 'reaching out past the fill in both directions')
+    assert(near(centred.minX, -10) && near(centred.maxY, 70), 'reaching out past the fill in both directions')
 
     const outside = boxed('outside')
     assert(near(outside.width, 140) && near(outside.height, 100), 'an outside stroke grows it by the full width')
-    assert(near(outside.minX, -20) && near(outside.maxY, 20), 'all of it beyond the outline')
+    assert(near(outside.minX, -20) && near(outside.maxY, 80), 'all of it beyond the outline')
 
     const inside = boxed('inside')
     assert(near(inside.width, 100) && near(inside.height, 60), 'an inside stroke leaves the node exactly the size of its fill')
-    assert(near(inside.minX, 0) && near(inside.maxY, 0), 'with the outline as the silhouette')
+    assert(near(inside.minX, 0) && near(inside.maxY, 60), 'with the outline as the silhouette')
 
     // Default: unchanged from before the option existed.
     assert(new Rect({ width: 10, height: 10 }).strokeAlign === 'center', "a shape strokes about its outline unless told otherwise")
@@ -194,7 +196,7 @@ it('strokeAlign changes the geometry, and so changes what the node measures', ()
     // It is baked into geometry, like strokeWidth - so it is invalidated the same way, and is
     // an attribute like any other (setAttr fires a change event, and the transformer's
     // capture/restore of a node's attributes carries it).
-    const rect = new Rect({ width: 100, height: 60, strokeWidth: 20 })
+    const rect = new Rect({ width: 100, height: 60, stroke: 'black', strokeWidth: 20 })
     assert(near(rect.localBounds().max.x, 110), 'the rect measures with its centred stroke')
     rect.strokeAlign = 'inside'
     rect.markGeometryDirty()
@@ -202,14 +204,14 @@ it('strokeAlign changes the geometry, and so changes what the node measures', ()
     assert(rect.getAttr('strokeAlign') === 'inside', 'strokeAlign reads back as an attribute')
 
     // A circle is a ring like any other: an inside stroke keeps it at its radius.
-    const circle = (align: StrokeAlign) => new Circle({ radius: 50, strokeWidth: 20, strokeAlign: align }).localBounds()
+    const circle = (align: StrokeAlign) => new Circle({ radius: 50, stroke: 'black', strokeWidth: 20, strokeAlign: align }).localBounds()
     assert(near(circle('inside').max.x, 50, 0.2), 'an inside stroke on a circle stays inside its radius')
     assert(near(circle('outside').max.x, 70, 0.2), 'an outside one reaches a full width past it')
     assert(near(circle('center').max.x, 60, 0.2), 'and a centred one, half a width')
 
     // An open polyline has no inside, so its measurement cannot change with the alignment.
     const line = (align: StrokeAlign) =>
-      new Polyline({ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], strokeWidth: 20, strokeAlign: align }).localBounds()
+      new Polyline({ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }], stroke: 'black', strokeWidth: 20, strokeAlign: align }).localBounds()
     assert(near(line('inside').max.y, 10) && near(line('outside').max.y, 10), 'an open line is centred whatever the alignment')
 })
 
@@ -244,7 +246,7 @@ it('boxFromPoints: fits an oriented box in a turned frame', () => {
 it('boxForNodes: every selection orients to the FIRST node\'s rotation, one node or many', () => {
     // Pivoted at its middle (a Rect's origin is its top-left corner - see Shape's header),
     // so the node's centre is at (100, 50) whatever it is rotated by.
-    const solo = new Rect({ x: 100, y: 50, width: 40, height: 20, offsetX: 20, offsetY: -10, rotation: Math.PI / 4 })
+    const solo = new Rect({ x: 100, y: 50, width: 40, height: 20, offsetX: 20, offsetY: 10, rotation: 45 })
     const box = boxForNodes([solo], localBoundsOf)!
     assert(near(box.rotation, Math.PI / 4), 'a single node gives a box turned to match it')
     assert(near(box.cx, 100) && near(box.cy, 50), "the box centers on the node's own bounds")
@@ -264,7 +266,7 @@ it('boxForNodes: every selection orients to the FIRST node\'s rotation, one node
     // frame (as the renderer does) kept resetting it back to axis-aligned, so the frame
     // never appeared to rotate with the selection even though the nodes genuinely were.
     // Order matters: it's the FIRST selected node, not any rotated node in the set.
-    const rotatedFirst = centredRect({ x: 0, y: 0, width: 20, height: 20, rotation: Math.PI / 4 })
+    const rotatedFirst = centredRect({ x: 0, y: 0, width: 20, height: 20, rotation: 45 })
     const unrotatedSecond = centredRect({ x: 100, y: 0, width: 20, height: 20 })
     const orientedToFirst = boxForNodes([rotatedFirst, unrotatedSecond], localBoundsOf)!
     assert(near(orientedToFirst.rotation, Math.PI / 4), 'a multi-node box orients to the FIRST selected node, not axis-aligned')
@@ -279,7 +281,7 @@ it('boxForNodes: every selection orients to the FIRST node\'s rotation, one node
 //     not snap back to axis-aligned - the bug the fix above addresses end to end ---
 it('REGRESSION: the box orientation must survive a live rotate gesture, i.e. re-fitting', () => {
     const upright = centredRect({ x: -100, y: 0, width: 120, height: 40 })
-    const turned = centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 })
+    const turned = centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: 45 })
     const selection = [turned, upright] // turned selected FIRST
 
     const pressBox = boxForNodes(selection, localBoundsOf)!
@@ -313,9 +315,9 @@ it('REGRESSION: the box orientation must survive a live rotate gesture, i.e. re-
 
 it('anchors: placement follows the box\'s rotation, and opposites really are opposite', () => {
     const box: OrientedBox = { cx: 0, cy: 0, halfW: 10, halfH: 5, rotation: 0 }
-    assert(near(anchorPosition(box, 'top-right').x, 10) && near(anchorPosition(box, 'top-right').y, 5), 'top-right sits at (+halfW,+halfH)')
+    assert(near(anchorPosition(box, 'top-right').x, 10) && near(anchorPosition(box, 'top-right').y, -5), 'top-right sits at (+halfW,-halfH)')
     assert(near(anchorPosition(box, 'middle-left').x, -10) && near(anchorPosition(box, 'middle-left').y, 0), 'middle-left sits at (-halfW,0)')
-    assert(near(rotateAnchorPosition(box, 4).y, 9), 'the rotate handle clears the top edge by its offset')
+    assert(near(rotateAnchorPosition(box, 4).y, -9), 'the rotate handle clears the top edge by its offset')
 
     // Turned a quarter turn, the box's +x axis points along world +y.
     const turned: OrientedBox = { ...box, rotation: Math.PI / 2 }
@@ -349,10 +351,11 @@ it('resizeFactors: the opposite anchor holds still, and dragging to the start is
 
     // A corner scales both axes independently unless the ratio is locked. Widths are
     // measured from the pinned corner: dragging top-right to x=30 spans -10..30, i.e. 40
-    // against the original 20, so twice as wide - while y is left where it was.
-    const corner = resizeFactors(box, 'top-right', { x: 30, y: 5 })
+    // against the original 20, so twice as wide - while y is left where it was. Top is -y,
+    // so leaving y alone means dragging to the top edge's own -5.
+    const corner = resizeFactors(box, 'top-right', { x: 30, y: -5 })
     assert(near(corner.scaleX, 2) && near(corner.scaleY, 1), 'a free corner scales each axis by its own drag')
-    assert(near(corner.fixed.x, -10) && near(corner.fixed.y, -5), 'a corner pins the opposite corner')
+    assert(near(corner.fixed.x, -10) && near(corner.fixed.y, 5), 'a corner pins the opposite corner')
 
     const locked = resizeFactors(box, 'top-right', { x: 20, y: 5 }, { keepRatio: true })
     assert(near(locked.scaleX, locked.scaleY), 'keepRatio ties the two axes together')
@@ -416,7 +419,7 @@ it('applyWorldTransform: a world delta lands correctly on the node\'s own fields
     const spun = centredRect({ x: 10, y: 0, width: 2, height: 2 })
     applyWorldTransform(spun, rotateAbout({ x: 0, y: 0 }, Math.PI / 2))
     assert(near(spun.x, 0) && near(spun.y, 10), 'rotating about the origin swings the node around it')
-    assert(near(spun.rotation, Math.PI / 2), 'and turns the node itself')
+    assert(near(spun.rotation, 90), 'and turns the node itself')
 
     // Scaling about a fixed corner: the fixed point must not move, the far side must double.
     const scaled = centredRect({ x: 0, y: 0, width: 10, height: 10 })
@@ -452,7 +455,7 @@ it('the delta reaches a node through a transformed PARENT, which is what makes',
     group.matrix = Matrix4x4.translation(new Vector3(100, -40, 0))
       .mul(Matrix4x4.rotationZ(0.6))
       .mul(Matrix4x4.scaling(new Vector3(2, 2, 1)))
-    const child = group.addChild(centredRect({ x: 3, y: 7, width: 10, height: 6, rotation: 0.2 }))
+    const child = group.addChild(centredRect({ x: 3, y: 7, width: 10, height: 6, rotation: 12 }))
 
     const before = corners(child)
     const delta = Matrix4x4.translation(new Vector3(25, -12, 0))
@@ -485,7 +488,7 @@ it('the delta reaches a node through a transformed PARENT, which is what makes',
 //     approximated. With skewX/skewY on Shape, rotate+skew+scale spans every invertible
 //     2x2 and the result is reproduced to the last decimal ---
 it('skew makes the decomposition EXACT: non-uniformly scaling a ROTATED node used to', () => {
-    const node = centredRect({ x: 30, y: -20, width: 80, height: 40, rotation: 0.7 })
+    const node = centredRect({ x: 30, y: -20, width: 80, height: 40, rotation: 40 })
     const before = corners(node)
     // Squash x, stretch y, about a point the node does not sit on - the case that shears.
     const pivot = { x: -15, y: 25 }
@@ -505,7 +508,7 @@ it('skew makes the decomposition EXACT: non-uniformly scaling a ROTATED node use
 
     // The same, in a rotated FRAME rather than along the world axes, on a node that is
     // already skewed - the general case; still exact.
-    const gnarly = centredRect({ x: 5, y: 5, width: 30, height: 70, rotation: -0.4, skewX: 0.3, skewY: -0.15 })
+    const gnarly = centredRect({ x: 5, y: 5, width: 30, height: 70, rotation: -23, skewX: 0.3, skewY: -0.15 })
     const g0 = corners(gnarly)
     const gPivot = { x: 12, y: -8 }
     applyWorldTransform(gnarly, scaleAbout(gPivot, 0.9, 1.8, 0.5))
@@ -526,14 +529,15 @@ it('skew makes the decomposition EXACT: non-uniformly scaling a ROTATED node use
 
 it('decompose2D round-trips through Shape\'s own transform composition', () => {
     for (const source of [
-      centredRect({ rotation: 0.9, scaleX: 2, scaleY: 0.5 }),
-      centredRect({ rotation: -1.2, scaleX: -1.5, scaleY: 3, skewX: 0.6 }),
+      centredRect({ rotation: 52, scaleX: 2, scaleY: 0.5 }),
+      centredRect({ rotation: -69, scaleX: -1.5, scaleY: 3, skewX: 0.6 }),
       centredRect({ skewX: -0.4, skewY: 0.25, scaleX: 1.3, scaleY: 1.3 }),
     ]) {
       const m = source.localMatrix().m
       const parts = decompose2D(m[0], m[1], m[4], m[5])
       const rebuilt = new Rect({
-        rotation: parts.rotation,
+        // decompose2D answers in radians; a node's own field is degrees (math/angle.ts).
+        rotation: radToDeg(parts.rotation),
         scaleX: parts.scaleX,
         scaleY: parts.scaleY,
         skewX: parts.skewX,
@@ -564,17 +568,44 @@ it('skew composes between rotation and scale', () => {
 })
 
 it('a node\'s own pivot (offset) survives a transform', () => {
-    const pivoted = new Rect({ x: 50, y: 50, width: 10, height: 10, offsetX: 4, offsetY: -2 })
+    const pivoted = new Rect({ x: 50, y: 50, width: 10, height: 10, offsetX: 4, offsetY: 2 })
     const before = corners(pivoted)
     applyWorldTransform(pivoted, Matrix4x4.translation(new Vector3(7, 7, 0)))
     const after = corners(pivoted)
-    assert(pivoted.offsetX === 4 && pivoted.offsetY === -2, 'the pivot itself is left alone')
+    assert(pivoted.offsetX === 4 && pivoted.offsetY === 2, 'the pivot itself is left alone')
     for (let i = 0; i < before.length; i++) {
       assert(
         near(after[i].x - before[i].x, 7) && near(after[i].y - before[i].y, 7),
         'a node with a pivot still moves by exactly the world delta',
       )
     }
+})
+
+//
+// Which unit a number is in cannot be seen at the call site, so it is pinned here. Every angle
+// an application writes is degrees; everything that computes with one works in radians, and the
+// two meet at the boundaries named in math/angle.ts. A quarter turn is the useful case to fix,
+// because 90 and Math.PI/2 are both plausible-looking numbers to find in a transform.
+it('angles are degrees wherever an application writes one', () => {
+    const quarter = new Rect({ width: 10, height: 10, rotation: 90 })
+    const turned = quarter.localMatrix().transformPoint(new Vector3(1, 0, 0))
+    assert(near(turned.x, 0, 1e-6) && near(turned.y, 1, 1e-6), 'rotation 90 is a quarter turn, not 90 radians')
+
+    // A camera reads the same unit as a node.
+    const camera = new Camera2D({ rotation: 90 })
+    const up = camera.view(100, 100).m
+    assert(near(Math.abs(up[0]), 0, 1e-6), "the camera's 90 is a quarter turn too")
+
+    // Coming back the other way: a world matrix decomposed onto a node arrives as degrees.
+    const spun = new Rect({ width: 10, height: 10 })
+    spun.applyLocalMatrix(Matrix4x4.rotationZ(Math.PI / 2))
+    assert(near(spun.rotation, 90, 1e-6), 'a quarter-turn matrix reads back as 90, not 1.57')
+
+    // And the round trip closes, which is what a transformer gesture depends on.
+    const original = new Rect({ width: 10, height: 10, rotation: 37 })
+    const copy = new Rect({ width: 10, height: 10 })
+    copy.applyLocalMatrix(original.localMatrix())
+    assert(near(copy.rotation, 37, 1e-4), 'degrees survive a matrix round trip')
 })
 
 it('worldRotationOf accumulates ancestors\' rotation', () => {
@@ -586,7 +617,8 @@ it('worldRotationOf accumulates ancestors\' rotation', () => {
     }
     const group = new TransformGroup()
     group.matrix = Matrix4x4.rotationZ(0.5)
-    const child = group.addChild(centredRect({ rotation: 0.25 }))
+    // The group carries radians (it is a raw matrix); the child's own field is degrees.
+    const child = group.addChild(centredRect({ rotation: radToDeg(0.25) }))
     assert(near(worldRotationOf(child), 0.75), "world rotation adds the parent's to the node's own")
 })
 
@@ -595,9 +627,9 @@ it('end to end: a resize gesture on a real node holds its opposite corner still'
     const box = boxForNodes([node], localBoundsOf)!
     const held = anchorPosition(box, 'bottom-left')
 
-    // Drag the top-right corner out to (100,50). Measured from the pinned bottom-left at
-    // (-50,-25) that spans 150x75 against the original 100x50, i.e. 1.5x on both axes.
-    const factors = resizeFactors(box, 'top-right', { x: 100, y: 50 })
+    // Drag the top-right corner out to (100,-50). Measured from the pinned bottom-left at
+    // (-50,25) that spans 150x75 against the original 100x50, i.e. 1.5x on both axes.
+    const factors = resizeFactors(box, 'top-right', { x: 100, y: -50 })
     assert(near(factors.scaleX, 1.5) && near(factors.scaleY, 1.5), 'the drag works out to 1.5x on both axes')
     applyWorldTransform(node, scaleAbout(factors.fixed, factors.rotation, factors.scaleX, factors.scaleY))
 
@@ -606,7 +638,7 @@ it('end to end: a resize gesture on a real node holds its opposite corner still'
     assert(near(heldAfter.x, held.x) && near(heldAfter.y, held.y), 'the held corner does not budge during a resize')
     assert(near(after.halfW, 75) && near(after.halfH, 37.5), 'the box grows by the scale factor')
     const dragged = anchorPosition(after, 'top-right')
-    assert(near(dragged.x, 100) && near(dragged.y, 50), 'the dragged corner lands exactly under the pointer')
+    assert(near(dragged.x, 100) && near(dragged.y, -50), 'the dragged corner lands exactly under the pointer')
 })
 
 //     rotated differently used to run away within a few pointer moves. The axis-aligned
@@ -617,7 +649,7 @@ it('end to end: a resize gesture on a real node holds its opposite corner still'
 it('REGRESSION: a non-uniform scale on a multi-node selection whose members are', () => {
     const makeSelection = () => [
       centredRect({ x: -100, y: 0, width: 120, height: 40 }),
-      centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: Math.PI / 4 }),
+      centredRect({ x: 100, y: 0, width: 120, height: 40, rotation: 45 }),
     ]
 
     // Exactly what the controller does on each pointermove: restore, then apply one delta.
@@ -660,7 +692,7 @@ it('REGRESSION: a non-uniform scale on a multi-node selection whose members are'
 
     // captureTransform/restoreTransform must cover every field localMatrix() reads - the
     // omission of one is what caused this in the first place.
-    const probe = new Rect({ x: 3, y: 4, rotation: 0.3, scaleX: 2, scaleY: 0.5, skewX: 0.4, skewY: -0.2, offsetX: 7, offsetY: -1 })
+    const probe = new Rect({ x: 3, y: 4, rotation: 0.3, scaleX: 2, scaleY: 0.5, skewX: 0.4, skewY: -0.2, offsetX: 7, offsetY: 1 })
     const captured = probe.captureTransform()
     const beforeMatrix = [...probe.localMatrix().m]
     probe.x = 0; probe.y = 0; probe.rotation = 0; probe.scaleX = 1; probe.scaleY = 1
@@ -707,10 +739,11 @@ it('Transformer: the frame re-fits itself as the selection changes shape, and do
     assert(near(edge('top').scaleX, expectedWidth, 1e-3), 'the frame re-fits itself to the resized selection')
     assert(edge('top').scaleX > widthBefore * 1.8, 'and really did grow, rather than staying at its old size')
 
-    // Rotating the selection turns the frame with it.
+    // Rotating the selection turns the frame with it. The delta is a world matrix, so it is
+    // written in radians; the edge it lands on is a node, whose rotation is degrees.
     applyWorldTransform(node, rotateAbout({ x: 0, y: 0 }, Math.PI / 6))
     fit()
-    assert(near(edge('top').rotation, Math.PI / 6, 1e-3), 'the frame turns with the selection')
+    assert(near(edge('top').rotation, radToDeg(Math.PI / 6), 1e-3), 'the frame turns with the selection')
 
     // Every part is a unit shape driven purely by transform - never resized or stroked, so
     // the frame costs no geometry rebuilds however much the selection moves. That holds for
@@ -744,9 +777,9 @@ it('Transformer: the frame re-fits itself as the selection changes shape, and do
     const sameColor = (got: readonly number[], want: readonly number[]) =>
       want.every((v, i) => near(got[i], v, 1e-3))
     const mvGreen = [0x54 / 255, 0xb4 / 255, 0x35 / 255, 1]
-    assert(sameColor(edge('top').fill, mvGreen), 'the border is the mv green')
-    assert(sameColor(edge('top-left').fill, mvGreen), 'and so is the inside of a handle')
-    assert(sameColor(edge('top-left-border').fill, [1, 1, 1, 1]), 'while its ring is white')
+    assert(sameColor(edge('top').fill!, mvGreen), 'the border is the mv green')
+    assert(sameColor(edge('top-left').fill!, mvGreen), 'and so is the inside of a handle')
+    assert(sameColor(edge('top-left-border').fill!, [1, 1, 1, 1]), 'while its ring is white')
 
     // Handles are found by proximity in world space, and corners beat the edges they touch.
     const box = boxForNodes(t.nodes, localBoundsOf)!
@@ -999,18 +1032,18 @@ it('groups: a container that places itself, sized by what it holds', () => {
     const moved = a.worldMatrix().transformPoint(new Vector3(0, 0, 0))
     assert(near(moved.x, 200) && near(a.x, 0), 'moving the group moves the child, whose own x never changed')
 
-    // Sized by its contents: the rect spans [0,40] x [-20,0] in its own space, and the group
+    // Sized by its contents: the rect spans [0,40] x [0,20] in its own space, and the group
     // holds that unmoved, so the group's local extent is exactly the rect's.
     const bounds = group.bounds()
     assert(bounds.valid(), 'a group holding something has an extent')
     assert(near(bounds.min.x, 0) && near(bounds.max.x, 40), 'and it is the union of what it holds')
-    assert(near(bounds.max.y, 0) && near(bounds.min.y, -20), 'in both axes')
+    assert(near(bounds.min.y, 0) && near(bounds.max.y, 20), 'in both axes')
 
     // Add a second shape and the group grows to cover it - no invalidation call anywhere.
     group.addChild(new Rect({ x: 60, y: 0, width: 10, height: 100 }))
     const grown = group.bounds()
     assert(near(grown.max.x, 70), 'adding a shape grows the group')
-    assert(near(grown.min.y, -100), 'in whichever direction the new shape reaches')
+    assert(near(grown.max.y, 100), 'in whichever direction the new shape reaches')
 
     // Move a child and the group follows it, again with nothing told to recompute.
     a.x = -30
@@ -1035,7 +1068,7 @@ it('the group\'s own transform applies to its contents\' extent', () => {
     group.addChild(new Rect({ width: 10, height: 10 }))
     assert(near(group.bounds().max.x, 10), "bounds() is in the group's OWN space, so its scale is not in them")
     assert(near(group.worldBounds().max.x, 20), 'worldBounds() is, so the scale is')
-    assert(near(group.worldBounds().min.y, -30), 'on both axes independently')
+    assert(near(group.worldBounds().max.y, 30), 'on both axes independently')
 })
 
 it('groups nest, and the middle group\'s transform is composed on the way down', () => {
@@ -1064,8 +1097,8 @@ it('a hidden group takes its contents out of the measurement, and out of the sce
 })
 
 it('which group a node belongs to, for an application deciding what a click means', () => {
-    const outer = new Group({ name: 'outer' })
-    const inner = outer.addChild(new Group({ name: 'inner' }))
+    const outer = new Group({ name: 'outer', draggable: true })
+    const inner = outer.addChild(new Group({ name: 'inner', draggable: true }))
     const leaf = inner.addChild(new Rect({ width: 1, height: 1 }))
     const loose = new Rect({ width: 1, height: 1 })
 
@@ -1346,8 +1379,8 @@ it('moveTo(): re-homing, with and without keeping the node where it looks', () =
 })
 
 it('moveTo() refuses the two moves that would corrupt the tree', () => {
-    const outer = new Group({ name: 'outer' })
-    const inner = outer.addChild(new Group({ name: 'inner' }))
+    const outer = new Group({ name: 'outer', draggable: true })
+    const inner = outer.addChild(new Group({ name: 'inner', draggable: true }))
     const leaf = inner.addChild(new Rect({ width: 1, height: 1 }))
 
     let threw = false

@@ -53,14 +53,14 @@
 //     it. A radius is measured from the middle, so any other origin would be a second,
 //     contradictory reference point.
 //   - Everything else - Rect, Image, MSDFText, VectorText - hangs from its TOP-LEFT corner,
-//     extending right and downward. The scene is y-up, so such a shape spans x in
-//     [0, width] and y in [-height, 0] in its own local space.
+//     extending right and downward. The scene is y-down, so such a shape spans x in
+//     [0, width] and y in [0, height] in its own local space.
 //   - Polyline and Path have no implied origin at all: their points and contours are
 //     already local coordinates, placed wherever they were authored.
 //
 // The practical consequence is the pivot. Rotation and scale are about the local origin,
 // so a Circle turns about its middle while a Rect turns about its corner. To spin a Rect
-// about its own centre, give it `offsetX: width / 2, offsetY: -height / 2`.
+// about its own centre, give it `offsetX: width / 2, offsetY: height / 2`.
 //
 // The shadow* properties mirror the canvas 2D shadow model: shadowColor, shadowBlur,
 // shadowOffsetX/Y, shadowOpacity, shadowEnabled, shadowForStrokeEnabled - plus
@@ -86,7 +86,7 @@ import { AABB } from '../math/AABB'
 import { bumpMeshGeometryEpoch, bumpObjectRecordEpoch } from './contentEpoch'
 import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
-import type {ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
+import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { sameGauge, type LineCap, type LineJoin, type StrokeAlign, type StrokeGauge } from '../render/stroke'
 import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
@@ -125,7 +125,7 @@ export interface ShapeOptions extends NodeOptions {
    * Draw in the always-on-top overlay pass (see webgpu/SceneRenderer). Default false.
    */
   overlay?: boolean
-  /** Can a pointer drag reposition this node? See Shape.draggable. Default true. */
+  /** Can a pointer drag reposition this node? See Shape.draggable. Default false. */
   draggable?: boolean
   /** Shadow tint. Default opaque black. */
   shadowColor?: ColorInput
@@ -142,9 +142,11 @@ export interface ShapeOptions extends NodeOptions {
   shadowEnabled?: boolean
   /** Cast the shadow from fill+stroke (true, default) or from the fill alone. */
   shadowForStrokeEnabled?: boolean
-  fill?: ColorInput
-  stroke?: ColorInput
-  /** Stroke width in world units; 0 = no stroke. */
+  /** Flat fill colour. Omitted (or null) is no fill - the shape draws nothing but still picks. */
+  fill?: ColorInput | null
+  /** Outline colour. Omitted (or null) is no outline, whatever strokeWidth says. */
+  stroke?: ColorInput | null
+  /** Stroke width in world units; 0 = no stroke. Default 2. */
   strokeWidth?: number
   /**
    * Which side of the outline the stroke expands onto: 'center' (default), 'inside' or
@@ -201,7 +203,7 @@ export abstract class Shape extends Node {
    * A drag only ever reaches a node that pickNode() returns, so `pickable = false` already
    * rules one out; this turns dragging off for a node that should still be selectable.
    */
-  draggable = true
+  draggable = false
 
   /**
    * Where this shape sits in the scene-wide stack: higher is in FRONT. Assigned from a
@@ -230,12 +232,18 @@ export abstract class Shape extends Node {
 
   // --- shadow (the canvas 2D model; see the file header) ------------------------------
   private shadowColorValue: RGBA = [0, 0, 0, 1]
+  private shadowColorWritten: ColorInput = [0, 0, 0, 1]
   /** Shadow tint; its alpha is multiplied by shadowOpacity. Accepts a string - see fill. */
   get shadowColor(): RGBA {
     return this.shadowColorValue
   }
   set shadowColor(value: ColorInput) {
     this.shadowColorValue = parseColor(value)
+    this.shadowColorWritten = value
+  }
+  /** What shadowColor was last assigned, in the form it was written. See fillInput. */
+  get shadowColorInput(): ColorInput {
+    return this.shadowColorWritten
   }
   /**
    * Canvas-style blur radius in LOCAL units: the silhouette is blurred by a Gaussian of
@@ -286,9 +294,10 @@ export abstract class Shape extends Node {
     this._height = value
   }
 
-  private fillValue: RGBA = [0, 0, 0, 1]
+  private fillValue: RGBA | null = null
   /**
-   * Flat fill colour, used when fillPriority is 'color'.
+   * Flat fill colour, used when fillPriority is 'color'. `null` - the default - is a shape
+   * with no fill at all, which draws nothing but stays hit-testable over its whole face.
    *
    * Assign either form: the `[r, g, b, a]` tuple in 0..1, or a colour string - '#f80',
    * 'rgb(255 136 0)', 'hsl(32 100% 50%)', 'tomato', 'transparent' (see render/color.ts for the
@@ -298,18 +307,57 @@ export abstract class Shape extends Node {
    * An unreadable string throws rather than falling back, since a colour that silently comes out
    * black looks like a design decision rather than a typo.
    */
-  get fill(): RGBA {
+  get fill(): RGBA | null {
     return this.fillValue
   }
-  set fill(value: ColorInput) {
-    this.fillValue = parseColor(value)
+  set fill(value: ColorInput | null) {
+    this.fillValue = value === null ? null : parseColor(value)
+    this.fillWritten = value
     bumpObjectRecordEpoch()
   }
+  private fillWritten: ColorInput | null = null
+  /**
+   * What `fill` was last assigned, in the form it was written - 'tomato' comes back as
+   * 'tomato', not as the tuple it renders through.
+   *
+   * The parsed tuple is what the shape IS, and every colour comparison the engine makes uses
+   * it. This is for the code on the other side: a swatch that has to show which preset is
+   * selected, a serializer writing a document back out in the vocabulary its author used.
+   * Those need the word, and cannot recover it from four numbers.
+   */
+  get fillInput(): ColorInput | null {
+    return this.fillWritten
+  }
 
-  /** Which fill mechanism this shape's fill triangles use. */
+  /**
+   * Whether this shape's fill paints anything: a colour, or a gradient with stops in it.
+   *
+   * Not the same as having fill TRIANGLES, which every closed shape has regardless - see
+   * FillPriority's 'none' for why they are kept.
+   */
+  hasFill(): boolean {
+    return this.fillPriority !== 'none'
+  }
+
+  /** Whether this shape's stroke paints anything: a colour AND a width to draw it at. */
+  hasStroke(): boolean {
+    return this.strokeValue !== null && this.strokeWidth > 0
+  }
+
+  /**
+   * Which fill mechanism this shape's fill triangles use.
+   *
+   * Reads as 'none' whenever the chosen mechanism has nothing to draw with - no fill colour,
+   * or a gradient with no stops - so everything downstream asks one field rather than each
+   * re-deriving the same emptiness test. Writing it records the CHOICE; the choice is what
+   * comes back once there is something to paint.
+   */
   private _fillPriority: FillPriority = 'color'
   get fillPriority(): FillPriority {
-    return this._fillPriority
+    if (this._fillPriority === 'color') return this.fillValue === null ? 'none' : 'color'
+    if (this._fillPriority === 'linear-gradient') return this.linearStops.length > 0 ? 'linear-gradient' : 'none'
+    if (this._fillPriority === 'radial-gradient') return this.radialStops.length > 0 ? 'radial-gradient' : 'none'
+    return 'none'
   }
   set fillPriority(value: FillPriority) {
     if (value === this._fillPriority) return
@@ -336,13 +384,23 @@ export abstract class Shape extends Node {
     bumpObjectRecordEpoch()
   }
   private linearStops: GradientStop[] = []
-  /** Linear gradient stops. Each stop's `color` accepts a string as well as the tuple. */
+  private linearStopsWritten: ColorStopsInput = []
+  /**
+   * Linear gradient stops, as `{offset, color}` however they were written. Assign either the
+   * object list or one flat array alternating the two - `[0, 'red', 1, 'blue']` - and either
+   * form of colour within it.
+   */
   get fillLinearGradientColorStops(): GradientStop[] {
     return this.linearStops
   }
-  set fillLinearGradientColorStops(value: readonly ColorStopInput[]) {
+  set fillLinearGradientColorStops(value: ColorStopsInput) {
     this.linearStops = parseStops(value)
+    this.linearStopsWritten = value
     bumpObjectRecordEpoch()
+  }
+  /** The stop list as it was written, flat form included. See fillInput. */
+  get fillLinearGradientColorStopsInput(): ColorStopsInput {
+    return this.linearStopsWritten
   }
 
   private _fillRadialGradientStartPoint: Vector2Like = { x: 0, y: 0 }
@@ -380,23 +438,38 @@ export abstract class Shape extends Node {
     bumpObjectRecordEpoch()
   }
   private radialStops: GradientStop[] = []
-  /** Radial gradient stops. Each stop's `color` accepts a string as well as the tuple. */
+  private radialStopsWritten: ColorStopsInput = []
+  /** Radial gradient stops. Takes both written forms - see fillLinearGradientColorStops. */
   get fillRadialGradientColorStops(): GradientStop[] {
     return this.radialStops
   }
-  set fillRadialGradientColorStops(value: readonly ColorStopInput[]) {
+  set fillRadialGradientColorStops(value: ColorStopsInput) {
     this.radialStops = parseStops(value)
+    this.radialStopsWritten = value
     bumpObjectRecordEpoch()
+  }
+  /** The stop list as it was written, flat form included. See fillInput. */
+  get fillRadialGradientColorStopsInput(): ColorStopsInput {
+    return this.radialStopsWritten
   }
 
-  private strokeValue: RGBA = [0, 0, 0, 1]
-  /** Stroke colour. Accepts a string as well as the tuple - see fill. */
-  get stroke(): RGBA {
+  private strokeValue: RGBA | null = null
+  private strokeWritten: ColorInput | null = null
+  /**
+   * Stroke colour. Accepts a string as well as the tuple - see fill. `null` - the default -
+   * is a shape with no outline, whatever its strokeWidth says.
+   */
+  get stroke(): RGBA | null {
     return this.strokeValue
   }
-  set stroke(value: ColorInput) {
-    this.strokeValue = parseColor(value)
+  set stroke(value: ColorInput | null) {
+    this.strokeValue = value === null ? null : parseColor(value)
+    this.strokeWritten = value
     bumpObjectRecordEpoch()
+  }
+  /** What stroke was last assigned, in the form it was written. See fillInput. */
+  get strokeInput(): ColorInput | null {
+    return this.strokeWritten
   }
   strokeWidth = 0
   /**
@@ -473,7 +546,7 @@ export abstract class Shape extends Node {
     this.zIndex = options.zIndex ?? nextZIndex()
     this.opacity = options.opacity ?? 1
     this.overlay = options.overlay ?? false
-    this.draggable = options.draggable ?? true
+    this.draggable = options.draggable ?? false
     this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]
     this.shadowBlur = options.shadowBlur ?? 0
     this.shadowSpread = options.shadowSpread ?? 0
@@ -482,9 +555,9 @@ export abstract class Shape extends Node {
     this.shadowOpacity = options.shadowOpacity ?? 1
     this.shadowEnabled = options.shadowEnabled ?? true
     this.shadowForStrokeEnabled = options.shadowForStrokeEnabled ?? true
-    this.fill = options.fill ?? [0, 0, 0, 1]
-    this.stroke = options.stroke ?? [0, 0, 0, 1]
-    this.strokeWidth = options.strokeWidth ?? 0
+    this.fill = options.fill ?? null
+    this.stroke = options.stroke ?? null
+    this.strokeWidth = options.strokeWidth ?? 2
     this.strokeAlign = options.strokeAlign ?? 'center'
     this.lineJoin = options.lineJoin ?? 'miter'
     this.lineCap = options.lineCap ?? 'butt'

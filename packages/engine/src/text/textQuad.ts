@@ -26,7 +26,7 @@ export interface QuadTransform {
   rotationPivotY: number
 }
 
-/** One quad in node-local space (y-up). Glyph quads carry an atlas uv rect. */
+/** One quad in node-local space (y-down: y0 is its top edge, y1 its bottom). Glyph quads carry an atlas uv rect. */
 export interface TextQuad extends QuadTransform {
   material: number
   /** Which font source the glyph came from - an atlas for MSDF text, a parsed TTF for vector text. */

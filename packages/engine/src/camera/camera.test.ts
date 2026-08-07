@@ -50,14 +50,14 @@ it('the default camera: world (0,0) at the top-left corner, one unit per pixel',
     const corner = toNdc(camera, 0, 0)
     assert(near(corner.x, -1) && near(corner.y, 1), 'world (0,0) renders at the viewport top-left')
 
-    // One world unit per pixel: the far corner of the viewport is (W, -H), the scene being
-    // y-up, so the view hangs DOWNWARD from its origin exactly as a Rect does.
-    const far = toNdc(camera, W, -H)
-    assert(near(far.x, 1) && near(far.y, -1), 'world (width, -height) renders at the bottom-right')
+    // One world unit per pixel: the far corner of the viewport is (W, H), the scene being
+    // y-down, so the view hangs DOWNWARD from its origin exactly as a Rect does.
+    const far = toNdc(camera, W, H)
+    assert(near(far.x, 1) && near(far.y, -1), 'world (width, height) renders at the bottom-right')
 
     const bounds = camera.viewBounds(W, H)
     assert(near(bounds.min.x, 0) && near(bounds.max.x, W), 'the visible world spans [0, width] in x')
-    assert(near(bounds.max.y, 0) && near(bounds.min.y, -H), 'and [-height, 0] in y')
+    assert(near(bounds.min.y, 0) && near(bounds.max.y, H), 'and [0, height] in y')
 })
 
 it('zoom is pixels per world unit, anchored at the same top-left corner', () => {
@@ -65,7 +65,7 @@ it('zoom is pixels per world unit, anchored at the same top-left corner', () => 
     const corner = toNdc(camera, 0, 0)
     assert(near(corner.x, -1) && near(corner.y, 1), 'zooming does not move the corner the camera is anchored at')
     // At 2 px per unit the viewport covers half as much world.
-    const far = toNdc(camera, W / 2, -H / 2)
+    const far = toNdc(camera, W / 2, H / 2)
     assert(near(far.x, 1) && near(far.y, -1), 'twice the zoom shows half the world')
     const size = camera.viewSize(W, H)
     assert(near(size.width, W / 2) && near(size.height, H / 2), 'viewSize reports the world rectangle, not the pixel one')
@@ -81,7 +81,7 @@ it('x/y move the view: the camera\'s own position is the world at the corner', (
     assert(toNdc(camera, 0, 0).x < -1, 'so the world origin is now off the left edge')
 
     const centre = camera.center(W, H)
-    assert(near(centre.x, 100 + W / 2) && near(centre.y, -40 - H / 2), 'the centre is half a viewport in and down from there')
+    assert(near(centre.x, 100 + W / 2) && near(centre.y, -40 + H / 2), 'the centre is half a viewport in and down from there')
     const middle = toNdc(camera, centre.x, centre.y)
     assert(near(middle.x, 0) && near(middle.y, 0), 'and it renders dead centre')
 
@@ -90,20 +90,21 @@ it('x/y move the view: the camera\'s own position is the world at the corner', (
     assert(near(recentred.x, 0) && near(recentred.y, 0), 'centerOn puts the given world point in the middle')
 })
 
-it('rotation turns what you see counter-clockwise, about the view centre', () => {
+it('rotation turns the view clockwise, so the content swings the other way, about the view centre', () => {
     const camera = new Camera2D()
     const c = camera.center(W, H)
 
-    // A point one unit to the RIGHT of the centre. Turning the view a quarter turn
-    // counter-clockwise must carry it to directly ABOVE the centre, i.e. NDC +y. The
-    // viewport is not square, so compare against the centre rather than expecting +1.
-    camera.rotation = Math.PI / 2
+    // A point one unit to the RIGHT of the centre. Turning the view a quarter turn must
+    // carry it onto the vertical axis, BELOW the centre: the view frame turns clockwise, so
+    // what it shows swings the other way. The viewport is not square, so compare against the
+    // centre rather than expecting -1.
+    camera.rotation = 90
     const turned = toNdc(camera, c.x + 1, c.y)
     assert(near(turned.x, 0), 'a quarter turn puts a point right of centre onto the vertical axis')
-    assert(turned.y > 0, 'above the centre, not below - positive rotation turns the scene counter-clockwise')
+    assert(turned.y < 0, 'below the centre - the view turns clockwise, so the content appears to turn the other way')
 
     // The centre itself is the pivot, so it does not move however far the view is turned.
-    for (const angle of [0.3, 1.1, -2.4, Math.PI]) {
+    for (const angle of [17, 63, -138, 180]) {
       camera.rotation = angle
       const middle = toNdc(camera, c.x, c.y)
       assert(near(middle.x, 0) && near(middle.y, 0), 'the view centre is the pivot, at every angle')
@@ -111,7 +112,7 @@ it('rotation turns what you see counter-clockwise, about the view centre', () =>
 
     // A turned view covers a bigger axis-aligned box than an unturned one - the corners of
     // the rotated rectangle reach further out.
-    camera.rotation = Math.PI / 4
+    camera.rotation = 45
     const turnedBounds = camera.viewBounds(W, H)
     const flat = new Camera2D().viewBounds(W, H)
     assert(turnedBounds.max.x > flat.max.x, 'cull bounds grow to cover a turned view')

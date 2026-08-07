@@ -35,7 +35,7 @@ function assert(cond: boolean, msg: string): void {
  * which is the frame the geometry below is written in.
  */
 const centredRect = (options: RectOptions = {}): Rect =>
-  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: (options.height ?? 1) / 2 })
 
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
 
@@ -106,13 +106,13 @@ it('picking: hitTestShape tests against the shape\'s own tessellated triangles',
     assert(!hitTestShape(rect, 0, 0), 'far outside rect misses')
 
     // The two origin conventions, in the bounds themselves. A Rect hangs from its top-left
-    // corner, so unshifted it spans [0, width] and [-height, 0]; a Circle is centred, so it
+    // corner, so unshifted it spans [0, width] and [0, height]; a Circle is centred, so it
     // spans its radius each way. (The rect above is pivoted to its middle, which moves where
     // it lands in the world but never what it emits in its own frame.)
     const cornered = shapeLocalBounds(new Rect({ x: 100, y: 50, width: 40, height: 20 }))
     assert(cornered.valid(), 'rect local bounds valid')
     assert(near(cornered.min.x, 0) && near(cornered.max.x, 40), 'a rect spans [0, width] from its local origin')
-    assert(near(cornered.max.y, 0) && near(cornered.min.y, -20), 'and hangs down to -height, the scene being y-up')
+    assert(near(cornered.min.y, 0) && near(cornered.max.y, 20), 'and hangs down to +height, the scene being y-down')
 
     // The circle is a polygon, so its bounds sit inside the true radius by the flattening
     // tolerance - what matters here is that they straddle the origin rather than start at it.
@@ -124,9 +124,9 @@ it('picking: hitTestShape tests against the shape\'s own tessellated triangles',
     // hit test runs on the very triangles that were drawn, so it follows whatever they are.
     const square = new Rect({ width: 100, height: 100 })
     const rounded = new Rect({ width: 100, height: 100, cornerRadius: 30 })
-    assert(hitTestShape(square, 4, -4), 'a square rect is hit right up in its corner')
-    assert(!hitTestShape(rounded, 4, -4), 'a rounded one is not - the corner is not there to hit')
-    assert(hitTestShape(rounded, 50, -50) && hitTestShape(rounded, 0.5, -50), 'its middle and its straight edges still are')
+    assert(hitTestShape(square, 4, 4), 'a square rect is hit right up in its corner')
+    assert(!hitTestShape(rounded, 4, 4), 'a rounded one is not - the corner is not there to hit')
+    assert(hitTestShape(rounded, 50, 50) && hitTestShape(rounded, 0.5, 50), 'its middle and its straight edges still are')
     const roundedBounds = shapeLocalBounds(rounded)
     assert(near(roundedBounds.min.x, 0) && near(roundedBounds.max.x, 100), 'and rounding never shrinks the bounds')
 
@@ -153,7 +153,7 @@ it('picking: hitTestShape tests against the shape\'s own tessellated triangles',
 
     // A 90deg rotation swaps which world axis lines up with the rect's long (width) side:
     // local = R(-rotation) * (world - center), so R(-90deg) maps (x,y) -> (y,-x).
-    const rotated = centredRect({ x: 0, y: 0, width: 40, height: 10, rotation: Math.PI / 2 })
+    const rotated = centredRect({ x: 0, y: 0, width: 40, height: 10, rotation: 90 })
     assert(hitTestShape(rotated, 0, 19), 'rotated rect hits along its now-vertical long axis')
     assert(!hitTestShape(rotated, 19, 0), 'rotated rect misses where the unrotated rect would have hit')
 })
@@ -236,7 +236,7 @@ it('MSDFText is a Shape now (not a lane-specific special case): it inherits zInd
     // though MSDFText's own rich per-run styling doesn't use it - one shared vocabulary instead
     // of the render lane dictating which fields a shape gets.
     const text = new MSDFText({ fill: [1, 0, 0, 1], stroke: [0, 1, 0, 1], strokeWidth: 2, width: 50 })
-    assert(text.fill[0] === 1 && text.stroke[1] === 1 && text.strokeWidth === 2 && text.width === 50, 'MSDFText inherits Shape fields, not just Shape defaults')
+    assert(text.fill![0] === 1 && text.stroke![1] === 1 && text.strokeWidth === 2 && text.width === 50, 'MSDFText inherits Shape fields, not just Shape defaults')
 
     let sawVertex = false
     text.tessellate({ vertex: () => ((sawVertex = true), 0), triangle: () => {} })
@@ -363,16 +363,16 @@ it('a group in a real scene: what draws, what picks, and what a hidden group tak
     assert(!(collectZOrder(scene) as unknown[]).includes(group), 'the group itself never does - it draws nothing')
 
     // Picking goes through the group's transform, so the shape is where the group put it.
-    assert(hitTestShape(inGroup, 220, -20), "the shape is hit at the group's position, not its own")
-    assert(!hitTestShape(inGroup, 20, -20), 'and not at where it would be without the group')
-    assert(pickNode(scene, 220, -20) === inGroup, 'a pick returns the SHAPE, not the group that holds it')
+    assert(hitTestShape(inGroup, 220, 20), "the shape is hit at the group's position, not its own")
+    assert(!hitTestShape(inGroup, 20, 20), 'and not at where it would be without the group')
+    assert(pickNode(scene, 220, 20) === inGroup, 'a pick returns the SHAPE, not the group that holds it')
 
     // Hiding the group removes its whole subtree from both, in one move.
     group.visible = false
     assert(!collectZOrder(scene).includes(inGroup), 'a hidden group takes its contents out of the render order')
-    assert(pickNode(scene, 220, -20) === null, 'and out of picking')
+    assert(pickNode(scene, 220, 20) === null, 'and out of picking')
     assert(collectZOrder(scene).includes(loose), 'while leaving everything outside it alone')
-    assert(pickNode(scene, -480, -20) === loose, 'which is still pickable')
+    assert(pickNode(scene, -480, 20) === loose, 'which is still pickable')
 
     group.visible = true
     assert(collectZOrder(scene).includes(inGroup), 'and showing it brings the subtree back')
@@ -403,20 +403,20 @@ it('a layer in a real scene: invisible to everything except its own `enabled` sw
     // through the layer's transform, like any container's.
     assert(collectZOrder(scene).includes(inLayer), 'a shape inside a layer still renders')
     assert(!(collectZOrder(scene) as unknown[]).includes(layer), 'the layer itself never does')
-    assert(hitTestShape(inLayer, 220, -20), "the shape is hit where the layer put it")
-    assert(pickNode(scene, 220, -20) === inLayer, 'a pick returns the shape - the layer is not in the way')
+    assert(hitTestShape(inLayer, 220, 20), "the shape is hit where the layer put it")
+    assert(pickNode(scene, 220, 20) === inLayer, 'a pick returns the shape - the layer is not in the way')
 
     // Switching the layer off takes the whole subtree out of everything derived from the
     // render order, in one move, and puts it back untouched.
     layer.enabled = false
     assert(!collectZOrder(scene).includes(inLayer), 'a disabled layer takes its contents out of the render order')
-    assert(pickNode(scene, 220, -20) === null, 'and out of picking')
+    assert(pickNode(scene, 220, 20) === null, 'and out of picking')
     assert(
       !nodesInBox(scene, { x: 100, y: -200 }, { x: 400, y: 200 }).includes(inLayer),
       'and out of a marquee, which reads the same order',
     )
     assert(collectZOrder(scene).includes(loose), 'while leaving everything outside it alone')
-    assert(pickNode(scene, -480, -20) === loose, 'which is still pickable')
+    assert(pickNode(scene, -480, 20) === loose, 'which is still pickable')
 
     // `enabled` is the layer's own property, not something written onto its children: a shape
     // that was hidden before is still hidden after, and one that was not is not.
@@ -451,7 +451,7 @@ it('layers nest, and nest with groups, without any of them learning about the ot
     const inner = group.addChild(new Layer({ x: 10 }))
     const leaf = inner.addChild(new Rect({ width: 10, height: 10 }))
 
-    assert(hitTestShape(leaf, 115, -5), 'both containers compose their transforms on the way down')
+    assert(hitTestShape(leaf, 115, 5), 'both containers compose their transforms on the way down')
     assert(collectZOrder(scene).includes(leaf), 'and the shape draws')
 
     // Either switch prunes the leaf, at whatever depth it sits: the walk turns back at the

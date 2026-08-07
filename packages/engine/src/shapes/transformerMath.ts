@@ -20,7 +20,7 @@ import type { AABB } from '../math/AABB'
 import type { Node } from './Node'
 import type { TransformableNode } from './Group'
 
-/** The eight resize handles, named by edge/corner. 'top' is +y (the scene is y-up). */
+/** The eight resize handles, named by edge/corner. 'top' is -y (the scene is y-down). */
 export type ResizeAnchor =
   | 'top-left'
   | 'top-center'
@@ -47,14 +47,14 @@ export const RESIZE_ANCHORS: readonly ResizeAnchor[] = [
 
 /** Which way each anchor sits from the box center, in box-local units of half-extent. */
 export const ANCHOR_DIRECTION: Record<ResizeAnchor, Vector2Like> = {
-  'top-left': { x: -1, y: 1 },
-  'top-center': { x: 0, y: 1 },
-  'top-right': { x: 1, y: 1 },
+  'top-left': { x: -1, y: -1 },
+  'top-center': { x: 0, y: -1 },
+  'top-right': { x: 1, y: -1 },
   'middle-left': { x: -1, y: 0 },
   'middle-right': { x: 1, y: 0 },
-  'bottom-left': { x: -1, y: -1 },
-  'bottom-center': { x: 0, y: -1 },
-  'bottom-right': { x: 1, y: -1 },
+  'bottom-left': { x: -1, y: 1 },
+  'bottom-center': { x: 0, y: 1 },
+  'bottom-right': { x: 1, y: 1 },
 }
 
 /**
@@ -97,10 +97,10 @@ export function anchorPosition(box: OrientedBox, anchor: ResizeAnchor): Vector2L
 
 /**
  * The rotate handle sits `distance` world units beyond the top edge, along the box's own
- * +y axis - so it stays clear of the top-center resize anchor and follows the rotation.
+ * -y axis - so it stays clear of the top-center resize anchor and follows the rotation.
  */
 export function rotateAnchorPosition(box: OrientedBox, distance: number): Vector2Like {
-  const world = rotate2({ x: 0, y: box.halfH + distance }, box.rotation)
+  const world = rotate2({ x: 0, y: -(box.halfH + distance) }, box.rotation)
   return { x: box.cx + world.x, y: box.cy + world.y }
 }
 

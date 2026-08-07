@@ -8,19 +8,34 @@ import type { Vector2Like } from '../math/Vector2'
 // Defined next to the parser that produces it, and re-exported here because this is where the
 // rest of the engine has always imported it from.
 import type { RGBA } from './color'
-export { isRGBA, parseColor, parseStops, type ColorInput, type ColorStopInput, type RGBA } from './color'
+export {
+  isRGBA,
+  parseColor,
+  parseStops,
+  MAX_GRADIENT_STOPS,
+  type ColorInput,
+  type ColorStopInput,
+  type ColorStopsInput,
+  type RGBA,
+} from './color'
 
-/** Which fill mechanism a shape's fill triangles use. */
-export type FillPriority = 'color' | 'linear-gradient' | 'radial-gradient'
+/**
+ * Which fill mechanism a shape's fill triangles use.
+ *
+ * 'none' is a shape with nothing to fill WITH, not a shape with nothing to fill: the
+ * triangles are still tessellated and still uploaded, and the fragment shader returns a
+ * transparent fragment for them. That is what keeps an unfilled shape hit-testable over
+ * its whole face - picking runs against the same triangles the mesh lane draws (see
+ * scene/picking.ts), so dropping them would make the inside of an outlined rectangle
+ * unclickable while its outline stayed live.
+ */
+export type FillPriority = 'color' | 'linear-gradient' | 'radial-gradient' | 'none'
 
 /** A single gradient color stop: `offset` in [0,1], `color` in straight RGBA. */
 export interface GradientStop {
   offset: number
   color: RGBA
 }
-
-/** Fixed cap on gradient stops per object (bounds the per-object storage record size). */
-export const MAX_GRADIENT_STOPS = 8
 
 /**
  * The styling half of a per-object record: everything the fragment shader reads to color
@@ -32,8 +47,10 @@ export const MAX_GRADIENT_STOPS = 8
  */
 export interface MeshMaterial {
   fillPriority: FillPriority
-  fill: RGBA
-  stroke: RGBA
+  /** null when there is nothing to fill with; fillPriority reads 'none' alongside it. */
+  fill: RGBA | null
+  /** null when there is no outline colour. Stroke triangles are not emitted in that case. */
+  stroke: RGBA | null
   fillLinearGradientStartPoint: Vector2Like
   fillLinearGradientEndPoint: Vector2Like
   fillLinearGradientColorStops: readonly GradientStop[]
@@ -114,6 +131,7 @@ export const FILL_TYPE_CODE: Record<FillPriority, number> = {
   color: 0,
   'linear-gradient': 1,
   'radial-gradient': 2,
+  none: 3,
 }
 
 // Frame uniform: mat4x4<f32> viewProjection (64) + vec2<f32> resolution (8), padded to 16.

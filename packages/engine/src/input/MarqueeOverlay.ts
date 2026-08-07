@@ -102,7 +102,7 @@ export class MarqueeOverlay extends Container {
       width: 1,
       height: 1,
       offsetX: 0.5,
-      offsetY: -0.5,
+      offsetY: 0.5,
       fill: [...fill],
       strokeWidth: 0,
       zIndex: Z_INDEX,

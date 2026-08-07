@@ -1,12 +1,12 @@
 // Rect - a filled, optionally stroked rectangle, with square or rounded corners. Its
 // TOP-LEFT corner sits at (x, y) in the Z=0 plane (before any offset), and it extends
-// right and down from there: the scene is y-up, so the rectangle spans x in [0, width]
-// and y in [-height, 0] in its own local space. Sized width×height, transformed by the
+// right and down from there: the scene is y-down, so the rectangle spans x in [0, width]
+// and y in [0, height] in its own local space. Sized width×height, transformed by the
 // common Shape parameters (position, scale, rotation, offset). See Shape's header for
 // which shapes are cornered and which centred.
 //
 // Rotation and scale are about the local origin, so a rectangle turns about its top-left
-// corner unless given an offset - `offsetX: width / 2, offsetY: -height / 2` puts the
+// corner unless given an offset - `offsetX: width / 2, offsetY: height / 2` puts the
 // pivot back in the middle. It owns no GPU resources: it tessellates its fill
 // in the mesh lane (fill color or gradient, via the inherited Shape fill API) and
 // strokes its own outline through the shared general-purpose stroker, using the
@@ -82,21 +82,22 @@ function cornerSegmentsFor(radius: number): number {
 }
 
 /**
- * The outline, counter-clockwise from the bottom-left corner, with each non-zero radius
- * replaced by an arc. The straight edges between the arcs are implicit - a corner's first
- * and last arc points ARE the tangent points, so consecutive corners connect directly.
+ * The outline, from the bottom-right corner round, with each non-zero radius replaced by an
+ * arc. The straight edges between the arcs are implicit - a corner's first and last arc
+ * points ARE the tangent points, so consecutive corners connect directly.
  */
 function roundedContour(width: number, height: number, r: Radii, segments?: number): Vector2Like[] {
   const w = width
-  const b = -height
+  const b = height
   const [tl, tr, br, bl] = r
-  // Centre and start angle of each corner's arc, in outline order. Every arc sweeps a
-  // quarter turn counter-clockwise from there.
+  // Centre and start angle of each corner's arc, in outline order, beginning at the
+  // bottom-right. Every arc sweeps a quarter turn; y is measured downward, so the sine term
+  // is subtracted rather than added and each arc bulges away from the rectangle's middle.
   const corners: { cx: number; cy: number; r: number; from: number }[] = [
-    { cx: w - br, cy: b + br, r: br, from: -Math.PI / 2 },
-    { cx: w - tr, cy: -tr, r: tr, from: 0 },
-    { cx: tl, cy: -tl, r: tl, from: Math.PI / 2 },
-    { cx: bl, cy: b + bl, r: bl, from: Math.PI },
+    { cx: w - br, cy: b - br, r: br, from: -Math.PI / 2 },
+    { cx: w - tr, cy: tr, r: tr, from: 0 },
+    { cx: tl, cy: tl, r: tl, from: Math.PI / 2 },
+    { cx: bl, cy: b - bl, r: bl, from: Math.PI },
   ]
   const points: Vector2Like[] = []
   for (const c of corners) {
@@ -109,7 +110,7 @@ function roundedContour(width: number, height: number, r: Radii, segments?: numb
     const n = segments ?? cornerSegmentsFor(c.r)
     for (let i = 0; i <= n; i++) {
       const a = c.from + (i / n) * (Math.PI / 2)
-      points.push({ x: c.cx + Math.cos(a) * c.r, y: c.cy + Math.sin(a) * c.r })
+      points.push({ x: c.cx + Math.cos(a) * c.r, y: c.cy - Math.sin(a) * c.r })
     }
   }
   return points
@@ -126,7 +127,7 @@ export class Rect extends Shape {
   cornerSegments?: number
 
   constructor(options: RectOptions = {}) {
-    super({ ...options, width: options.width ?? 1, height: options.height ?? 1 })
+    super({ ...options, width: options.width ?? 0, height: options.height ?? 0 })
     this.cornerRadius = options.cornerRadius ?? 0
     this.cornerSegments = options.cornerSegments
   }
@@ -137,9 +138,9 @@ export class Rect extends Shape {
 
   protected override buildGeometry(sink: MeshSink): void {
     const w = this.width
-    // The scene is y-up and the origin is the top-left corner, so the rectangle hangs below
-    // it: its bottom edge is at -height.
-    const b = -this.height
+    // The scene is y-down and the origin is the top-left corner, so the rectangle hangs below
+    // it: its bottom edge is at +height.
+    const b = this.height
     const radii = fitRadii(this.cornerRadius, w, this.height)
     const rounded = radii.some((r) => r > 0)
 
@@ -155,7 +156,7 @@ export class Rect extends Shape {
         sink.triangle(idx[0], idx[i], idx[i + 1])
       }
     } else {
-      // Fill: two triangles, wound counter-clockwise from the bottom-left.
+      // Fill: two triangles, from the bottom-left corner round.
       outline = [
         { x: 0, y: b },
         { x: w, y: b },
@@ -170,7 +171,7 @@ export class Rect extends Shape {
       sink.triangle(f0, f2, f3)
     }
 
-    if (this.strokeWidth > 0) {
+    if (this.hasStroke()) {
       strokePolyline(outline, sink, {
         width: this.strokeWidth,
         closed: true,

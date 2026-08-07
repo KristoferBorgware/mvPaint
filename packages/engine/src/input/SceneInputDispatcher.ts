@@ -42,6 +42,7 @@ import type { Shape } from '../shapes/Shape'
 import { draggableGroup, type TransformableNode } from '../shapes/Group'
 import type { Transformer } from '../shapes/Transformer'
 import { Vector2, type Vector2Like } from '../math/Vector2'
+import { degToRad } from '../math/angle'
 import {
   applyWorldTransform,
   resizeFactors,
@@ -85,9 +86,9 @@ export interface SceneInputDispatcherOptions {
   dblClickWindow?: number
   /** Set false so a one-pointer drag is never a node drag, whatever it presses on. Default true. */
   dragNodes?: boolean
-  /** Angles (radians) a rotate drag settles onto when within `rotationSnapTolerance`. */
+  /** Angles (degrees) a rotate drag settles onto when within `rotationSnapTolerance`. */
   rotationSnaps?: readonly number[]
-  /** How close (radians) a rotation must come to a snap to take it. Default 0.12 (~7 degrees). */
+  /** How close (degrees) a rotation must come to a snap to take it. Default 7. */
   rotationSnapTolerance?: number
   /** Clock for the double-click window. Defaults to performance.now. */
   now?: () => number
@@ -152,6 +153,9 @@ export class SceneInputDispatcher {
   private readonly tapThreshold: number
   private readonly dblClickWindow: number
   private readonly dragNodes: boolean
+  // Radians, converted from the degrees the options carry: the transformer's angle math is
+  // radians throughout, and converting a list of snaps per pointer move would redo the same
+  // eight multiplications for a set that never changes. See math/angle.ts.
   private readonly rotationSnaps?: readonly number[]
   private readonly rotationSnapTolerance: number
   private readonly now: () => number
@@ -203,8 +207,8 @@ export class SceneInputDispatcher {
     this.tapThreshold = options.tapThreshold ?? DEFAULT_TAP_THRESHOLD
     this.dblClickWindow = options.dblClickWindow ?? DEFAULT_DBL_CLICK_WINDOW
     this.dragNodes = options.dragNodes ?? true
-    this.rotationSnaps = options.rotationSnaps
-    this.rotationSnapTolerance = options.rotationSnapTolerance ?? 0.12
+    this.rotationSnaps = options.rotationSnaps?.map(degToRad)
+    this.rotationSnapTolerance = degToRad(options.rotationSnapTolerance ?? 7)
     this.now = options.now ?? (() => performance.now())
 
     const resolve = options.nodesInBox ?? (() => [])

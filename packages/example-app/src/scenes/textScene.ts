@@ -19,7 +19,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-title',
       x: LEFT,
-      y: 340,
+      y: -340,
       text: 'mvPaint MSDF text',
       style: {
         fontStyle: 'bold',
@@ -42,7 +42,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-styles',
       x: LEFT,
-      y: 250,
+      y: -250,
       runs: [
         { text: 'Regular ', style: { fontStyle: 'regular', fontSize: 34, color: NAVY } },
         { text: 'Bold ', style: { fontStyle: 'bold', fontSize: 34, color: NAVY } },
@@ -57,7 +57,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-sizes',
       x: LEFT,
-      y: 190,
+      y: -190,
       runs: [
         { text: 'Size ', style: { fontSize: 20, color: SLATE } },
         { text: 'scales ', style: { fontSize: 32, color: SLATE } },
@@ -71,7 +71,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-outline',
       x: LEFT,
-      y: 120,
+      y: -120,
       text: 'Outlined',
       style: { fontStyle: 'bold', fontSize: 72, color: YELLOW, strokeColor: DARK, strokeWidth: 2.5 },
     }),
@@ -82,7 +82,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-decorations',
       x: LEFT,
-      y: 30,
+      y: -30,
       runs: [
         { text: 'underline ', style: { fontSize: 34, color: TEAL, underline: true } },
         { text: 'strikethrough', style: { fontSize: 34, color: CRIMSON, strikethrough: true } },
@@ -95,7 +95,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-highlight',
       x: LEFT,
-      y: -40,
+      y: 40,
       runs: [
         { text: 'with ', style: { fontSize: 30, color: DARK } },
         { text: 'highlighted', style: { fontSize: 30, color: DARK, highlight: HIGHLIGHT } },
@@ -109,7 +109,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-paragraph',
       x: LEFT,
-      y: -90,
+      y: 90,
       maxWidth: 520,
       lineHeight: 1.3,
       text: 'Multi-channel signed distance fields keep every glyph crisp at any size and zoom from a single small atlas, so this paragraph wraps and stays sharp.',
@@ -124,7 +124,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-baseline',
       x: 90,
-      y: 340,
+      y: -340,
       runs: [
         { text: 'E = mc', style: { fontSize: 34, color: NAVY } },
         { text: '2', style: { fontSize: 22, color: NAVY, baselineShift: 16 } },
@@ -140,7 +140,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-faux',
       x: 90,
-      y: 285,
+      y: -285,
       runs: [
         { text: 'Faux ', style: { fontSize: 30, color: NAVY } },
         { text: 'bold ', style: { fontSize: 30, color: NAVY, fauxBold: true } },
@@ -155,7 +155,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-shadow',
       x: 90,
-      y: 225,
+      y: -225,
       text: 'Drop shadow',
       style: {
         fontStyle: 'bold',
@@ -171,7 +171,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-glow',
       x: 90,
-      y: 155,
+      y: -155,
       text: 'Soft glow',
       style: { fontStyle: 'bold', fontSize: 44, color: DARK, glow: { color: '#ffcc26', radius: 6 } },
     }),
@@ -182,7 +182,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-justify',
       x: 90,
-      y: 95,
+      y: -95,
       maxWidth: 360,
       align: 'justify',
       lineHeight: 1.35,
@@ -196,7 +196,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-rtl',
       x: 90,
-      y: -15,
+      y: 15,
       maxWidth: 360,
       direction: 'rtl',
       text: 'RTL flow 12345',
@@ -209,7 +209,7 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-centered',
       x: 90,
-      y: -70,
+      y: 70,
       align: 'center',
       maxWidth: 260,
       lineHeight: 1.25,
@@ -225,8 +225,8 @@ export function buildTextScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'text-rotated',
       x: 470,
-      y: -140,
-      rotation: Math.PI / 4,
+      y: 140,
+      rotation: -45,
       text: 'Rotated 45',
       style: { fontStyle: 'bold', fontSize: 28, color: CRIMSON },
     }),
@@ -239,7 +239,7 @@ export function buildTextScene(scene: Scene): SceneContent {
       // Clear of the justified block's 360-wide measure, which reaches x 450: vertical columns
       // run right to left, so this node's glyphs sit to the LEFT of where it is anchored.
       x: 530,
-      y: 340,
+      y: -340,
       orientation: 'vertical',
       lineHeight: 1.05,
       text: 'Vertical\ntext',

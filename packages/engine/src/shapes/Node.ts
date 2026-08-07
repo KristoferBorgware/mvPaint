@@ -40,6 +40,7 @@
 //
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
+import { degToRad, radToDeg } from '../math/angle'
 import { decompose2D } from '../math/decompose2D'
 import { bumpObjectRecordEpoch } from './contentEpoch'
 import { Matrix4x4 } from '../math/Matrix4x4'
@@ -101,7 +102,7 @@ export interface NodeOptions {
   y?: number
   scaleX?: number
   scaleY?: number
-  /** Radians, about +Z. */
+  /** Degrees, about +Z. */
   rotation?: number
   offsetX?: number
   offsetY?: number
@@ -191,7 +192,7 @@ export class Node {
     this._scaleY = value
     bumpObjectRecordEpoch()
   }
-  /** Radians, about +Z. */
+  /** Degrees, about +Z. See math/angle.ts for where the unit changes. */
   get rotation(): number {
     return this._rotation
   }
@@ -377,7 +378,7 @@ export class Node {
 
     let m = Matrix4x4.translation(new Vector3(this.x, this.y, 0))
     if (this.rotation !== 0) {
-      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), this.rotation)))
+      m = m.mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), degToRad(this.rotation))))
     }
     if (this.skewX !== 0 || this.skewY !== 0) {
       m = m.mul(skewMatrix(this.skewX, this.skewY))
@@ -409,8 +410,10 @@ export class Node {
   applyLocalMatrix(matrix: Matrix4x4): void {
     const m = matrix.m
     // Column-major: column 0 is the x axis, column 1 the y axis, column 3 the translation.
+    // decompose2D works in radians, like everything that computes with an angle rather than
+    // storing one; the node's own field is degrees. See math/angle.ts.
     const parts = decompose2D(m[0], m[1], m[4], m[5])
-    this.rotation = parts.rotation
+    this.rotation = radToDeg(parts.rotation)
     this.scaleX = parts.scaleX
     this.scaleY = parts.scaleY
     this.skewX = parts.skewX

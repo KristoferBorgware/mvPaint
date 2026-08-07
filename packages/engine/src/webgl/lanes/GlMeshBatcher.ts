@@ -19,7 +19,7 @@
 import type { Shape } from '../../shapes/Shape'
 import { objectRecordEpoch } from '../../shapes/contentEpoch'
 import { sameMembers } from '../../render/gather'
-import { ObjectCache } from '../../webgpu/lanes/MeshBatcher'
+import { ObjectCache, TRANSPARENT_PAINT } from '../../webgpu/lanes/MeshBatcher'
 import {
   FILL_TYPE_CODE,
   MAX_GRADIENT_STOPS,
@@ -246,8 +246,10 @@ export class GlMeshBatcher {
           f32[colorBase + 3] = a
         }
 
-        f32.set(material.fill, base + OBJECT_FILL_COLOR_OFFSET / 4)
-        f32.set(material.stroke, base + OBJECT_STROKE_COLOR_OFFSET / 4)
+        // Absent paint writes transparent rather than being skipped: the slot is reused
+        // across frames, so leaving it would keep whatever the previous object put there.
+        f32.set(material.fill ?? TRANSPARENT_PAINT, base + OBJECT_FILL_COLOR_OFFSET / 4)
+        f32.set(material.stroke ?? TRANSPARENT_PAINT, base + OBJECT_STROKE_COLOR_OFFSET / 4)
 
         cache.remember(model, depth, opacity, fillType, material, stopCount, stops)
       }

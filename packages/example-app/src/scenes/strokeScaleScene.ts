@@ -36,7 +36,7 @@ function star(fixed: boolean): Path {
   const points = Array.from({ length: 10 }, (_, i) => {
     const radius = i % 2 === 0 ? 46 : 20
     const angle = Math.PI / 2 + (Math.PI * i) / 5
-    return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+    return { x: Math.cos(angle) * radius, y: -Math.sin(angle) * radius }
   })
   return new Path({
     contours: [{ points, closed: true }],
@@ -67,11 +67,11 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   const root = scene.root
 
   root.addChild(
-    new MSDFText({ x: -520, y: 340, text: 'Stroke and scale', style: { fontStyle: 'bold', fontSize: 40, color: DARK } }),
+    new MSDFText({ x: -520, y: -340, text: 'Stroke and scale', style: { fontStyle: 'bold', fontSize: 40, color: DARK } }),
   )
   // 56 below the title's own y, not 34: a 40px line reaches ~50 below where it is anchored,
   // so anything closer than that lands in the title's descenders.
-  root.addChild(label(-520, 284, 'each pair is one shape twice, differing only in strokeScaleEnabled'))
+  root.addChild(label(-520, -284, 'each pair is one shape twice, differing only in strokeScaleEnabled'))
 
   // --- growing and shrinking --------------------------------------------------------------
   //
@@ -83,29 +83,29 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
     for (const fixed of [false, true]) {
       const node = star(fixed)
       node.x = centre + (fixed ? 90 : -90)
-      node.y = 185
+      node.y = -185
       node.scaleX = scale
       node.scaleY = scale
       root.addChild(node)
     }
-    root.addChild(caption(centre - 14, 74, `${scale}x`))
+    root.addChild(caption(centre - 14, -74, `${scale}x`))
   })
 
-  root.addChild(label(-520, 40, 'the same star at three scales - the left half of each pair scales its outline, the right half keeps it'))
+  root.addChild(label(-520, -40, 'the same star at three scales - the left half of each pair scales its outline, the right half keeps it'))
 
   // --- inside a scaled group ----------------------------------------------------------------
   //
   // Neither of these was scaled itself; their parent was. A keyline that only compensated for
   // its own scaleX would be wrong here by exactly the group's, which is why what is measured
   // is the WORLD transform.
-  const nested = root.addChild(new Group({ name: 'zoomed', x: -330, y: -40, scaleX: 2.2, scaleY: 2.2 }))
+  const nested = root.addChild(new Group({ name: 'zoomed', x: -330, y: 40, scaleX: 2.2, scaleY: 2.2 }))
   nested.addChild(
-    new Rect({ x: -70, y: 26, width: 52, height: 52, fill: '#dbe4f0', stroke: NAVY, strokeWidth: 3, cornerRadius: 6 }),
+    new Rect({ x: -70, y: -26, width: 52, height: 52, fill: '#dbe4f0', stroke: NAVY, strokeWidth: 3, cornerRadius: 6 }),
   )
   nested.addChild(
     new Rect({
       x: 18,
-      y: 26,
+      y: -26,
       width: 52,
       height: 52,
       fill: '#dbe4f0',
@@ -115,8 +115,8 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
       strokeScaleEnabled: false,
     }),
   )
-  root.addChild(caption(-90, -30, 'group scaled 2.2x'))
-  root.addChild(label(-520, -130, 'neither of these was scaled - their group was, and the right one still holds 3'))
+  root.addChild(caption(-90, 30, 'group scaled 2.2x'))
+  root.addChild(label(-520, 130, 'neither of these was scaled - their group was, and the right one still holds 3'))
 
   // --- a live resize -------------------------------------------------------------------------
   //
@@ -126,7 +126,7 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   const breathing = [false, true].map((fixed) => {
     const circle = new Circle({
       x: -400 + (fixed ? 160 : 0),
-      y: -250,
+      y: 250,
       radius: 46,
       fill: '#f2d9e0',
       stroke: CRIMSON,
@@ -135,7 +135,7 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
     })
     return root.addChild(circle)
   })
-  root.addChild(caption(-520, -350, 'animated: the right outline is re-tessellated every frame - the only case here that is not free'))
+  root.addChild(caption(-520, 350, 'animated: the right outline is re-tessellated every frame - the only case here that is not free'))
 
   // --- which side of the outline the width goes on --------------------------------------------
   //
@@ -146,10 +146,10 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   const ALIGN_WIDTH = 120
   const ALIGN_HEIGHT = 66
   const ALIGNMENTS: readonly StrokeAlign[] = ['inside', 'center', 'outside']
-  root.addChild(label(60, -40, 'strokeAlign: the same 16-wide stroke, three ways'))
+  root.addChild(label(60, 40, 'strokeAlign: the same 16-wide stroke, three ways'))
   ALIGNMENTS.forEach((align, i) => {
     const x = 60 + i * 160
-    const y = -80
+    const y = 80
     const box = new Rect({
       name: `align-${align}`,
       x,
@@ -182,8 +182,8 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
 
     const bounds = box.localBounds()
     const size = `${Math.round(bounds.max.x - bounds.min.x)} x ${Math.round(bounds.max.y - bounds.min.y)}`
-    root.addChild(caption(x, y - ALIGN_HEIGHT - 30, `${align}`))
-    root.addChild(caption(x, y - ALIGN_HEIGHT - 48, `measures ${size}`))
+    root.addChild(caption(x, y + ALIGN_HEIGHT + 30, `${align}`))
+    root.addChild(caption(x, y + ALIGN_HEIGHT + 48, `measures ${size}`))
   })
 
   // --- the case a single number cannot fix ---------------------------------------------------
@@ -194,11 +194,11 @@ export function buildStrokeScaleScene(scene: Scene): SceneContent {
   ;[false, true].forEach((fixed, i) => {
     const stretched = ring(fixed)
     stretched.x = 90 + i * 300
-    stretched.y = -250
+    stretched.y = 250
     stretched.scaleX = 4
     root.addChild(stretched)
   })
-  root.addChild(caption(60, -350, 'stretched 4:1 - even the whole way round only on the right'))
+  root.addChild(caption(60, 350, 'stretched 4:1 - even the whole way round only on the right'))
 
   let t = 0
   return {

@@ -86,7 +86,7 @@ export interface ObjectInputOptions {
   groupsAsUnits?: boolean
   /** How long a finger must rest before it pulls a rectangle instead of panning (ms). Default 450. */
   touchHoldDelay?: number
-  /** Angles a rotate drag settles onto. Default: every 45 degrees. */
+  /** Angles (degrees) a rotate drag settles onto. Default: every 45. */
   rotationSnaps?: readonly number[]
   /** Passed to the Transformer the engine builds - colours, anchor size, keepRatio. */
   transformer?: TransformerOptions
@@ -124,16 +124,7 @@ const DEFAULT_CAMERA: Required<CameraInputOptions> = {
 }
 
 /** The 45-degree marks, which is what makes it possible to get something upright by hand. */
-const DEFAULT_ROTATION_SNAPS: readonly number[] = [
-  0,
-  Math.PI / 4,
-  Math.PI / 2,
-  (3 * Math.PI) / 4,
-  Math.PI,
-  (5 * Math.PI) / 4,
-  (3 * Math.PI) / 2,
-  (7 * Math.PI) / 4,
-]
+const DEFAULT_ROTATION_SNAPS: readonly number[] = [0, 45, 90, 135, 180, 225, 270, 315]
 
 const DEFAULT_OBJECTS: Required<Omit<ObjectInputOptions, 'transformer'>> & { transformer: TransformerOptions } = {
   drag: true,

@@ -73,10 +73,10 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   // The top row is four demos across, so each one's centre is chosen to leave its neighbour
   // clear of everything it draws - which for the badge and the marquee is wider than their
   // rings, since both carry text that stands outside the curve.
-  const badgeCenter = { x: -410, y: 190 }
+  const badgeCenter = { x: -410, y: -190 }
   const badgeRadius = 132
   const topRing = circlePath(badgeRadius, { center: badgeCenter })
-  const bottomRing = circlePath(badgeRadius, { center: badgeCenter, startAngle: -Math.PI / 2, clockwise: false })
+  const bottomRing = circlePath(badgeRadius, { center: badgeCenter, startAngle: Math.PI / 2, clockwise: false })
 
   root.addChild(guide(topRing, 'tp-badge-guide'))
   // Negative puts it behind everything: shapes that say nothing take their zIndex from a
@@ -102,11 +102,11 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: bottomRing, align: 'center', offset: -20 },
     }),
   )
-  root.addChild(label(badgeCenter.x - 60, badgeCenter.y - 175, 'circle, top and bottom'))
+  root.addChild(label(badgeCenter.x - 60, badgeCenter.y + 175, 'circle, top and bottom'))
 
   // --- an arc: an open curve, so the text has ends to run off ---
-  const archCenter = { x: -110, y: 150 }
-  const arch = arcPath(150, Math.PI * 0.92, -Math.PI * 0.84, { center: archCenter })
+  const archCenter = { x: -110, y: -150 }
+  const arch = arcPath(150, -Math.PI * 0.92, Math.PI * 0.84, { center: archCenter })
   root.addChild(guide(arch, 'tp-arch-guide'))
   root.addChild(
     new MSDFText({
@@ -116,10 +116,10 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: arch, align: 'center', startOffset: arch.length / 2, offset: 10 },
     }),
   )
-  root.addChild(label(archCenter.x - 60, archCenter.y - 40, 'arc, centred on it'))
+  root.addChild(label(archCenter.x - 60, archCenter.y + 40, 'arc, centred on it'))
 
   // --- more text than curve: what does not fit is dropped at the end ---
-  const shortArc = arcPath(120, Math.PI, -Math.PI / 2, { center: { x: 200, y: 130 } })
+  const shortArc = arcPath(120, -Math.PI, Math.PI / 2, { center: { x: 200, y: -130 } })
   root.addChild(guide(shortArc, 'tp-clip-guide'))
   root.addChild(
     new MSDFText({
@@ -129,7 +129,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: shortArc, offset: 6 },
     }),
   )
-  root.addChild(label(50, 30, 'text longer than its curve is cut off', 200))
+  root.addChild(label(50, -30, 'text longer than its curve is cut off', 200))
 
   // --- an arbitrary curve, straight out of SVG path data ---
   //
@@ -137,7 +137,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   // contours, which is exactly what the curve is built from.
   // The same curve as before, forty lower: it runs the full width of the scene, so its crest
   // is what the row of captions above it has to clear.
-  const wave = TextPathGeometry.fromContours(flattenPathData('M -470 -120 C -330 0, -190 -230, -40 -110 S 210 20, 360 -100'))
+  const wave = TextPathGeometry.fromContours(flattenPathData('M -470 120 C -330 0, -190 230, -40 110 S 210 -20, 360 100'))
   root.addChild(guide(wave, 'tp-wave-guide'))
   root.addChild(
     new MSDFText({
@@ -147,13 +147,13 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: wave, startOffset: 12, offset: 8 },
     }),
   )
-  root.addChild(label(-470, -155, 'any SVG path'))
+  root.addChild(label(-470, 155, 'any SVG path'))
 
   // --- decorations bend too ---
   //
   // An underline or a highlight is one long rectangle on a straight baseline and cannot
   // curve, so on a path it becomes a row of short ones that each follow their own part of it.
-  const ringCenter = { x: -330, y: -320 }
+  const ringCenter = { x: -330, y: 320 }
   const decorated = circlePath(115, { center: ringCenter })
   root.addChild(guide(decorated, 'tp-decor-guide'))
   root.addChild(
@@ -166,13 +166,13 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: decorated, align: 'center', offset: 6 },
     }),
   )
-  root.addChild(label(ringCenter.x - 70, ringCenter.y - 150, 'rules and highlights follow it'))
+  root.addChild(label(ringCenter.x - 70, ringCenter.y + 150, 'rules and highlights follow it'))
 
   // --- two lines become two rings ---
   //
   // The first baseline lands on the curve and the rest keep their distance from it, so the
   // leading survives the mapping instead of every line collapsing onto the same curve.
-  const ringsCenter = { x: 20, y: -320 }
+  const ringsCenter = { x: 20, y: 320 }
   const rings = circlePath(120, { center: ringsCenter })
   root.addChild(guide(rings, 'tp-rings-guide'))
   root.addChild(
@@ -184,13 +184,13 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: rings, align: 'center', offset: 4 },
     }),
   )
-  root.addChild(label(ringsCenter.x - 55, ringsCenter.y - 150, 'two lines, two rings'))
+  root.addChild(label(ringsCenter.x - 55, ringsCenter.y + 150, 'two lines, two rings'))
 
   // --- the same curve, drawn as outlines through the mesh lane ---
   //
   // The path is a shaping option, so it costs VectorText nothing to support: both text
   // implementations run the same shaper and read the same quads.
-  const outlineCenter = { x: 370, y: -320 }
+  const outlineCenter = { x: 370, y: 320 }
   const outlineRing = circlePath(118, { center: outlineCenter })
   root.addChild(guide(outlineRing, 'tp-outline-guide'))
   if (fonts) {
@@ -204,10 +204,10 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       }),
     )
   }
-  root.addChild(label(outlineCenter.x - 60, outlineCenter.y - 150, 'the same, as outlines'))
+  root.addChild(label(outlineCenter.x - 60, outlineCenter.y + 150, 'the same, as outlines'))
 
   // --- animation: sliding the text along its curve, which re-shapes each frame ---
-  const marqueeRing = circlePath(125, { center: { x: 370, y: 190 } })
+  const marqueeRing = circlePath(125, { center: { x: 370, y: -190 } })
   root.addChild(guide(marqueeRing, 'tp-marquee-guide'))
   const marquee = root.addChild(
     new MSDFText({
@@ -217,7 +217,7 @@ export function buildTextPathScene(scene: Scene): SceneContent {
       textPath: { path: marqueeRing, offset: 8 },
     }),
   )
-  root.addChild(label(300, 30, 'startOffset animated'))
+  root.addChild(label(300, -30, 'startOffset animated'))
 
   let travelled = 0
   return {

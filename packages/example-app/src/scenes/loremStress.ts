@@ -243,10 +243,10 @@ function computeLayout(): LoremLayout {
       const shaped = layoutText(runs, { maxWidth: BODY_MAX_WIDTH, lineHeight: PARAGRAPH_LINE_HEIGHT }, provider)
       // Stop before overflowing the sheet rather than after - except for the very first
       // paragraph, which goes on regardless so no page can come out blank.
-      if (paragraphs.length > 0 && -y + shaped.height > BODY_MAX_HEIGHT) break
+      if (paragraphs.length > 0 && y + shaped.height > BODY_MAX_HEIGHT) break
       paragraphs.push({ runs, y })
       wordCount += tokenize(text).length
-      y -= shaped.height + PARAGRAPH_GAP
+      y += shaped.height + PARAGRAPH_GAP
     }
     pages.push({ paragraphs })
   }
@@ -260,7 +260,7 @@ function computeLayout(): LoremLayout {
     const row = Math.floor(index / GRID_COLS)
     return {
       x: -totalWidth / 2 + col * (PAGE_WIDTH + PAGE_GAP),
-      y: totalHeight / 2 - row * (pageHeight + PAGE_GAP),
+      y: -totalHeight / 2 + row * (pageHeight + PAGE_GAP),
     }
   }
 
@@ -298,11 +298,11 @@ export function addPageFrame(root: Container, index: number, layout: LoremLayout
     new MSDFText({
       name: `lorem-page-label-${index}`,
       x: origin.x + PAGE_PADDING,
-      y: origin.y - PAGE_PADDING - 14,
+      y: origin.y + PAGE_PADDING + 14,
       text: `Page ${index + 1}`,
       style: { fontStyle: 'bold', fontSize: 13, color: SLATE },
     }),
   )
 
-  return { x: origin.x + PAGE_PADDING, y: origin.y - PAGE_PADDING - HEADER_HEIGHT }
+  return { x: origin.x + PAGE_PADDING, y: origin.y + PAGE_PADDING + HEADER_HEIGHT }
 }

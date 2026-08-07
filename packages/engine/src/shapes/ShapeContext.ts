@@ -23,8 +23,8 @@
 // Three differences follow from that, and they are the whole of what you need to hold in
 // mind coming from an immediate-mode API:
 //
-//   - Coordinates are LOCAL and y-up. The shape's own origin is (0, 0) and lands wherever
-//     the node's x/y put it, and a larger y is further UP the screen. There is no transform
+//   - Coordinates are LOCAL and y-down. The shape's own origin is (0, 0) and lands wherever
+//     the node's x/y put it, and a larger y is further DOWN the screen. There is no transform
 //     stack here because the node already has one, and a scene graph above it.
 //   - Order is painter order WITHIN the shape, not depth. Every part of one custom shape
 //     shares the node's single zIndex; a later fill() covers an earlier one, and that is as
@@ -58,8 +58,9 @@
 // current path with the style current at the moment it is called.
 
 import type { Vector2Like } from '../math/Vector2'
+import { degToRad } from '../math/angle'
 import { parseColor, parseStops } from '../render/color'
-import type {ColorInput, ColorStopInput, FillPriority, GradientStop, MeshMaterial, } from '../render/meshFormat'
+import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, MeshMaterial, } from '../render/meshFormat'
 import type { LineCap, LineJoin } from '../render/stroke'
 import { classifyContours } from '../render/contours'
 import { flattenCubic, flattenPathData, flattenQuadratic } from '../svg/flattenPath'
@@ -76,17 +77,17 @@ import type { Shape } from './Shape'
  * Colours take either form here, the same as everywhere else - a string or the tuple.
  */
 export interface SegmentStyle {
-  fill?: ColorInput
+  fill?: ColorInput | null
   fillPriority?: FillPriority
   fillLinearGradientStartPoint?: Vector2Like
   fillLinearGradientEndPoint?: Vector2Like
-  fillLinearGradientColorStops?: readonly ColorStopInput[]
+  fillLinearGradientColorStops?: ColorStopsInput
   fillRadialGradientStartPoint?: Vector2Like
   fillRadialGradientStartRadius?: number
   fillRadialGradientEndPoint?: Vector2Like
   fillRadialGradientEndRadius?: number
-  fillRadialGradientColorStops?: readonly ColorStopInput[]
-  stroke?: ColorInput
+  fillRadialGradientColorStops?: ColorStopsInput
+  stroke?: ColorInput | null
   /** Stroke width in the shape's local units; 0 means this run is not stroked. */
   strokeWidth?: number
   lineJoin?: LineJoin
@@ -242,22 +243,38 @@ export class ShapeContext {
   private buildMaterial(patch: SegmentStyle): MeshMaterial {
     const base = this.materialList[this.style_.material]
     const stops = (
-      value: readonly ColorStopInput[] | undefined,
+      value: ColorStopsInput | undefined,
       fallback: readonly GradientStop[],
     ): readonly GradientStop[] => (value ? parseStops(value) : fallback)
 
+    const fill = patch.fill !== undefined ? (patch.fill === null ? null : parseColor(patch.fill)) : base.fill
+    const linearStops = stops(patch.fillLinearGradientColorStops, base.fillLinearGradientColorStops)
+    const radialStops = stops(patch.fillRadialGradientColorStops, base.fillRadialGradientColorStops)
+
+    // The chosen mechanism, resolved against THIS material's own paint - the same rule
+    // Shape.fillPriority applies to the shape's. It cannot be copied from the base as-is:
+    // the base's value is already resolved, so a shape with no fill of its own reads 'none'
+    // there, and carrying that into a segment that DOES supply a fill would draw the
+    // segment's colour as nothing.
+    const chosen = patch.fillPriority ?? base.fillPriority
+    const fillPriority: FillPriority =
+      chosen === 'linear-gradient' ? (linearStops.length > 0 ? 'linear-gradient' : 'none')
+      : chosen === 'radial-gradient' ? (radialStops.length > 0 ? 'radial-gradient' : 'none')
+      : fill !== null ? 'color'
+      : 'none'
+
     return {
-      fillPriority: patch.fillPriority ?? base.fillPriority,
-      fill: patch.fill !== undefined ? parseColor(patch.fill) : base.fill,
-      stroke: patch.stroke !== undefined ? parseColor(patch.stroke) : base.stroke,
+      fillPriority,
+      fill,
+      stroke: patch.stroke !== undefined ? (patch.stroke === null ? null : parseColor(patch.stroke)) : base.stroke,
       fillLinearGradientStartPoint: patch.fillLinearGradientStartPoint ?? base.fillLinearGradientStartPoint,
       fillLinearGradientEndPoint: patch.fillLinearGradientEndPoint ?? base.fillLinearGradientEndPoint,
-      fillLinearGradientColorStops: stops(patch.fillLinearGradientColorStops, base.fillLinearGradientColorStops),
+      fillLinearGradientColorStops: linearStops,
       fillRadialGradientStartPoint: patch.fillRadialGradientStartPoint ?? base.fillRadialGradientStartPoint,
       fillRadialGradientStartRadius: patch.fillRadialGradientStartRadius ?? base.fillRadialGradientStartRadius,
       fillRadialGradientEndPoint: patch.fillRadialGradientEndPoint ?? base.fillRadialGradientEndPoint,
       fillRadialGradientEndRadius: patch.fillRadialGradientEndRadius ?? base.fillRadialGradientEndRadius,
-      fillRadialGradientColorStops: stops(patch.fillRadialGradientColorStops, base.fillRadialGradientColorStops),
+      fillRadialGradientColorStops: radialStops,
     }
   }
 
@@ -304,9 +321,14 @@ export class ShapeContext {
   /**
    * An arc of a circle, joined to the current point by a straight segment (as canvas does).
    *
-   * Angles are radians measured from +x. The scene is y-up, so an INCREASING angle turns
-   * counter-clockwise on screen - hence the default direction; pass `counterclockwise:
-   * false` to sweep the other way round.
+   * Angles are DEGREES measured from +x, which is where this parts company with the Canvas2D
+   * method it otherwise mirrors: every other angle an application writes in this engine is in
+   * degrees (see math/angle.ts), and one method taking radians is the kind of difference that
+   * is only ever found by drawing the wrong thing.
+   *
+   * The scene is y-down, so an INCREASING angle turns CLOCKWISE on screen - which is what
+   * Canvas2D's arc does too. `counterclockwise` (the default) therefore sweeps from the end
+   * angle backwards; pass false to sweep the other way round.
    */
   arc(
     cx: number,
@@ -319,7 +341,7 @@ export class ShapeContext {
     return this.ellipse(cx, cy, radius, radius, 0, startAngle, endAngle, counterclockwise)
   }
 
-  /** As arc(), for an ellipse with its own radii turned by `rotation` radians. */
+  /** As arc(), for an ellipse with its own radii turned by `rotation` degrees. */
   ellipse(
     cx: number,
     cy: number,
@@ -330,11 +352,13 @@ export class ShapeContext {
     endAngle: number,
     counterclockwise = true,
   ): this {
-    let sweep = endAngle - startAngle
+    // Degrees at the boundary, radians for the trigonometry below - see math/angle.ts.
+    const start = degToRad(startAngle)
+    let sweep = degToRad(endAngle) - start
     const full = Math.PI * 2
     if (counterclockwise) {
       // Normalise into (0, 2π]: equal angles mean a whole turn, which is how a circle is
-      // written (0 to 2π, or 0 to 0).
+      // written (0 to 360, or 0 to 0).
       while (sweep <= 0) sweep += full
       if (sweep > full) sweep = full
     } else {
@@ -343,10 +367,10 @@ export class ShapeContext {
     }
 
     const steps = arcSteps(Math.max(Math.abs(radiusX), Math.abs(radiusY)), sweep, this.tolerance)
-    const cos = Math.cos(rotation)
-    const sin = Math.sin(rotation)
+    const cos = Math.cos(degToRad(rotation))
+    const sin = Math.sin(degToRad(rotation))
     for (let i = 0; i <= steps; i++) {
-      const a = startAngle + (sweep * i) / steps
+      const a = start + (sweep * i) / steps
       const ex = Math.cos(a) * radiusX
       const ey = Math.sin(a) * radiusY
       const p = { x: cx + ex * cos - ey * sin, y: cy + ex * sin + ey * cos }
@@ -361,20 +385,20 @@ export class ShapeContext {
   /** A whole circle as its own closed subpath. */
   circle(cx: number, cy: number, radius: number): this {
     this.open = null // its own subpath, never joined to whatever came before
-    this.ellipse(cx, cy, radius, radius, 0, 0, Math.PI * 2)
+    this.ellipse(cx, cy, radius, radius, 0, 0, 360)
     return this.closePath()
   }
 
   /**
    * An axis-aligned rectangle as its own closed subpath, hanging from (x, y) and extending
    * right and DOWNWARD - the same corner a Rect node is placed by, so the two agree in a
-   * y-up scene.
+   * y-down scene.
    */
   rect(x: number, y: number, width: number, height: number): this {
     this.moveTo(x, y)
     this.push({ x: x + width, y })
-    this.push({ x: x + width, y: y - height })
-    this.push({ x, y: y - height })
+    this.push({ x: x + width, y: y + height })
+    this.push({ x, y: y + height })
     return this.closePath()
   }
 

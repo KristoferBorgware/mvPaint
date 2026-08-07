@@ -93,7 +93,7 @@ export abstract class CustomShape extends Shape {
 
   /**
    * Draw this shape's outline into `ctx`. Coordinates are the shape's own local space,
-   * y-up, with its origin at (0, 0) - the point that lands wherever x/y put the node.
+   * y-down, with its origin at (0, 0) - the point that lands wherever x/y put the node.
    *
    * Nothing is drawn until you commit it: build a path, then call ctx.fill(), ctx.stroke()
    * or ctx.fillAndStroke(). A describe() that only builds a path produces an empty shape.

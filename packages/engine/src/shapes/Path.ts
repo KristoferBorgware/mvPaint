@@ -58,7 +58,7 @@ export class Path extends Shape {
     }
 
     // Stroke: every contour (each subpath uses its own closed flag), via the shared stroker.
-    if (this.strokeWidth > 0 && this.contours.length > 0) {
+    if (this.hasStroke() && this.contours.length > 0) {
       strokeContours(this.contours, sink, {
         width: this.strokeWidth,
         align: this.strokeAlign,

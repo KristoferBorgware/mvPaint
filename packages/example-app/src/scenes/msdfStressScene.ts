@@ -26,7 +26,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'msdf-stress-title',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 70,
+      y: -(layout.gridTop + 70),
       text: `MSDF text: ${PAGE_COUNT} pages, ${layout.wordCount.toLocaleString()} words, one atlas`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
@@ -35,7 +35,7 @@ export function buildMsdfStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'msdf-stress-note',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 26,
+      y: -(layout.gridTop + 26),
       text: 'Every glyph is four vertices into one shared atlas, however many words are on the page.',
       style: { fontSize: 17, color: SLATE },
     }),

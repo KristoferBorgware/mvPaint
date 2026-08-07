@@ -34,9 +34,24 @@ import {
   type GradientStop,
   type MeshMaterial,
   type MeshSink,
+  type RGBA,
 } from '../../render/meshFormat'
 
 const EMPTY_STOPS: readonly GradientStop[] = []
+
+/**
+ * What absent paint is written into the record as. A material's fill or stroke may be null -
+ * a shape with nothing to fill or outline with - but the record's four floats are always
+ * written, because the slot is reused frame to frame and skipping it would leave whatever
+ * the previous object put there. The fill TYPE is what actually tells the shader to ignore
+ * them (see FillPriority's 'none'); this only keeps the bytes honest.
+ */
+export const TRANSPARENT_PAINT: RGBA = [0, 0, 0, 0]
+
+/** A material's colour, or the transparent stand-in when it has none. */
+export function paint(color: RGBA | null): RGBA {
+  return color ?? TRANSPARENT_PAINT
+}
 // 5 numbers per gradient stop, flattened: offset, r, g, b, a.
 const STOP_FIELDS = 5
 
@@ -81,14 +96,14 @@ export class ObjectCache {
       this.depth !== depth ||
       this.opacity !== opacity ||
       this.fillType !== fillType ||
-      this.fillR !== material.fill[0] ||
-      this.fillG !== material.fill[1] ||
-      this.fillB !== material.fill[2] ||
-      this.fillA !== material.fill[3] ||
-      this.strokeR !== material.stroke[0] ||
-      this.strokeG !== material.stroke[1] ||
-      this.strokeB !== material.stroke[2] ||
-      this.strokeA !== material.stroke[3] ||
+      this.fillR !== paint(material.fill)[0] ||
+      this.fillG !== paint(material.fill)[1] ||
+      this.fillB !== paint(material.fill)[2] ||
+      this.fillA !== paint(material.fill)[3] ||
+      this.strokeR !== paint(material.stroke)[0] ||
+      this.strokeG !== paint(material.stroke)[1] ||
+      this.strokeB !== paint(material.stroke)[2] ||
+      this.strokeA !== paint(material.stroke)[3] ||
       this.stopCount !== stopCount
     ) {
       return false
@@ -135,14 +150,14 @@ export class ObjectCache {
     this.depth = depth
     this.opacity = opacity
     this.fillType = fillType
-    this.fillR = material.fill[0]
-    this.fillG = material.fill[1]
-    this.fillB = material.fill[2]
-    this.fillA = material.fill[3]
-    this.strokeR = material.stroke[0]
-    this.strokeG = material.stroke[1]
-    this.strokeB = material.stroke[2]
-    this.strokeA = material.stroke[3]
+    this.fillR = paint(material.fill)[0]
+    this.fillG = paint(material.fill)[1]
+    this.fillB = paint(material.fill)[2]
+    this.fillA = paint(material.fill)[3]
+    this.strokeR = paint(material.stroke)[0]
+    this.strokeG = paint(material.stroke)[1]
+    this.strokeB = paint(material.stroke)[2]
+    this.strokeA = paint(material.stroke)[3]
     this.stopCount = stopCount
     if (fillType === FILL_TYPE_CODE['linear-gradient']) {
       this.gradStartX = material.fillLinearGradientStartPoint.x
@@ -429,8 +444,10 @@ export class MeshBatcher {
           f32[colorBase + 3] = a
         }
 
-        f32.set(material.fill, floatBase + OBJECT_FILL_COLOR_OFFSET / 4)
-        f32.set(material.stroke, floatBase + OBJECT_STROKE_COLOR_OFFSET / 4)
+        // Absent paint writes transparent rather than being skipped: the slot is reused
+        // across frames, so leaving it would keep whatever the previous object put there.
+        f32.set(material.fill ?? TRANSPARENT_PAINT, floatBase + OBJECT_FILL_COLOR_OFFSET / 4)
+        f32.set(material.stroke ?? TRANSPARENT_PAINT, floatBase + OBJECT_STROKE_COLOR_OFFSET / 4)
 
         cache.remember(model, depth, opacity, fillType, material, stopCount, stops)
       }

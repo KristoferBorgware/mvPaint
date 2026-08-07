@@ -34,7 +34,7 @@ class Star extends CustomShape {
       const radius = i % 2 === 0 ? this.outer : this.inner
       const angle = Math.PI / 2 + (Math.PI * i) / this.tips
       const x = Math.cos(angle) * radius
-      const y = Math.sin(angle) * radius
+      const y = -Math.sin(angle) * radius
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     }
@@ -56,9 +56,9 @@ class Heart extends CustomShape {
 
   protected override describe(ctx: ShapeContext): void {
     const s = this.size
-    ctx.moveTo(0, -s)
-    ctx.bezierCurveTo(-s * 1.4, s * 0.35, -s * 0.55, s * 1.15, 0, s * 0.42)
-    ctx.bezierCurveTo(s * 0.55, s * 1.15, s * 1.4, s * 0.35, 0, -s)
+    ctx.moveTo(0, s)
+    ctx.bezierCurveTo(-s * 1.4, -s * 0.35, -s * 0.55, -s * 1.15, 0, -s * 0.42)
+    ctx.bezierCurveTo(s * 0.55, -s * 1.15, s * 1.4, -s * 0.35, 0, s)
     ctx.closePath()
     ctx.fillAndStroke()
   }
@@ -131,10 +131,10 @@ class Gear extends CustomShape {
     for (let i = 0; i < this.teeth; i++) {
       const a = i * step
       // Each tooth is a flank out, a tip arc, and a flank back to the root circle.
-      ctx.lineTo(Math.cos(a) * this.rootRadius, Math.sin(a) * this.rootRadius)
-      ctx.lineTo(Math.cos(a + step * 0.18) * this.outer, Math.sin(a + step * 0.18) * this.outer)
-      ctx.lineTo(Math.cos(a + step * 0.38) * this.outer, Math.sin(a + step * 0.38) * this.outer)
-      ctx.lineTo(Math.cos(a + step * 0.56) * this.rootRadius, Math.sin(a + step * 0.56) * this.rootRadius)
+      ctx.lineTo(Math.cos(a) * this.rootRadius, -Math.sin(a) * this.rootRadius)
+      ctx.lineTo(Math.cos(a + step * 0.18) * this.outer, -Math.sin(a + step * 0.18) * this.outer)
+      ctx.lineTo(Math.cos(a + step * 0.38) * this.outer, -Math.sin(a + step * 0.38) * this.outer)
+      ctx.lineTo(Math.cos(a + step * 0.56) * this.rootRadius, -Math.sin(a + step * 0.56) * this.rootRadius)
     }
     ctx.closePath()
     // A second subpath inside the first is a hole - the same nesting rule an SVG path with
@@ -197,7 +197,7 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   root.addChild(
     new Star(5, 92, 40, {
       x: -430,
-      y: 146,
+      y: -146,
       fill: '#ffc93d',
       stroke: '#a86e00',
       strokeWidth: 6,
@@ -211,10 +211,10 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
     }),
   )
 
-  const heart = new Heart(78, { x: -215, y: 136, stroke: '#8c0f2b', strokeWidth: 5 })
+  const heart = new Heart(78, { x: -215, y: -136, stroke: '#8c0f2b', strokeWidth: 5 })
   // Gradients are on Shape, so a described outline takes one the same way a Rect does.
   heart.fillPriority = 'radial-gradient'
-  heart.fillRadialGradientStartPoint = { x: -20, y: 40 }
+  heart.fillRadialGradientStartPoint = { x: -20, y: -40 }
   heart.fillRadialGradientStartRadius = 4
   heart.fillRadialGradientEndPoint = { x: 0, y: 0 }
   heart.fillRadialGradientEndRadius = 110
@@ -224,29 +224,29 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   ]
   root.addChild(heart)
 
-  root.addChild(caption(-500, 42, 'a star and a heart - one describe() each, no engine support for either'))
-  root.addChild(label(-500, 20, 'click a notch between two points: the hit test uses the outline, not a box'))
+  root.addChild(caption(-500, -42, 'a star and a heart - one describe() each, no engine support for either'))
+  root.addChild(label(-500, -20, 'click a notch between two points: the hit test uses the outline, not a box'))
 
   // --- one outline, several styles --------------------------------------------------------
   const route = new Route([
     { x: 0, y: 0, stroke: TEAL, strokeWidth: 14 },
-    { x: 90, y: 70, stroke: TEAL, strokeWidth: 14 },
-    { x: 190, y: 30, stroke: '#e6802e', strokeWidth: 22 },
-    { x: 280, y: 130, stroke: '#e6802e', strokeWidth: 22 },
-    { x: 350, y: 90, stroke: CRIMSON, strokeWidth: 9 },
-    { x: 430, y: 168, stroke: NAVY, strokeWidth: 30 },
+    { x: 90, y: -70, stroke: TEAL, strokeWidth: 14 },
+    { x: 190, y: -30, stroke: '#e6802e', strokeWidth: 22 },
+    { x: 280, y: -130, stroke: '#e6802e', strokeWidth: 22 },
+    { x: 350, y: -90, stroke: CRIMSON, strokeWidth: 9 },
+    { x: 430, y: -168, stroke: NAVY, strokeWidth: 30 },
   ])
   route.x = 40
-  route.y = 96
+  route.y = -96
   root.addChild(route)
 
-  root.addChild(caption(40, 42, 'one shape, four stroke colours and four widths'))
-  root.addChild(label(40, 20, 'style() applies to what comes after it'))
+  root.addChild(caption(40, -42, 'one shape, four stroke colours and four widths'))
+  root.addChild(label(40, -20, 'style() applies to what comes after it'))
 
   // --- holes, and everything else that comes free -----------------------------------------
   const gear = new Gear(14, 100, 74, 34, {
     x: -400,
-    y: -224,
+    y: 224,
     stroke: '#2b2b33',
     strokeWidth: 4,
     shadowColor: '#00000066',
@@ -254,8 +254,8 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
     shadowOffsetY: 14,
   })
   gear.fillPriority = 'linear-gradient'
-  gear.fillLinearGradientStartPoint = { x: -100, y: 100 }
-  gear.fillLinearGradientEndPoint = { x: 100, y: -100 }
+  gear.fillLinearGradientStartPoint = { x: -100, y: -100 }
+  gear.fillLinearGradientEndPoint = { x: 100, y: 100 }
   gear.fillLinearGradientColorStops = [
     { offset: 0, color: '#8fa3c4' },
     { offset: 0.5, color: '#e3e9f2' },
@@ -267,27 +267,27 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   // still just a transform - the outline is described once however the node is moved.
   const pinion = new Gear(9, 58, 42, 18, {
     x: -212,
-    y: -282,
+    y: 282,
     fill: '#d9a441',
     stroke: '#8a6212',
     strokeWidth: 3,
   })
   root.addChild(pinion)
 
-  root.addChild(caption(-500, -346, 'a gear: a toothed ring with a bore through it, wearing a gradient and a shadow'))
-  root.addChild(label(-500, -368, 'the bore is a second subpath inside the first'))
+  root.addChild(caption(-500, 346, 'a gear: a toothed ring with a bore through it, wearing a gradient and a shadow'))
+  root.addChild(label(-500, 368, 'the bore is a second subpath inside the first'))
 
   // --- an outline that actually changes ---------------------------------------------------
-  const wave = new Wave(430, 52, 26, { x: 40, y: -254, fill: NAVY, opacity: 0.9 })
+  const wave = new Wave(430, 52, 26, { x: 40, y: 254, fill: NAVY, opacity: 0.9 })
   root.addChild(wave)
 
-  root.addChild(caption(40, -346, 'the only one here whose outline is re-described'))
-  root.addChild(label(40, -368, 'moving or recolouring never re-runs describe()'))
+  root.addChild(caption(40, 346, 'the only one here whose outline is re-described'))
+  root.addChild(label(40, 368, 'moving or recolouring never re-runs describe()'))
 
   root.addChild(
     new MSDFText({
       x: -500,
-      y: 344,
+      y: -344,
       text: 'Custom shapes',
       style: { fontStyle: 'bold', fontSize: 40, color: DARK },
     }),
@@ -297,7 +297,7 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
   root.addChild(
     new MSDFText({
       x: -500,
-      y: 288,
+      y: -288,
       text: 'five classes, each one a CustomShape that draws its own contour',
       style: { fontSize: 15, color: SLATE },
     }),
@@ -310,8 +310,8 @@ export function buildCustomShapeScene(scene: Scene): SceneContent {
 
       // Free: a transform is applied per frame from the object record and never touches the
       // description, so these two turn for nothing at all.
-      gear.rotation = t * 0.5
-      pinion.rotation = -t * 0.5 * (14 / 9)
+      gear.rotation = -t * 30
+      pinion.rotation = t * 30 * (14 / 9)
 
       // Not free: the wave's outline depends on its phase, so a new phase is a new outline
       // and has to be announced. That is a re-describe and a re-triangulate every frame -

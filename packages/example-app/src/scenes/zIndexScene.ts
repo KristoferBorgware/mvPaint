@@ -24,11 +24,11 @@ import type { SceneContent } from './types'
 // A panel is 204 tall, measured down from its heading: 17 of heading, a 24 gap, a 130 band of
 // shapes, a 20 gap, then 13 of caption. The two rows are placed so the pair straddles y = 0.
 const PANEL_H = 204
-const ROW = [227, -23] // each row's heading baseline (top edge - MSDFText hangs downwards)
+const ROW = [-227, 23] // each row's heading baseline (top edge - MSDFText hangs downwards)
 const COL = [-520, -150, 250] // each column's left edge
-const BODY = -41 // top of the band of shapes, relative to the row
-const BAND = 130 // its height, so the band runs ROW-171 .. ROW-41
-const FOOT = -(PANEL_H - 13) // caption baseline, clear of the band
+const BODY = 41 // top of the band of shapes, relative to the row
+const BAND = 130 // its height, so the band runs ROW+41 .. ROW+171
+const FOOT = PANEL_H - 13 // caption baseline, clear of the band
 
 const heading = (col: number, row: number, text: string): MSDFText =>
   new MSDFText({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
@@ -55,9 +55,9 @@ export function buildZIndexScene(scene: Scene): SceneContent {
   // shows enough of itself to be recognised. Both cells of every pair below use this exact
   // geometry, so the only thing that ever differs between two cells is the stacking.
   const word = (cx: number, row: number) =>
-    new MSDFText({ x: cx - 52, y: ROW[row] + BODY - BAND / 2 + 18, text: 'ABC', style: { fontSize: 34, fontStyle: 'bold', color: NAVY } })
+    new MSDFText({ x: cx - 52, y: ROW[row] + BODY + BAND / 2 - 18, text: 'ABC', style: { fontSize: 34, fontStyle: 'bold', color: NAVY } })
   const disc = (cx: number, row: number, fill: ColorInput) =>
-    new Circle({ x: cx + 22, y: ROW[row] + BODY - BAND / 2, radius: 34, fill })
+    new Circle({ x: cx + 22, y: ROW[row] + BODY + BAND / 2, radius: 34, fill })
 
   // --- made later is in front -----------------------------------------------------------
   //
@@ -119,7 +119,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
   // can reach. The panel here is made LAST, after every circle, and is still behind them.
   root.addChild(heading(1, 1, 'Send one behind everything'))
   for (let i = 0; i < 3; i++) {
-    root.addChild(new Circle({ name: `backdrop-dot-${i}`, x: -100 + i * 80, y: ROW[1] + BODY - BAND / 2, radius: 40, fill: NAVY }))
+    root.addChild(new Circle({ name: `backdrop-dot-${i}`, x: -100 + i * 80, y: ROW[1] + BODY + BAND / 2, radius: 40, fill: NAVY }))
   }
   root.addChild(
     new Rect({
@@ -145,7 +145,7 @@ export function buildZIndexScene(scene: Scene): SceneContent {
   // The three take consecutive numbers, and are cut short top and bottom so the slotted card
   // can stand taller than them. Without that it would be a 25-wide strip between two cards -
   // correct, and almost impossible to see.
-  const short = ROW[1] + BODY - 10
+  const short = ROW[1] + BODY + 10
   const first = root.addChild(card(COL[2], short, 80, BAND - 20, STEPS[0]))
   const second = root.addChild(card(COL[2] + 60, short, 80, BAND - 20, STEPS[1]))
   root.addChild(card(COL[2] + 120, short, 80, BAND - 20, STEPS[2]))

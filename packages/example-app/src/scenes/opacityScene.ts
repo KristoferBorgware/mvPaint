@@ -16,11 +16,11 @@ import { CRIMSON, DARK, NAVY, SLATE, TEAL, withAlpha } from './palette'
 import type { SceneContent } from './types'
 
 const PANEL_H = 204
-const ROW = [227, -23] // each row's heading baseline (MSDFText hangs downwards from its y)
+const ROW = [-227, 23] // each row's heading baseline (MSDFText hangs downwards from its y)
 const COL = [-520, 40] // each column's left edge
-const BODY = -41 // top of the band of shapes, relative to the row
+const BODY = 41 // top of the band of shapes, relative to the row
 const BAND = 130
-const FOOT = -(PANEL_H - 13)
+const FOOT = PANEL_H - 13
 
 const heading = (col: number, row: number, text: string): MSDFText =>
   new MSDFText({ x: COL[col], y: ROW[row], text, style: { fontSize: 17, fontStyle: 'bold', color: DARK } })
@@ -45,7 +45,7 @@ function bars(root: Container, col: number, row: number, width: number): void {
         width: 17,
         height: BAND,
         fill: '#dee3eb',
-        rotation: -0.5,
+        rotation: 29,
       }),
     )
   }
@@ -89,12 +89,12 @@ export function buildOpacityScene(scene: Scene): SceneContent {
   // objects rather than one.
   root.addChild(heading(0, 1, 'Every lane obeys it'))
   bars(root, 0, 1, 440)
-  root.addChild(new Circle({ name: 'lane-mesh', x: COL[0] + 55, y: ROW[1] + BODY - BAND / 2, radius: 52, fill: TEAL, opacity: 0.45 }))
+  root.addChild(new Circle({ name: 'lane-mesh', x: COL[0] + 55, y: ROW[1] + BODY + BAND / 2, radius: 52, fill: TEAL, opacity: 0.45 }))
   root.addChild(
     new MSDFText({
       name: 'lane-text',
       x: COL[0] + 130,
-      y: ROW[1] + BODY - 34,
+      y: ROW[1] + BODY + 34,
       text: 'MSDFText',
       style: { fontSize: 62, fontStyle: 'bold', color: NAVY },
       opacity: 0.45,
@@ -104,7 +104,7 @@ export function buildOpacityScene(scene: Scene): SceneContent {
     new Rect({
       name: 'lane-shadowed',
       x: COL[0] + 300,
-      y: ROW[1] + BODY - 12,
+      y: ROW[1] + BODY + 12,
       width: 100,
       height: 100,
       fill: CRIMSON,

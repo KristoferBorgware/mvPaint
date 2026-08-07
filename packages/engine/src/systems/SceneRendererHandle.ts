@@ -176,7 +176,7 @@ export interface SceneRendererHandle extends SceneResources {
  */
 export interface CaptureOptions {
   /**
-   * World point at the capture's top-left corner. The scene is y-up, so the region extends
+   * World point at the capture's top-left corner. The scene is y-down, so the region extends
    * right and DOWNWARD from here - the same convention Rect, Camera2D and the rest follow.
    * Defaults to the live camera's, so omitting x/y/width/height captures the current view.
    */

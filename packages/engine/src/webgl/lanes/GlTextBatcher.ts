@@ -107,11 +107,11 @@ export class GlTextBatcher {
           packedIds.push(packed)
           vertexCount++
         }
-        // TL, TR, BR, BL (y-up: y1 is the top edge, y0 the bottom).
-        push(q.x0, q.y1, q.u0, q.v0)
-        push(q.x1, q.y1, q.u1, q.v0)
-        push(q.x1, q.y0, q.u1, q.v1)
-        push(q.x0, q.y0, q.u0, q.v1)
+        // TL, TR, BR, BL (y-down: y0 is the top edge, y1 the bottom).
+        push(q.x0, q.y0, q.u0, q.v0)
+        push(q.x1, q.y0, q.u1, q.v0)
+        push(q.x1, q.y1, q.u1, q.v1)
+        push(q.x0, q.y1, q.u0, q.v1)
 
         indices.push(b, b + 1, b + 2, b, b + 2, b + 3)
       }

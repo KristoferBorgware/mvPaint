@@ -31,9 +31,6 @@ export class Polyline extends Shape {
     super(options)
     this.points = options.points
     this.closed = options.closed ?? false
-    // Stroke-only: Shape's default strokeWidth of 0 would render nothing, so a Polyline
-    // defaults to a visible 1-unit stroke instead.
-    this.strokeWidth = options.strokeWidth ?? 1
   }
 
   protected override attrKeys(): readonly string[] {
@@ -41,7 +38,7 @@ export class Polyline extends Shape {
   }
 
   protected override buildGeometry(sink: MeshSink): void {
-    if (this.strokeWidth <= 0 || this.points.length < 2) return
+    if (!this.hasStroke() || this.points.length < 2) return
     strokePolyline(this.points, sink, {
       width: this.strokeWidth,
       closed: this.closed,

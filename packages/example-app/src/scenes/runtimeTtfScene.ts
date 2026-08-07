@@ -61,13 +61,13 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'ttf-title',
       x: LEFT,
-      y: 260,
+      y: -260,
       text: 'Parsed at runtime',
       style: { fontStyle: 'bold', fontSize: 56, color: DARK },
     }),
   )
-  root.addChild(label(LEFT, 196, 'This TTF was fetched and parsed in the browser by @mvpaint/ttf -'))
-  root.addChild(label(LEFT, 172, 'the engine itself carries no font parser, and never sees the file.'))
+  root.addChild(label(LEFT, -196, 'This TTF was fetched and parsed in the browser by @mvpaint/ttf -'))
+  root.addChild(label(LEFT, -172, 'the engine itself carries no font parser, and never sees the file.'))
 
   // The full charset is the point: an atlas covers what it was generated for, a parser covers
   // whatever the font has. These characters are outside the printable-ASCII set the bundled
@@ -77,12 +77,12 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'ttf-charset',
       x: LEFT,
-      y: 110,
+      y: -110,
       text: 'Æøå Ćžš — «déjà vu» ¶§',
       style: { fontSize: 44, color: TEAL },
     }),
   )
-  root.addChild(label(LEFT, 46, "Characters outside the atlases' generated charset, drawn from the file itself."))
+  root.addChild(label(LEFT, -46, "Characters outside the atlases' generated charset, drawn from the file itself."))
 
   // Everything else a VectorText can do still applies - these are the same nodes, differing
   // only in where their outlines came from.
@@ -91,7 +91,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
       fonts: book,
       name: 'ttf-styled',
       x: LEFT,
-      y: -30,
+      y: 30,
       runs: [
         { text: 'Real geometry: ', style: { fontSize: 40, color: DARK } },
         { text: 'shadowed', style: { fontSize: 40, color: CRIMSON, shadow: { color: '#00000073', offsetX: 3, offsetY: 4 } } },
@@ -102,15 +102,15 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
       ],
     }),
   )
-  root.addChild(label(LEFT, -100, 'Only regular and bold were loaded, so the italic above is synthesized - the'))
-  root.addChild(label(LEFT, -124, 'same fallback ladder every other font book in the engine walks.'))
+  root.addChild(label(LEFT, 100, 'Only regular and bold were loaded, so the italic above is synthesized - the'))
+  root.addChild(label(LEFT, 124, 'same fallback ladder every other font book in the engine walks.'))
 
   root.addChild(
     new VectorText({
       fonts: book,
       name: 'ttf-body',
       x: LEFT,
-      y: -190,
+      y: 190,
       maxWidth: 900,
       text:
         'A parser is worth its weight only when the font is unknown until the moment it is needed: a file the user drops in, a font picker, a document that names its own typeface. Everything else is better served by a polygon atlas, which is this same geometry computed once and shipped as data.',

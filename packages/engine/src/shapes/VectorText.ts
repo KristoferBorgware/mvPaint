@@ -160,8 +160,11 @@ export class VectorText extends Text {
       // Every outline point goes through the same corner transform the MSDF lane applies to
       // the glyph's quad - the faux-italic shear, then any curve rotation - so an outline
       // shears and bends exactly as its box does.
+      //
+      // A font's own units are y-up - an ascender has positive y - and the scene is y-down,
+      // so the glyph's y is subtracted from the baseline rather than added to it.
       const place = (p: Vector2Like): Vector2Like =>
-        quadCorner(quad, quad.originX + p.x * quad.unitScale, quad.originY + p.y * quad.unitScale)
+        quadCorner(quad, quad.originX + p.x * quad.unitScale, quad.originY - p.y * quad.unitScale)
 
       // Fill: the cached triangulation, transformed into this instance's place on the line.
       const base = mesh.vertices.map((v) => {

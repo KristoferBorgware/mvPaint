@@ -26,7 +26,7 @@ import { quadCorner, type TextQuad } from './textQuad'
 export interface PathSample {
   x: number
   y: number
-  /** Tangent direction in radians, counter-clockwise from +x. */
+  /** Tangent direction in radians, measured from +x (increasing clockwise on screen). */
   angle: number
 }
 
@@ -202,19 +202,19 @@ export interface ArcPathOptions {
 }
 
 /**
- * An arc of `sweep` radians starting at `startAngle`, measured counter-clockwise from +x.
- * A negative sweep runs clockwise.
+ * An arc of `sweep` radians from `startAngle`. Angles are measured from +x and INCREASE
+ * CLOCKWISE on screen, because +y is down - the same sense Canvas2D's arc uses.
  *
  * Which way it runs decides which side of the curve the text ends up on, because a glyph's
- * up direction is the curve's left normal: text on a clockwise arc stands on the outside,
- * text on a counter-clockwise one hangs from the inside.
+ * up direction is the curve's left normal: text on a clockwise arc (positive sweep) stands
+ * on the outside, text on an anti-clockwise one hangs from the inside.
  */
 export function arcPath(radius: number, startAngle: number, sweep: number, options: ArcPathOptions = {}): TextPathGeometry {
   return TextPathGeometry.fromPoints(arcPoints(radius, startAngle, sweep, options, true), false)
 }
 
 export interface CirclePathOptions extends ArcPathOptions {
-  /** Where distance 0 sits, counter-clockwise from +x. Default Math.PI/2 - the top. */
+  /** Where distance 0 sits, measured from +x. Default -Math.PI/2 - the top. */
   startAngle?: number
   /** Default true, which stands the text upright on the outside of the circle. */
   clockwise?: boolean
@@ -227,8 +227,8 @@ export interface CirclePathOptions extends ArcPathOptions {
  * symmetrically about the top; set `clockwise` false for text that reads along the bottom.
  */
 export function circlePath(radius: number, options: CirclePathOptions = {}): TextPathGeometry {
-  const startAngle = options.startAngle ?? Math.PI / 2
-  const sweep = (options.clockwise ?? true) ? -Math.PI * 2 : Math.PI * 2
+  const startAngle = options.startAngle ?? -Math.PI / 2
+  const sweep = (options.clockwise ?? true) ? Math.PI * 2 : -Math.PI * 2
   // The closing point is left off and the curve closed instead: coming back round to the
   // start angle does not reproduce the first point exactly, and the difference would show up
   // as a stray hair of a segment at the seam.
@@ -342,10 +342,14 @@ function bendQuad(
   if (!sample) return null
 
   // How far this quad's own baseline sits from the block's first one, carried out along the
-  // curve's left normal so lines stay spaced and a glyph's ascent points off the curve.
-  const perpendicular = quad.originY - referenceBaseline + normalOffset
-  const nx = -Math.sin(sample.angle)
-  const ny = Math.cos(sample.angle)
+  // curve's normal so lines stay spaced and a glyph's ascent points off the curve.
+  //
+  // The normal is the one a glyph stands UP along, which is -y in this y-down space - so a
+  // later line, whose originY is the LARGER, is carried back along it and lands under the
+  // line before it, while a positive `offset` lifts the whole block clear of the curve.
+  const perpendicular = referenceBaseline - quad.originY + normalOffset
+  const nx = Math.sin(sample.angle)
+  const ny = -Math.cos(sample.angle)
   const targetX = sample.x + nx * perpendicular
   const targetY = sample.y + ny * perpendicular
 

@@ -11,6 +11,9 @@ const OBJECT_ID_MASK: u32 = 0x7fffffffu;
 const FILL_COLOR: u32 = 0u;
 const FILL_LINEAR: u32 = 1u;
 const FILL_RADIAL: u32 = 2u;
+// A shape with nothing to fill with. Its triangles still exist - picking needs them - and
+// come out transparent. See FillPriority in render/meshFormat.ts.
+const FILL_NONE: u32 = 3u;
 
 struct Frame {
   viewProjection : mat4x4<f32>,
@@ -143,6 +146,8 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
   var color : vec4<f32>;
   if (!isFill) {
     color = obj.strokeColor;
+  } else if (obj.fillType == FILL_NONE) {
+    color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
   } else if (obj.fillType == FILL_COLOR) {
     color = obj.fillColor;
   } else {

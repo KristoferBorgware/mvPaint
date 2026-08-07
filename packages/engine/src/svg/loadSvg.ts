@@ -170,7 +170,7 @@ export interface LoadSvgOptions {
   tolerance?: number
   /**
    * Root CTM applied before every element transform (default identity). Use it to place
-   * the document in the scene and to flip Y, since SVG is y-down and the scene is y-up.
+   * the document in the scene. SVG is y-down and so is the scene, so no Y flip is wanted.
    */
   rootMatrix?: Mat2x3
 }

@@ -225,6 +225,19 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       // renderer must exist for there to be any, which the guard above ensures.
       contentRef.current = def.build(sceneGraph, resourcesRef.current)
 
+      // Every scene here is meant to be pushed around - "drag a shape to move it" is what the
+      // page says. The engine draws nothing and drags nothing it was not asked to, so the app
+      // opts its own content in rather than each scene repeating the flag on every node.
+      //
+      // `keepDragOptOut` is how a scene keeps a node OUT of that: groupScene turns one group
+      // off deliberately, to show what draggable: false does, and a blanket pass would undo
+      // exactly the thing it is demonstrating.
+      const optedOut = new Set<Node>(contentRef.current.keepDragOptOut ?? [])
+      sceneGraph.root.traversePreOrder((node) => {
+        const draggable = node as Node & { draggable?: boolean }
+        if (draggable.draggable !== undefined && !optedOut.has(node)) draggable.draggable = true
+      })
+
       // Re-frame: each scene lays itself out around the origin, so a pan left over from the
       // previous one would otherwise start the new scene half off-screen.
       //

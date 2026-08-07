@@ -81,7 +81,7 @@ handle.scene.root.addChild(dot)
 handle.scene.root.addChild(card)
 
 handle.onFrame = (dt) => {
-  dot.rotation += dt
+  dot.rotation += dt * 60
 }
 
 handle.scene.root.on('click', (event) => {
@@ -239,13 +239,16 @@ const blob = await handle.toBlob({ x: 0, y: 0, width: 1200, height: 800, pixelRa
 ## Scene graph
 
 Nodes carry the transform: position, rotation, scale, skew and offset. Shapes add the paint.
+Angles are in **degrees** everywhere an application writes one — `rotation` on a node or a
+camera, the marks a rotate drag snaps onto, the sweep of a `ShapeContext` arc.
 
 Two conventions:
 
-- The scene is **y-up**, so a shape extends downward from its origin.
+- The scene is **y-down**, so a shape extends downward from its origin and `+y` is toward the
+  bottom of the viewport, matching Canvas2D, SVG and the coordinates pointer events arrive in.
 - A shape's origin is its top-left corner, except radius-defined shapes such as `Circle`, which
   are centred. The origin is also the pivot for rotation and scale. To rotate a rect about its
-  own centre, set `offsetX: width / 2, offsetY: -height / 2`.
+  own centre, set `offsetX: width / 2, offsetY: height / 2`.
 
 ### Nodes and containers
 
@@ -293,6 +296,21 @@ shape.zIndex = -1                // send it behind everything
 
 **Fills.** Solid colours, plus linear and radial gradients evaluated analytically in the shape's
 local space, so a gradient transforms with its shape.
+
+Nothing paints unless it is asked to: `fill` and `stroke` are both absent by default, so a shape
+with neither draws no pixels while still being measured, picked and stacked like any other.
+`hasFill()` and `hasStroke()` answer whether a shape paints; a stroke needs a colour as well as
+a width, so the default `strokeWidth` of 2 outlines nothing on its own. `draggable` is likewise
+off until a node opts in.
+
+A colour is written as `[r, g, b, a]` in 0..1 or as a CSS string — hex, `rgb()`, `hsl()`, a
+keyword, `transparent`. Reading one back gives the tuple, which is what the shape renders
+through; `fillInput`, `strokeInput`, `shadowColorInput` and `tintInput` give back the form it
+was written in. Anything that is neither a string nor four finite numbers is refused at
+assignment, where it still has a name to report.
+
+Gradient stops take either shape — a list of `{offset, color}`, or one flat array alternating
+the two, `[0, 'red', 1, 'blue']`. A gradient holds at most eight.
 
 **Strokes.** Miter, round and bevel joins; butt, round and square caps; a miter limit.
 

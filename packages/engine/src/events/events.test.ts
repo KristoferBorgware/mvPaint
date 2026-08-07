@@ -31,7 +31,7 @@ function assert(cond: boolean, msg: string): void {
  * which is the frame the geometry below is written in.
  */
 const centredRect = (options: RectOptions = {}): Rect =>
-  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: (options.height ?? 1) / 2 })
 
 /**   root
  *     +- group

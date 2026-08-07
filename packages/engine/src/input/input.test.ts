@@ -49,7 +49,7 @@ const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
  * which is the frame the geometry below is written in.
  */
 const centredRect = (options: RectOptions = {}): Rect =>
-  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: (options.height ?? 1) / 2 })
 
 /**
  * A canvas stand-in, and a way to drive it: the dispatcher only ever adds listeners, captures
@@ -226,9 +226,10 @@ it('draggedPosition: a node follows the pointer in WORLD space, while its own x/
     )
 })
 
-it('draggable: on by default (a drag only ever reaches a pickable node), opt-out per node', () => {
-    assert(centredRect().draggable, 'a shape is draggable by default')
-    assert(!centredRect({ draggable: false }).draggable, 'draggable can be turned off per node')
+it('draggable: off by default, opted into per node', () => {
+    assert(!centredRect().draggable, 'a shape is not draggable unless it says so')
+    assert(centredRect({ draggable: true }).draggable, 'draggable is turned on per node')
+    assert(!new Group().draggable, 'a group is not draggable either')
 })
 
 //
@@ -266,7 +267,7 @@ it('resolving a press: a transformer handle is not the shape behind it', () => {
     const box = { cx: 0, cy: 0, halfW: 40, halfH: 40, rotation: 0 }
     transformer.update(box, 1)
 
-    const rotateAnchor = { x: 0, y: 76 } // above the top edge, where the rotate handle sits
+    const rotateAnchor = { x: 0, y: -76 } // above the top edge (-y), where the rotate handle sits
     assert(transformer.anchorAt(rotateAnchor.x, rotateAnchor.y) === 'rotate', 'the rotate handle is where the test presses')
 
     resetListenerCensus()
@@ -330,8 +331,8 @@ it('a press inside a group takes hold of the GROUP', () => {
     }
 
     const root = new Container()
-    const group = root.addChild(new Group({ name: 'assembly' }))
-    const part = group.addChild(centredRect({ name: 'part', x: 0, y: 0, width: 40, height: 40 }))
+    const group = root.addChild(new Group({ name: 'assembly', draggable: true }))
+    const part = group.addChild(centredRect({ name: 'part', x: 0, y: 0, width: 40, height: 40, draggable: true }))
 
     resetListenerCensus()
     const dispatcher = new SceneInputDispatcher(canvas as unknown as HTMLCanvasElement, {
@@ -731,7 +732,7 @@ it('a run of wheel notches holds one anchor rather than re-reading it', () => {
 it('the editor set: press to select, drag to move, empty space to clear', () => {
     resetListenerCensus()
     const scene = new Scene()
-    const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 200, height: 200 }))
+    const shape = scene.root.addChild(centredRect({ name: 'content', x: 0, y: 0, width: 200, height: 200, draggable: true }))
 
     let over: Shape | null = shape
     const host = fakeHost(scene, () => over)
@@ -884,11 +885,11 @@ it('MarqueeOverlay: the selection box wears the same green as the frame it becom
 
     const wash = partNamed(marquee, '__marquee-fill')
     const border = partNamed(marquee, '__marquee-top')
-    assert(isGreen(wash.fill), 'the wash is the mv green')
-    assert(isGreen(border.fill), 'and so is the border')
-    assert(isGreen(partNamed(t, '__transformer-top').fill), 'the same green the frame is drawn in')
+    assert(isGreen(wash.fill!), 'the wash is the mv green')
+    assert(isGreen(border.fill!), 'and so is the border')
+    assert(isGreen(partNamed(t, '__transformer-top').fill!), 'the same green the frame is drawn in')
 
     // Only the alpha differs between them - a wash you can see through, a border you cannot.
-    assert(wash.fill[3] < 0.5 && border.fill[3] > 0.5, 'the wash is translucent where the border is not')
+    assert(wash.fill![3] < 0.5 && border.fill![3] > 0.5, 'the wash is translucent where the border is not')
 })
 

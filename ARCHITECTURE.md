@@ -77,7 +77,8 @@ them at different points in the frame.
 ### Node, Container, Shape
 
 `Node` (`shapes/Node.ts`) is the base: id, name, parent link, event listeners, and **its own 2D
-transform** — position, rotation, scale, skew and pivot offset. Every node in the tree is
+transform** — position, rotation, scale, skew and pivot offset (`rotation` in degrees; see
+`math/angle.ts` for where the unit changes). Every node in the tree is
 placeable, drawable or not.
 
 `Container extends Node` adds the child list. Traversal and search stay on `Node`, which calls
@@ -88,6 +89,13 @@ leaf yields nothing.
 `pickable`, `draggable`, `opacity`, `overlay`, the full fill/stroke vocabulary, and the shadow
 fields. It is the base of every drawable — `Rect`, `Circle`, `Polyline`, `Path`, `Image`,
 `CustomShape`, and `Text` with its two subclasses `MSDFText` and `VectorText`.
+
+None of the paint is on by default. `fill` and `stroke` are absent until set, so a shape with
+neither draws nothing while remaining a full participant — measured, picked, stacked. Its fill
+triangles are still tessellated and uploaded for exactly that reason: picking runs against the
+same triangles the mesh lane draws, so `FillPriority` carries a `'none'` case that the fragment
+shader answers with a transparent fragment, rather than the shape dropping its interior and
+going unclickable in the middle. `hasFill()` and `hasStroke()` are the predicates.
 
 `Group extends Container` (`shapes/Group.ts`) draws nothing and emits no geometry.
 It contributes a matrix in the middle of the chain, which world-matrix composition already
@@ -129,13 +137,13 @@ Which point of a shape lands at `(x, y)` depends on the shape:
 
 - **Radius-defined shapes** (`Circle`) are **centered** on the origin.
 - **`Rect`, `Image`, `Text`, `VectorText`** hang from their **top-left corner**. The scene is
-  y-up, so such a shape spans `x ∈ [0, width]` and `y ∈ [-height, 0]` in local space.
+  y-down, so such a shape spans `x ∈ [0, width]` and `y ∈ [0, height]` in local space.
 - **`Polyline` and `Path`** place their points as authored; the origin is wherever the author
   put it.
 
 The practical consequence is the pivot. Rotation and scale are about the local origin, so a
 circle spins in place while a rect turns about its corner. To spin a rect about its middle, set
-`offsetX: width / 2, offsetY: -height / 2`.
+`offsetX: width / 2, offsetY: height / 2`.
 
 ### Matrix caching
 
@@ -333,7 +341,7 @@ class Star extends CustomShape {
 `pathData(d)` for SVG path data — and it produces **mesh geometry, not pixels**. Closed subpaths
 go through the same earcut path a `Path` node's contours do, so a subpath inside another is a
 hole; open ones go through the shared stroker. Coordinates are the shape's own local space,
-y-up. Curves are flattened against the shape's `tolerance`.
+y-down. Curves are flattened against the shape's `tolerance`.
 
 The output is triangles, so everything downstream applies unchanged: picking tests the real
 outline, bounds come from it, a shadow bakes from that silhouette, and gradients, object opacity
@@ -948,7 +956,7 @@ left-to-right and mechanically mirrored right-to-left; a vertical orientation st
 top-to-bottom in right-to-left columns. Text can be bent onto an arbitrary path
 (`text/textPath.ts`). Every run becomes one or more materials referenced by its quads.
 
-Coordinates are the node's local space: +x right, +y up, the block's top-left at the origin.
+Coordinates are the node's local space: +x right, +y down, the block's top-left at the origin.
 
 A `Text` drop shadow is a duplicate of the run's glyphs drawn behind them at an offset, styled
 per run. `VectorText` has real mesh geometry, so it honours the ordinary `Shape.shadow*` fields
@@ -1088,7 +1096,7 @@ print preview).
 
 It describes a rectangle of world under the same conventions the shapes use: `x, y` is the world
 point at the viewport's **top-left**, `zoom` is viewport pixels per world unit, and `rotation`
-turns the view about its own center. Omitting it renders through a default camera, which puts
+(degrees) turns the view about its own center. Omitting it renders through a default camera, which puts
 world (0, 0) at the top-left at 1:1.
 
 Zoom is in **CSS pixels**, not device pixels, so a shape is the same physical size on a

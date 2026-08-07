@@ -1,8 +1,8 @@
 // MSDF glyph metrics: the raw BMFont/Hiero JSON shape (produced by scripts/genFontAtlas.ts)
 // and its normalization into fast lookup structures. All metric values are in atlas pixels at
 // the generation em size (`size`); the layout scales them by (renderSize / size). Positions
-// follow BMFont's y-down convention (yoffset measured downward from the line top); the shaper
-// converts to the scene's y-up space.
+// follow BMFont's y-down convention (yoffset measured downward from the line top), which is
+// the scene's own direction, so the shaper carries them across without turning them over.
 
 /** One glyph entry as stored in the atlas JSON. */
 export interface BmChar {

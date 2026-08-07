@@ -6,12 +6,12 @@
 // Horizontal text supports left-to-right and (mechanically mirrored) right-to-left; a vertical
 // orientation stacks glyphs top-to-bottom in right-to-left columns. Every run becomes one or
 // more materials (fill/gradient + per-letter stroke + coverage dilation) referenced by its
-// quads. Coordinates are the node's local space: +x right, +y up, the block's top-left at the
-// origin (horizontal lines descend to negative y; vertical columns extend to negative x).
+// quads. Coordinates are the node's local space: +x right, +y DOWN, the block's top-left at the
+// origin (horizontal lines descend to positive y; vertical columns extend to negative x).
 
 import type { Vector2Like } from '../math/Vector2'
 import { parseColor, parseStops } from '../render/color'
-import type {ColorInput, ColorStopInput, FillPriority, GradientStop, RGBA} from '../render/meshFormat'
+import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, RGBA} from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
 // From the metrics module, not from webgpu/FontBook which re-exports it: the shaper is pure
@@ -28,7 +28,7 @@ export interface TextGradient {
   startRadius?: number
   endRadius?: number
   /** Each stop's `color` accepts a string as well as the tuple. */
-  stops: ColorStopInput[]
+  stops: ColorStopsInput
 }
 
 /**
@@ -180,7 +180,10 @@ export interface ShapedText {
 const BLACK: RGBA = [0, 0, 0, 1]
 const ORIGIN: Vector2Like = { x: 0, y: 0 }
 const FAUX_BOLD_DILATE = 0.03 // fraction of font size, in world px
-const FAUX_ITALIC_SKEW = 0.24 // tangent of the shear angle
+// Tangent of the shear angle, negative because of which way the lean is measured: the shear
+// slides x by skew per unit of y about the baseline, an ascender sits at SMALLER y than the
+// baseline, and an italic leans its ascenders to the RIGHT.
+const FAUX_ITALIC_SKEW = -0.24
 
 // A run resolved to its atlas + materials, shared by every entry of the run.
 interface RunResolved {
@@ -258,6 +261,9 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
     const g = style.gradient
     let fillPriority: FillPriority = 'color'
     if (g) fillPriority = g.type === 'radial' ? 'radial-gradient' : 'linear-gradient'
+    // Parsed once and read twice - as the material's stop list, and as the fallback colour a
+    // run with a gradient but no `color` of its own draws in.
+    const stops = g ? parseStops(g.stops) : []
     const mainMaterial = materials.length
     materials.push({
       fillPriority,
@@ -265,7 +271,7 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       gradientStartRadius: g?.startRadius ?? 0,
       gradientEnd: g ? g.end : ORIGIN,
       gradientEndRadius: g?.endRadius ?? 0,
-      stops: g ? parseStops(g.stops) : [],
+      stops,
       strokeColor: style.strokeColor ? parseColor(style.strokeColor) : BLACK,
       strokeWidth: style.strokeColor ? (style.strokeWidth ?? 0) : 0,
       dilate: boldDilate,
@@ -293,7 +299,7 @@ function resolveRuns(runs: readonly TextRun[], fonts: FontProvider): ResolveResu
       baselineShift: style.baselineShift ?? 0,
       // Parsed here rather than where the style was written: this runs once per run when the
       // text is shaped, which is cached, so a string costs nothing per glyph or per frame.
-      color: style.color ? parseColor(style.color) : g?.stops[0] ? parseColor(g.stops[0].color) : BLACK,
+      color: style.color ? parseColor(style.color) : (stops[0]?.color ?? BLACK),
       underline: style.underline ?? false,
       strikethrough: style.strikethrough ?? false,
       highlight: style.highlight ? parseColor(style.highlight) : undefined,
@@ -464,7 +470,7 @@ function layoutHorizontal(
     }
     // The baseline is fixed by the (unshifted) ascent; a run's baselineShift then moves its
     // glyphs relative to it (a small super/subscript rides within the line's leading).
-    const baselineY = topY - ascent
+    const baselineY = topY + ascent
     if (li === 0) referenceBaseline = baselineY
 
     // Justify wrapped (non-final) lines by widening the inter-word spacers.
@@ -504,14 +510,14 @@ function layoutHorizontal(
     }
     flushSpan()
 
-    topY -= (ascent + descent) * lineHeightMult
+    topY += (ascent + descent) * lineHeightMult
   })
 
   return {
     quads: [...highlights, ...shadows, ...glows, ...glyphs, ...decorations],
     materials,
     width: blockWidth,
-    height: -topY,
+    height: topY,
     lineCount: lines.length,
     referenceBaseline,
   }
@@ -533,9 +539,9 @@ function emitGlyphStack(
     glows.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.glowMaterial, withOpacity(rr.glow.color, rr.glow.opacity), 0, 0))
   }
   if (rr.shadowMaterial >= 0 && rr.shadow) {
-    // offsetY is downward-positive; the scene is y-up, so the rotated vector's y is negated.
+    // offsetY is downward-positive, which is where +y points, so it carries through as it is.
     shadows.push(
-      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
+      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, rr.shadow.offsetY),
     )
   }
   glyphs.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, penYOffset, rr.mainMaterial, rr.color, 0, 0))
@@ -558,17 +564,19 @@ function makeGlyphQuad(
   // The bounding box below is that origin plus the glyph's extents; an outline consumer
   // wants the origin itself.
   const originX = penX + offX
-  const originY = baselineY + rr.baselineShift + penYOffset + offY
+  // baselineShift is +up by convention (a superscript is positive), and up is -y here.
+  const originY = baselineY - rr.baselineShift + penYOffset + offY
   const leftX = originX + g.xoffset * scale
-  const topGY = originY + (rr.metrics.base - g.yoffset) * scale
+  // The glyph's top edge, which in a y-down space is its SMALLER y.
+  const topGY = originY - (rr.metrics.base - g.yoffset) * scale
   return {
     material,
     atlasIndex: rr.atlasIndex,
     isGlyph: true,
     x0: leftX,
-    y0: topGY - g.height * scale,
+    y0: topGY,
     x1: leftX + g.width * scale,
-    y1: topGY,
+    y1: topGY + g.height * scale,
     u0: g.u0,
     v0: g.v0,
     u1: g.u1,
@@ -604,16 +612,16 @@ function emitRunDecorations(
   if (rr.highlight) {
     const ascent = rr.metrics.base * rr.scale
     const descent = (rr.metrics.lineHeight - rr.metrics.base) * rr.scale
-    solid(startX, baselineY - descent, endX, baselineY + ascent, rr.highlight, highlights)
+    solid(startX, baselineY - ascent, endX, baselineY + descent, rr.highlight, highlights)
   }
   const dec = rr.metrics.decoration
   if (rr.underline) {
-    const cy = baselineY + shift + dec.underlineOffset * rr.fontSize
+    const cy = baselineY - shift - dec.underlineOffset * rr.fontSize
     const th = dec.underlineThickness * rr.fontSize
     solid(startX, cy - th / 2, endX, cy + th / 2, rr.color, decorations)
   }
   if (rr.strikethrough) {
-    const cy = baselineY + shift + dec.strikeOffset * rr.fontSize
+    const cy = baselineY - shift - dec.strikeOffset * rr.fontSize
     const th = dec.strikeThickness * rr.fontSize
     solid(startX, cy - th / 2, endX, cy + th / 2, rr.color, decorations)
   }
@@ -665,14 +673,14 @@ function layoutVertical(
         // Center the glyph box on the column axis; place its cell baseline below the pen top.
         const centerX = columnX - columnWidth / 2
         const leftX = centerX - (e.glyph.width * scale) / 2 - e.glyph.xoffset * scale
-        const baselineY = penY - ascent
+        const baselineY = penY + ascent
         emitCenteredGlyph(rr, e.glyph, e.cp, leftX, baselineY, glyphs, shadows, glows)
-        penY -= step
+        penY += step
       } else if (e.rr >= 0) {
-        penY -= resolved[e.rr].metrics.lineHeight * resolved[e.rr].scale * lineHeightMult
+        penY += resolved[e.rr].metrics.lineHeight * resolved[e.rr].scale * lineHeightMult
       }
     }
-    maxDepth = Math.max(maxDepth, -penY)
+    maxDepth = Math.max(maxDepth, penY)
     columnX -= columnWidth * lineHeightMult
   }
 
@@ -693,7 +701,7 @@ function emitCenteredGlyph(rr: RunResolved, glyph: Glyph, codePoint: number, lef
   }
   if (rr.shadowMaterial >= 0 && rr.shadow) {
     shadows.push(
-      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, -rr.shadow.offsetY),
+      makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.shadowMaterial, withOpacity(rr.shadow.color, rr.shadow.opacity), rr.shadow.offsetX, rr.shadow.offsetY),
     )
   }
   glyphs.push(makeGlyphQuad(rr, glyph, codePoint, penX, baselineY, 0, rr.mainMaterial, rr.color, 0, 0))

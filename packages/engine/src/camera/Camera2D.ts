@@ -6,17 +6,19 @@
 //
 // WHAT IT IS. A rectangle of world, placed like any other rectangle in this engine:
 //
-//   x, y     the world point at the viewport's TOP-LEFT corner. The scene is y-up, so the
+//   x, y     the world point at the viewport's TOP-LEFT corner. The scene is y-down, so the
 //            view extends right and DOWNWARD from there - the same origin convention Rect,
 //            Image and MSDFText follow (see Shape's header).
 //   zoom     viewport pixels per world unit. 1 means one world unit is one CSS pixel.
-//   rotation radians, about the view's CENTRE, turning what you see counter-clockwise.
+//   rotation degrees, about the view's CENTRE. Positive turns the view clockwise on screen,
+//            the same sense a node's rotation turns a shape, so the content appears to turn
+//            counter-clockwise.
 //
 // A default camera therefore puts world (0, 0) at the top-left corner at 1:1 scale, which
 // is what a scene renders through when an application supplies no camera of its own.
 //
 // The visible world rectangle, before rotation, is x in [x, x + width/zoom] and y in
-// [y - height/zoom, y]; rotation turns that rectangle about its own middle, which is what
+// [y, y + height/zoom]; rotation turns that rectangle about its own middle, which is what
 // anyone turning a view expects (turning about the corner would swing the content away).
 //
 // WHY IT STILL BUILDS A 4x4. The projection could be two multiplies and an add, and
@@ -32,6 +34,7 @@
 // many physical pixels render each logical one. Callers pass the viewport's CSS size.
 
 import type { Vector2Like } from '../math/Vector2'
+import { degToRad } from '../math/angle'
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Ray } from '../math/Ray'
@@ -44,12 +47,15 @@ export interface Camera2DOptions {
   y?: number
   /** Viewport pixels per world unit; >1 magnifies. Default 1. */
   zoom?: number
-  /** Radians, about the view centre, turning the scene counter-clockwise. Default 0. */
+  /** Degrees, about the view centre, turning the view clockwise on screen. Default 0. */
   rotation?: number
 }
 
 /** Smallest zoom that still describes a view - guards a divide, not a policy. */
 const MIN_ZOOM = 1e-6
+
+/** Reflects clip-space y. Built once; see Camera2D.proj for what it is doing there. */
+const FLIP_Y = Matrix4x4.scaling(new Vector3(1, -1, 1))
 
 export class Camera2D {
   x: number
@@ -84,30 +90,48 @@ export class Camera2D {
    */
   center(viewportWidth: number, viewportHeight: number): Vector2Like {
     const { width, height } = this.viewSize(viewportWidth, viewportHeight)
-    return { x: this.x + width / 2, y: this.y - height / 2 }
+    return { x: this.x + width / 2, y: this.y + height / 2 }
   }
 
   /** Moves the camera so `worldX, worldY` sits at the middle of the view. */
   centerOn(worldX: number, worldY: number, viewportWidth: number, viewportHeight: number): void {
     const { width, height } = this.viewSize(viewportWidth, viewportHeight)
     this.x = worldX - width / 2
-    this.y = worldY + height / 2
+    this.y = worldY - height / 2
   }
 
   /**
-   * Looks straight down -Z at the view centre. Rotation is carried in the up vector: with
-   * up turned clockwise by `rotation`, the world appears turned counter-clockwise by it.
+   * Looks straight down -Z at the view centre. Rotation is carried in the up vector, which
+   * turns the view frame; the content therefore appears to turn the other way. proj() mirrors
+   * y after this, so a positive `rotation` reads clockwise on screen - the same sense a node's
+   * rotation turns a shape.
    */
   view(viewportWidth: number, viewportHeight: number): Matrix4x4 {
     const c = this.center(viewportWidth, viewportHeight)
-    const up = new Vector3(Math.sin(this.rotation), Math.cos(this.rotation), 0)
+    const radians = degToRad(this.rotation)
+    const up = new Vector3(Math.sin(radians), Math.cos(radians), 0)
     return Matrix4x4.lookAtRH(new Vector3(c.x, c.y, 1), new Vector3(c.x, c.y, 0), up)
   }
 
-  /** Orthographic, sized by the world rectangle the viewport covers at this zoom. */
+  /**
+   * Orthographic, sized by the world rectangle the viewport covers at this zoom, and MIRRORED
+   * IN Y.
+   *
+   * This is the one place the scene's vertical direction is decided. The scene is y-down, so
+   * +y is toward the bottom of the viewport, while clip space puts +y at the top - hence the
+   * mirror. It cannot live in view() instead: lookToRH builds an orthonormal basis out of the
+   * up vector, so pointing `up` downward turns the whole frame about Z rather than reflecting
+   * it, and x would come out backwards with y.
+   *
+   * A reflection reverses the winding of every triangle that passes through it. Nothing reads
+   * winding to decide whether to draw - every pipeline sets cullMode 'none' - and the two
+   * places that read it to decide GEOMETRY, stroke sides and hole classification, take the
+   * ring's shoelace sign and its edge normals together, which reverse with it and cancel (see
+   * the mirror checks in orientation.test.ts).
+   */
   proj(viewportWidth: number, viewportHeight: number): Matrix4x4 {
     const { width, height } = this.viewSize(viewportWidth, viewportHeight)
-    return Matrix4x4.orthographicRH(width, height, this.nearZ, this.farZ)
+    return FLIP_Y.mul(Matrix4x4.orthographicRH(width, height, this.nearZ, this.farZ))
   }
 
   /** Column-vector view-projection: clip = viewProjection * world. */

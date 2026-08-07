@@ -64,12 +64,18 @@ export class Image extends Shape {
   filter: ImageFilter
 
   private tintValue: RGBA = [1, 1, 1, 1]
+  private tintWritten: ColorInput = [1, 1, 1, 1]
   /** Multiplied into every sampled texel. Accepts a string as well as the tuple - see Shape.fill. */
   get tint(): RGBA {
     return this.tintValue
   }
   set tint(value: ColorInput) {
     this.tintValue = parseColor(value)
+    this.tintWritten = value
+  }
+  /** What tint was last assigned, in the form it was written. See Shape.fillInput. */
+  get tintInput(): ColorInput {
+    return this.tintWritten
   }
 
   constructor(options: ImageOptions) {
@@ -132,11 +138,11 @@ export class Image extends Shape {
    * picking, bounds and the shadow silhouette something real to work from. See the header.
    */
   protected override buildGeometry(sink: MeshSink): void {
-    // The origin is the picture's top-left corner and the scene is y-up, so the quad hangs
+    // The origin is the picture's top-left corner and the scene is y-down, so the quad hangs
     // below it. ImageBatcher lays the drawn quad out over exactly this rectangle - the two
     // have to agree, or the pixels and the hit test would describe different places.
     const w = this.width
-    const b = -this.height
+    const b = this.height
     const p0 = sink.vertex(0, b, true)
     const p1 = sink.vertex(w, b, true)
     const p2 = sink.vertex(w, 0, true)

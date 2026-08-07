@@ -133,7 +133,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'svg',
     title: 'SVG document',
     description:
-      'loadSvgDocument() turning a document into Path nodes under one container: an even-odd hole, linear and radial gradient fills, and a stroked open curve - so the loader and the tessellation/stroke geometry are exercised together. rootMatrix flips y, since SVG is y-down and the scene is y-up.',
+      'loadSvgDocument() turning a document into Path nodes under one container: an even-odd hole, linear and radial gradient fills, and a stroked open curve - so the loader and the tessellation/stroke geometry are exercised together. rootMatrix only scales and places, since SVG is y-down and so is the scene.',
     build: buildSvgScene,
   },
   {

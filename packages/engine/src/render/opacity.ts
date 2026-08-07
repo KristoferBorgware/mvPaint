@@ -35,11 +35,15 @@ import type { MeshMaterial } from './meshFormat'
  *
  * The stroke is checked whether or not the shape actually strokes anything, since a
  * material carries no stroke WIDTH (see MeshMaterial) and the fallback has to be the safe
- * one. It costs nothing in practice: an unstroked shape keeps the default opaque black.
+ * one. A shape with no stroke COLOUR emits no stroke fragments at all, so it is passed
+ * over rather than counted against.
  */
 export function isOpaqueMaterial(material: MeshMaterial): boolean {
-  if (material.stroke[3] < 1) return false
-  if (material.fillPriority === 'color') return material.fill[3] >= 1
+  if (material.stroke !== null && material.stroke[3] < 1) return false
+  // Nothing to fill with means every fill fragment comes out transparent, which is the one
+  // thing an opaque object may not do - see FillPriority's 'none'.
+  if (material.fillPriority === 'none') return false
+  if (material.fillPriority === 'color') return material.fill !== null && material.fill[3] >= 1
 
   const stops =
     material.fillPriority === 'linear-gradient'

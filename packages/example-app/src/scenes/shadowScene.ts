@@ -30,7 +30,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'shadow-title',
       x: -430,
-      y: 330,
+      y: -330,
       text: 'Shadows',
       style: { fontStyle: 'bold', fontSize: 44, color: DARK },
     }),
@@ -50,7 +50,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
         name: `card-${i}`,
         // A Rect's position is its top-left corner, so the card hangs down and right of it.
         x: -390 + i * 130,
-        y: 230 - i * 40,
+        y: -230 + i * 40,
         width: 260,
         height: 180,
         fill: CARD_FILL[i],
@@ -61,17 +61,17 @@ export function buildShadowScene(scene: Scene): SceneContent {
       }),
     )
   }
-  label(scene, -430, 260, 'Overlapping: each shadow falls on the card behind it')
+  label(scene, -430, -260, 'Overlapping: each shadow falls on the card behind it')
 
   // --- one parameter at a time ----------------------------------------------------------
-  const y = -140
-  label(scene, -430, y + 106, 'Offset only, then blur, then spread, then fill-only')
+  const y = 140
+  label(scene, -430, y - 106, 'Offset only, then blur, then spread, then fill-only')
 
   root.addChild(
     new Rect({
       name: 'shadow-offset-only',
       x: -415,
-      y: y + 65,
+      y: y - 65,
       width: 130,
       height: 130,
       fill: '#d9d9e0',
@@ -86,7 +86,7 @@ export function buildShadowScene(scene: Scene): SceneContent {
     new Rect({
       name: 'shadow-blur',
       x: -225,
-      y: y + 65,
+      y: y - 65,
       width: 130,
       height: 130,
       fill: '#d9d9e0',
@@ -138,10 +138,10 @@ export function buildShadowScene(scene: Scene): SceneContent {
     new Polyline({
       name: 'shadow-polyline',
       points: [
-        { x: 360, y: y - 60 },
-        { x: 420, y: y + 40 },
-        { x: 480, y: y - 40 },
-        { x: 540, y: y + 60 },
+        { x: 360, y: y + 60 },
+        { x: 420, y: y - 40 },
+        { x: 480, y: y + 40 },
+        { x: 540, y: y - 60 },
       ],
       closed: false,
       stroke: '#734cbf',

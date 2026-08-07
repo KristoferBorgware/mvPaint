@@ -143,8 +143,8 @@ export function shadowQuadBounds(
 /**
  * The canvas 2D shadow offset semantics: the offset scales with the node's absolute scale
  * but is NOT turned by its rotation (a canvas shadow's offset is applied in device space,
- * outside the current transform). `offsetY` is downward-positive, so it flips against this
- * scene's y-up axis.
+ * outside the current transform). `offsetY` is downward-positive, which is the direction +y
+ * already points in this scene, so it carries through unchanged.
  *
  * `scaleX`/`scaleY` are the world matrix's axis lengths - see worldAxisScale.
  */
@@ -154,7 +154,7 @@ export function shadowWorldOffset(
   scaleX: number,
   scaleY: number,
 ): Vector2Like {
-  return { x: offsetX * scaleX, y: -offsetY * scaleY }
+  return { x: offsetX * scaleX, y: offsetY * scaleY }
 }
 
 /**

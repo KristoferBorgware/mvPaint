@@ -15,6 +15,7 @@
 export * from './core'
 
 export * from './math/AABB'
+export * from './math/angle'
 export * from './math/Matrix4x4'
 export * from './math/Quaternion'
 export * from './math/Ray'

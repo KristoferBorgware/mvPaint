@@ -22,7 +22,7 @@ export function buildShapesScene(scene: Scene): SceneContent {
       width: 160,
       height: 160,
       offsetX: 80,
-      offsetY: -80,
+      offsetY: 80,
       fill: '#e6473d',
       stroke: '#801a14',
       strokeWidth: 6,
@@ -32,7 +32,7 @@ export function buildShapesScene(scene: Scene): SceneContent {
   // space - it moves and rotates with the rect.
   left.fillPriority = 'linear-gradient'
   // Local space runs [0, width] x [-height, 0], so the diagonal is bottom-left to top-right.
-  left.fillLinearGradientStartPoint = { x: 0, y: -160 }
+  left.fillLinearGradientStartPoint = { x: 0, y: 160 }
   left.fillLinearGradientEndPoint = { x: 160, y: 0 }
   left.fillLinearGradientColorStops = [
     { offset: 0, color: '#ffe64c' },
@@ -46,7 +46,7 @@ export function buildShapesScene(scene: Scene): SceneContent {
       width: 200,
       height: 130,
       offsetX: 100,
-      offsetY: -65,
+      offsetY: 65,
       fill: '#3373e6',
       stroke: '#142e80',
       strokeWidth: 6,
@@ -86,11 +86,11 @@ export function buildShapesScene(scene: Scene): SceneContent {
     new Polyline({
       name: 'zigzag',
       points: [
-        { x: -180, y: -180 },
-        { x: -90, y: -120 },
-        { x: 0, y: -180 },
-        { x: 90, y: -120 },
-        { x: 180, y: -180 },
+        { x: -180, y: 180 },
+        { x: -90, y: 120 },
+        { x: 0, y: 180 },
+        { x: 90, y: 120 },
+        { x: 180, y: 180 },
       ],
       stroke: '#8c59d9',
       strokeWidth: 14,
@@ -116,7 +116,7 @@ export function buildShapesScene(scene: Scene): SceneContent {
       new Rect({
         name: `rounded-${i}`,
         x: spec.x,
-        y: -230,
+        y: 230,
         width: 130,
         height: 90,
         cornerRadius: spec.cornerRadius,
@@ -134,8 +134,8 @@ export function buildShapesScene(scene: Scene): SceneContent {
   return {
     onFrame: (dt, speed) => {
       if (speed <= 0) return
-      angle += dt * speed
-      for (const [rect, spinScale] of spins) rect.rotation = angle * spinScale
+      angle += dt * speed * 60
+      for (const [rect, spinScale] of spins) rect.rotation = -angle * spinScale
     },
   }
 }

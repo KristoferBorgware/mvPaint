@@ -39,6 +39,7 @@
 // the set never changes, so selecting/deselecting costs nothing beyond these few quads.
 
 import type { Vector2Like } from '../math/Vector2'
+import { radToDeg } from '../math/angle'
 import { Container } from './Container'
 import { Circle } from './Circle'
 import { Rect } from './Rect'
@@ -191,7 +192,7 @@ export class Transformer extends Container {
    */
   private makeEdge(name: string, fill: RGBA): Rect {
     return this.adopt(
-      new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...fill], strokeWidth: 0, zIndex: TRANSFORMER_Z_INDEX, scaleX: 0, scaleY: 0 }),
+      new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: 0.5, fill: [...fill], strokeWidth: 0, zIndex: TRANSFORMER_Z_INDEX, scaleX: 0, scaleY: 0 }),
     )
   }
 
@@ -365,8 +366,8 @@ export class Transformer extends Container {
 
     // Four edge bars, each spanning one side of the frame. Overlapping at the corners by
     // the bar thickness is what closes them cleanly.
-    this.placeEdge('top', framed, 0, framed.halfH, fullW + thickness, thickness)
-    this.placeEdge('bottom', framed, 0, -framed.halfH, fullW + thickness, thickness)
+    this.placeEdge('top', framed, 0, -framed.halfH, fullW + thickness, thickness)
+    this.placeEdge('bottom', framed, 0, framed.halfH, fullW + thickness, thickness)
     this.placeEdge('left', framed, -framed.halfW, 0, thickness, fullH + thickness)
     this.placeEdge('right', framed, framed.halfW, 0, thickness, fullH + thickness)
 
@@ -434,7 +435,8 @@ export class Transformer extends Container {
     const s = Math.sin(box.rotation)
     rect.x = box.cx + localX * c - localY * s
     rect.y = box.cy + localX * s + localY * c
-    rect.rotation = box.rotation
+    // The box carries radians, a node's rotation is degrees - see math/angle.ts.
+    rect.rotation = radToDeg(box.rotation)
     rect.scaleX = width
     rect.scaleY = height
   }

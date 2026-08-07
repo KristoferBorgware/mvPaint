@@ -57,7 +57,7 @@ export class Circle extends Shape {
     } else if (options.height !== undefined) {
       this.radius = options.height / 2
     } else {
-      this.radius = 1
+      this.radius = 0
     }
     // A rim approximated by straight segments needs round joins to look like a smooth
     // circle (Shape's 'miter' default would facet visibly at each segment), so override
@@ -101,7 +101,7 @@ export class Circle extends Shape {
       sink.triangle(center, rimIdx[i], rimIdx[(i + 1) % n])
     }
 
-    if (this.strokeWidth > 0) {
+    if (this.hasStroke()) {
       strokePolyline(rim, sink, {
         width: this.strokeWidth,
         closed: true,

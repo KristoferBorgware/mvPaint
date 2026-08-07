@@ -42,7 +42,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'vector-stress-title',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 70,
+      y: -(layout.gridTop + 70),
       text: `Outline text: ${PAGE_COUNT} pages, ${layout.wordCount.toLocaleString()} words, no atlas`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
@@ -51,7 +51,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'vector-stress-note',
       x: -PAGE_WIDTH,
-      y: layout.gridTop + 26,
+      y: -(layout.gridTop + 26),
       text: 'Every glyph is a real triangulated outline - tessellated once, cached, and never re-blurred.',
       style: { fontSize: 17, color: SLATE },
     }),

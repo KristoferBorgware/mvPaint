@@ -67,19 +67,19 @@ const COLUMN_X = 265
  * heading above it and two notes below, and they are not the same height. This offset is what
  * puts the WHOLE thing about the origin, which is where the app's camera looks.
  */
-const GRID_CENTER_Y = 45
+const GRID_CENTER_Y = -45
 const ROW_OFFSET = 205
 
 /** Caption top above a box's centre, and where the stats lines start below it. */
-const CAPTION_Y = 150
-const STATS_Y = -133
+const CAPTION_Y = -150
+const STATS_Y = 133
 const STATS_LINE = 24
 
 /** The heading above the grid, and the two notes under it. */
-const TITLE_Y = 515
-const SUBTITLE_Y = 469
-const COVERAGE_NOTE_Y = -375
-const ZOOM_NOTE_Y = -489
+const TITLE_Y = -515
+const SUBTITLE_Y = -469
+const COVERAGE_NOTE_Y = 375
+const ZOOM_NOTE_Y = 489
 /** Both columns of one row, which is what the full-width paragraphs wrap against. */
 const GRID_WIDTH = 2 * COLUMN_X + BOX
 
@@ -121,7 +121,7 @@ function fitToBox(width: number, height: number): { scale: number; width: number
 function cellCenter(column: number, row: number): { x: number; y: number } {
   return {
     x: column === 0 ? -COLUMN_X : COLUMN_X,
-    y: GRID_CENTER_Y + (row === 0 ? ROW_OFFSET : -ROW_OFFSET),
+    y: GRID_CENTER_Y + (row === 0 ? -ROW_OFFSET : ROW_OFFSET),
   }
 }
 
@@ -169,17 +169,17 @@ function loadVector(asset: AssetSpec, center: { x: number; y: number }): VectorL
   const rect = documentRect(asset.svg, asset.title)
   const { scale } = fitToBox(rect.width, rect.height)
 
-  // SVG is y-down and the scene is y-up, so d is negated; e and f then put the middle of the
-  // document's own rectangle at the middle of the cell.
+  // SVG is y-down and so is the scene, so the matrix only scales; e and f then put the
+  // middle of the document's own rectangle at the middle of the cell.
   const parseStart = performance.now()
   const doc = loadSvgDocument(asset.svg, {
     rootMatrix: [
       scale,
       0,
       0,
-      -scale,
+      scale,
       center.x - (rect.x + rect.width / 2) * scale,
-      center.y + (rect.y + rect.height / 2) * scale,
+      center.y - (rect.y + rect.height / 2) * scale,
     ],
   })
   const parseMs = performance.now() - parseStart
@@ -255,7 +255,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
         new MSDFText({
           name: `svg-stress-stat-${key}-${i}`,
           x,
-          y: y + STATS_Y - i * STATS_LINE,
+          y: y + STATS_Y + i * STATS_LINE,
           text: line,
           style: { fontSize: 15, color: SLATE },
         }),
@@ -270,7 +270,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
         new Rect({
           name: `svg-stress-frame-${row}-${column}`,
           x: center.x - BOX / 2,
-          y: center.y + BOX / 2,
+          y: center.y - BOX / 2,
           width: BOX,
           height: BOX,
           fill: 'transparent',
@@ -315,7 +315,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
         name: `svg-stress-image-${asset.key}`,
         texture: raster.texture,
         x: right.x - fitted.width / 2,
-        y: right.y + fitted.height / 2,
+        y: right.y - fitted.height / 2,
         width: fitted.width,
         height: fitted.height,
       }),

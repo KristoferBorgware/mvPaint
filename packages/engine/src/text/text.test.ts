@@ -325,7 +325,7 @@ it('hard breaks: \'\\n\' forces a new line, and later lines sit lower (smaller y
     const glyphQuads = shaped.quads.filter((q) => q.isGlyph)
     assert(shaped.lineCount === 2, "'\\n' forces a second line")
     assert(glyphQuads.length === 2, 'two glyphs across the two lines')
-    assert(glyphQuads[1].y1 < glyphQuads[0].y1, 'the second line is below the first (y-up)')
+    assert(glyphQuads[1].y1 > glyphQuads[0].y1, 'the second line is below the first (y-down)')
 })
 
 it('alignment: right/center shift the first glyph rightward vs. left alignment', () => {
@@ -396,7 +396,7 @@ it('baseline shift raises a superscript run and lowers a subscript run', () => {
     const base = layoutText([run('x', { fontSize: 30 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
     const sup = layoutText([run('x', { fontSize: 30, baselineShift: 12 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
     const sub = layoutText([run('x', { fontSize: 30, baselineShift: -12 })], {}, fonts).quads.filter((q) => q.isGlyph)[0]
-    assert(sup.y1 > base.y1 && sub.y1 < base.y1, 'superscript sits above the baseline, subscript below')
+    assert(sup.y1 < base.y1 && sub.y1 > base.y1, 'superscript sits above the baseline (smaller y), subscript below')
 })
 
 it('justify: a wrapped (non-final) line stretches to fill the max width', () => {
@@ -419,12 +419,14 @@ it('faux bold / italic: synthesized from the regular-only provider and via expli
     assert(fauxBold.materials[0].dilate > 0, 'a missing bold style is synthesized with coverage dilation')
 
     const fauxItalic = layoutText([run('I', { fontStyle: 'italic', fontSize: 40 })], {}, regularOnly)
-    assert(fauxItalic.quads.filter((q) => q.isGlyph)[0].skew > 0, 'a missing italic style is synthesized with shear')
+    // The shear slides x per unit of y about the baseline; an ascender is at SMALLER y, so a
+    // rightward lean is a NEGATIVE slope. See FAUX_ITALIC_SKEW.
+    assert(fauxItalic.quads.filter((q) => q.isGlyph)[0].skew < 0, 'a missing italic style is synthesized with shear')
 
     // Explicit flags synthesize on top of a present atlas (e.g. faux bold-italic from italic).
     const explicit = layoutText([run('x', { fontStyle: 'italic', fontSize: 40, fauxBold: true, fauxItalic: true })], {}, fonts)
     assert(explicit.materials[0].dilate > 0, 'fauxBold flag adds dilation')
-    assert(explicit.quads.filter((q) => q.isGlyph)[0].skew > 0, 'fauxItalic flag adds shear')
+    assert(explicit.quads.filter((q) => q.isGlyph)[0].skew < 0, 'fauxItalic flag adds shear')
 })
 
 it('drop shadow + soft glow: extra materials and extra glyph quads behind the body', () => {
@@ -443,11 +445,11 @@ it('drop shadow + soft glow: extra materials and extra glyph quads behind the bo
     const shadowMaterial = shadowed.materials[shadowed.materials.length - 1]
     assert(shadowMaterial.dilate === 0, "a text shadow doesn't dilate coverage - it's a duplicate, not a blur")
 
-    // offsetY is downward-positive, matching Shape's shadowOffsetY, so it moves the copy to
-    // a LOWER local y in this y-up scene.
+    // offsetY is downward-positive, matching Shape's shadowOffsetY, which is the direction +y
+    // already points here.
     const shadowQuad = shadowed.quads.find((q) => q.isGlyph && q.material === 1)!
     assert(Math.abs(shadowQuad.x0 - (plainQuad.x0 + 3)) < 1e-6, 'shadow offsetX shifts the duplicate right')
-    assert(Math.abs(shadowQuad.y0 - (plainQuad.y0 - 3)) < 1e-6, 'shadow offsetY is downward-positive')
+    assert(Math.abs(shadowQuad.y0 - (plainQuad.y0 + 3)) < 1e-6, 'shadow offsetY is downward-positive')
 
     const glowed = layoutText([run('g', { fontSize: 40, glow: { color: [1, 1, 0, 1], radius: 4 } })], {}, fonts)
     assert(glowed.materials.some((m) => m.dilate >= 4), 'the glow material carries the spread radius')
@@ -479,7 +481,7 @@ it('vertical: glyphs stack downward, later columns sit to the left', () => {
     const g = v.quads.filter((q) => q.isGlyph) // emitted column-by-column, top-to-bottom: a,b,c,d
     assert(v.lineCount === 2, 'a vertical block splits into columns on newline')
     assert(g.length === 4, 'four glyphs across two columns')
-    assert(g[1].y1 < g[0].y1, 'vertical glyphs stack top-to-bottom within a column')
+    assert(g[1].y1 > g[0].y1, 'vertical glyphs stack top-to-bottom within a column')
     assert(g[2].x0 < g[0].x0, 'later columns sit to the left of earlier ones')
 })
 
@@ -588,7 +590,7 @@ it('the same shaper, driven by outlines instead of an atlas', () => {
     const glyph = viaOutlines.quads.find((q) => q.isGlyph)!
     assert(glyph.codePoint === 'W'.codePointAt(0), 'a glyph quad records its code point')
     assert(glyph.unitScale > 0 && Math.abs(glyph.unitScale - 40 / regularVector.metrics.size) < 1e-9, 'unitScale converts font units to local units')
-    assert(glyph.originY < glyph.y1, 'the pen origin sits below the top of the glyph box')
+    assert(glyph.originY > glyph.y0, 'the pen origin sits below the top of the glyph box')
 })
 
 const recordGeometry = (shape: VectorText) => {
@@ -730,8 +732,8 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     const plain = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40 } }] })
     const raised = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: 15 } }] })
     const lowered = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: -15 } }] })
-    assert(Math.abs(boundsOf(raised).y0 - (boundsOf(plain).y0 + 15)) < 1e-6, 'a positive baseline shift lifts the outline by exactly that much')
-    assert(Math.abs(boundsOf(lowered).y0 - (boundsOf(plain).y0 - 15)) < 1e-6, 'a negative baseline shift drops it')
+    assert(Math.abs(boundsOf(raised).y0 - (boundsOf(plain).y0 - 15)) < 1e-6, 'a positive baseline shift lifts the outline by exactly that much')
+    assert(Math.abs(boundsOf(lowered).y0 - (boundsOf(plain).y0 + 15)) < 1e-6, 'a negative baseline shift drops it')
     assert(Math.abs(boundsOf(raised).x0 - boundsOf(plain).x0) < 1e-6, 'and moves it vertically only')
 
     // A superscript run rides above its neighbour without disturbing the pen.
@@ -744,7 +746,7 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     })
     const glyphs = superscript.shaped().quads.filter((q) => q.isGlyph)
     assert(glyphs.length === 2, 'both runs contribute a glyph')
-    assert(glyphs[1].originY > glyphs[0].originY, 'the shifted run sits above the baseline of the one before it')
+    assert(glyphs[1].originY < glyphs[0].originY, 'the shifted run sits above (at a smaller y than) the baseline of the one before it')
     assert(glyphs[1].originX > glyphs[0].originX, 'and after it, so the shift is vertical only')
 
     // Alignment offsets the geometry within the block; justify stretches to fill it.
@@ -766,7 +768,7 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     assert(vertical.shaped().lineCount === 2, 'a newline starts a second column')
     assert(recordGeometry(vertical).verts.length === recordGeometry(horizontal).verts.length, 'the same four glyphs are tessellated either way')
     const columnQuads = vertical.shaped().quads.filter((q) => q.isGlyph)
-    assert(columnQuads[1].originY < columnQuads[0].originY, 'glyphs stack top-to-bottom within a column')
+    assert(columnQuads[1].originY > columnQuads[0].originY, 'glyphs stack top-to-bottom within a column')
     assert(columnQuads[2].originX < columnQuads[0].originX, 'the second column sits to the left of the first')
     assert(boundsOf(vertical).x1 <= 0, 'the block extends leftward from its origin')
 
@@ -911,7 +913,7 @@ it('arcs and circles', () => {
     // The default arrangement is the one that reads across the top with the letters standing
     // up off the outside: distance 0 at the top, running towards +x, normal pointing outward.
     const top = circle.sampleAt(0)!
-    assert(near(top.x, 0, 1e-9) && near(top.y, 200), 'distance 0 is the top of the circle')
+    assert(near(top.x, 0, 1e-9) && near(top.y, -200), 'distance 0 is the top of the circle')
     assert(Math.abs(top.angle) < 0.05, 'where the curve runs left to right')
     const normalY = Math.cos(top.angle)
     assert(normalY > 0, "so a glyph's up direction points away from the centre")
@@ -934,12 +936,12 @@ it('glyphs land on the curve', () => {
     // sides of the y axis and stays in the upper half.
     const xs = glyphs.map((q) => baselineMidpoint(q).x)
     assert(Math.min(...xs) < 0 && Math.max(...xs) > 0, 'centring puts half the text either side of the top')
-    assert(glyphs.every((q) => baselineMidpoint(q).y > 0), 'and all of it in the top half of the circle')
+    assert(glyphs.every((q) => baselineMidpoint(q).y < 0), 'and all of it in the top half of the circle')
 
     // Each glyph is turned to its own place on the curve; the first and last differ most.
     const rotations = glyphs.map((q) => q.rotation)
     assert(new Set(rotations.map((r) => r.toFixed(4))).size === rotations.length, 'every glyph has its own rotation')
-    assert(rotations[0] > rotations[rotations.length - 1], 'turning steadily clockwise from first to last')
+    assert(rotations[0] < rotations[rotations.length - 1], 'turning steadily clockwise from first to last')
     assert(Math.abs(rotations[0] - rotations[rotations.length - 1]) > 0.5, 'over a substantial arc')
 })
 
@@ -1002,8 +1004,9 @@ it('startOffset, align and side', () => {
     const outside = glyphsOf({ textPath: { path, align: 'center' } })
     const inside = glyphsOf({ textPath: { path, align: 'center', side: 'right' } })
     assert(Math.cos(outside[0].rotation) * Math.cos(inside[0].rotation) < 0.99, "'right' turns the text over")
-    assert(inside.every((q) => baselineMidpoint(q).y > 0), 'both sides still sit at the top of the circle')
-    const ascenderOut = (q: BentQuad) => radiusOf(quadCorner(q, (q.x0 + q.x1) / 2, q.y1))
+    assert(inside.every((q) => baselineMidpoint(q).y < 0), 'both sides still sit at the top of the circle')
+    // y0 is the quad's top edge, so it is the ascender end in a y-down space.
+    const ascenderOut = (q: BentQuad) => radiusOf(quadCorner(q, (q.x0 + q.x1) / 2, q.y0))
     assert(ascenderOut(outside[0]) > 200, 'set on the left of the curve, a glyph reaches outward')
     assert(ascenderOut(inside[0]) < 200, 'set on the right, it reaches inward')
 })

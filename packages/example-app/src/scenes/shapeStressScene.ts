@@ -65,7 +65,7 @@ function regularPolygonPoints(sides: number, radius: number): Vector2Like[] {
   const points: Vector2Like[] = []
   for (let i = 0; i < sides; i++) {
     const a = (i / sides) * Math.PI * 2 - Math.PI / 2
-    points.push({ x: Math.cos(a) * radius, y: Math.sin(a) * radius })
+    points.push({ x: Math.cos(a) * radius, y: -Math.sin(a) * radius })
   }
   return points
 }
@@ -75,7 +75,7 @@ function starPoints(spikes: number, outerRadius: number, innerRadius: number): V
   for (let i = 0; i < spikes * 2; i++) {
     const r = i % 2 === 0 ? outerRadius : innerRadius
     const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2
-    points.push({ x: Math.cos(a) * r, y: Math.sin(a) * r })
+    points.push({ x: Math.cos(a) * r, y: -Math.sin(a) * r })
   }
   return points
 }
@@ -87,7 +87,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
     const kind = pick(KINDS)
     const x = randomBetween(-FIELD_HALF_WIDTH, FIELD_HALF_WIDTH)
     const y = randomBetween(-FIELD_HALF_HEIGHT, FIELD_HALF_HEIGHT)
-    const rotation = Math.random() * Math.PI * 2
+    const rotation = Math.random() * 360
 
     const shared = {
       name: `shape-stress-${i}`,
@@ -139,7 +139,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
       // Clear of the field, not of its centres: FIELD_HALF_HEIGHT bounds where a shape is
       // PUT, and it then draws its own radius on top of that - up to another ~70 once the
       // random per-axis scale is in. Both lines here start above that.
-      y: FIELD_HALF_HEIGHT + 154,
+      y: -(FIELD_HALF_HEIGHT + 154),
       text: `${COUNT} shapes, no shadows`,
       style: { fontStyle: 'bold', fontSize: 32, color: DARK },
     }),
@@ -148,7 +148,7 @@ export function buildShapeStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'shape-stress-note',
       x: -FIELD_HALF_WIDTH,
-      y: FIELD_HALF_HEIGHT + 110,
+      y: -(FIELD_HALF_HEIGHT + 110),
       text: 'Random size, rotation and colour across rects, circles, polygons and stars - solid fill only, no stroke or alpha.',
       style: { fontSize: 17, color: SLATE },
     }),

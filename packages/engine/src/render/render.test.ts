@@ -18,6 +18,7 @@ import { Polyline, type PolylineOptions } from '../shapes/Polyline'
 import { Path } from '../shapes/Path'
 import {
   FILL_TYPE_CODE,
+  type FillPriority,
   MAX_GRADIENT_STOPS,
   MESH_VERTEX_STRIDE,
   OBJECT_DEPTH_OFFSET,
@@ -35,7 +36,7 @@ import {strokeContours, strokePolyline, type LineCap, type StrokeAlign} from './
 import { signedArea } from './contours'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
-import { parseColor } from './color'
+import { parseColor, parseStops, type ColorInput, type ColorStopsInput } from './color'
 import { MAX_CAPTURE_PIXELS, flipRows, paddedBytesPerRow, resolveCapture, unpadRows } from './capture'
 import { IMAGE_OBJECT_DEPTH_OFFSET, IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE, IMAGE_OBJECT_TINT_OFFSET } from './imageFormat'
 import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
@@ -75,6 +76,7 @@ import {
 } from './shadowFormat'
 import { Shape } from '../shapes/Shape'
 import { hitTestShape } from '../scene/picking'
+import { degToRad } from '../math/angle'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
@@ -129,7 +131,7 @@ const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) <= eps
  * which is the frame the geometry below is written in.
  */
 const centredRect = (options: RectOptions = {}): Rect =>
-  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: -(options.height ?? 1) / 2 })
+  new Rect({ ...options, offsetX: (options.width ?? 1) / 2, offsetY: (options.height ?? 1) / 2 })
 
 const hasVertexNear = (verts: CapturedVertex[], x: number, y: number, eps = 1e-6) =>
   verts.some((v) => near(v.x, x, eps) && near(v.y, y, eps))
@@ -157,15 +159,15 @@ it('stroked rect: fill (4v/2t) + a 4-corner miter-joined contour', () => {
 
     // Fill verts (still emitted first, unchanged) carry no color of their own - just marked
     // isFill (gradient-eligible). A Rect hangs from its top-left corner at the local origin,
-    // so it spans x in [0, width] and y in [-height, 0]. The shape's fill/stroke colors are
+    // so it spans x in [0, width] and y in [0, height]. The shape's fill/stroke colors are
     // read from the object buffer at fragment time, not from vertex data.
     assert(verts.slice(0, 4).every((v) => v.isFill), 'first 4 verts are marked isFill')
-    assert(near(verts[0].x, 0) && near(verts[0].y, -2), 'fill corner at the bottom-left, (0,-height)')
+    assert(near(verts[0].x, 0) && near(verts[0].y, 2), 'fill corner at the bottom-left, (0,height)')
     assert(near(verts[2].x, 4) && near(verts[2].y, 0), 'fill corner at the top-right, (width,0)')
     const xs = verts.slice(0, 4).map((v) => v.x)
     const ys = verts.slice(0, 4).map((v) => v.y)
     assert(Math.min(...xs) === 0 && Math.max(...xs) === 4, 'the fill starts at x=0 and runs right')
-    assert(Math.max(...ys) === 0 && Math.min(...ys) === -2, 'and starts at y=0 and hangs downward')
+    assert(Math.min(...ys) === 0 && Math.max(...ys) === 2, 'and starts at y=0 and hangs downward')
     assert(verts.slice(4).every((v) => !v.isFill), 'stroke verts are never marked isFill (no gradient on stroke)')
     assert(rect.fill === fill && rect.stroke === stroke, 'the shape retains the fill/stroke colors it was constructed with')
 
@@ -174,8 +176,8 @@ it('stroked rect: fill (4v/2t) + a 4-corner miter-joined contour', () => {
     // via the general engine. The concave (inner) side is the documented simplification
     // (fills to the original path point rather than a true inner-miter intersection), so
     // it lands at each edge's own per-normal offset instead of a symmetric diagonal point.
-    // Corners are (0,0), (4,0), (4,-2), (0,-2) - the rectangle hangs from its origin.
-    assert(hasVertexNear(verts, -0.2, -2.2), 'outer miter corner at the bottom-left corner + sw/2 on both axes')
+    // Corners are (0,0), (4,0), (4,2), (0,2) - the rectangle hangs from its origin.
+    assert(hasVertexNear(verts, -0.2, 2.2), 'outer miter corner at the bottom-left corner + sw/2 on both axes')
     assert(hasVertexNear(verts, 3.8, 0.0), 'inner offset along one edge at the top-right corner')
     assert(hasVertexNear(verts, 4.0, -0.2), 'inner offset along the other edge at the top-right corner')
 })
@@ -204,15 +206,15 @@ it('rounded rect: the corners become arcs, and the outline still spans the same 
     const xs = verts.map((v) => v.x)
     const ys = verts.map((v) => v.y)
     assert(near(Math.min(...xs), 0) && near(Math.max(...xs), 8), 'still spans x in [0, width]')
-    assert(near(Math.min(...ys), -6) && near(Math.max(...ys), 0), 'and y in [-height, 0]')
-    assert(near(rect.localBounds().min.x, 0) && near(rect.localBounds().max.y, 0), 'so the bounds are unchanged too')
+    assert(near(Math.min(...ys), 0) && near(Math.max(...ys), 6), 'and y in [0, height]')
+    assert(near(rect.localBounds().min.x, 0) && near(rect.localBounds().min.y, 0), 'so the bounds are unchanged too')
 
     // ...and the square corners themselves are gone: nothing sits within the radius of them.
     const square = [
       { x: 0, y: 0 },
       { x: 8, y: 0 },
-      { x: 8, y: -6 },
-      { x: 0, y: -6 },
+      { x: 8, y: 6 },
+      { x: 0, y: 6 },
     ]
     // The arc's closest approach to the corner it replaces is its 45-degree sample, at
     // r*(sqrt(2)-1) away - so nothing reaches the corner, and nothing crosses to the far side.
@@ -224,10 +226,10 @@ it('rounded rect: the corners become arcs, and the outline still spans the same 
     assert(square.every((c) => !hasVertexNear(verts, c.x, c.y)), 'and none sits on one')
     // Every arc sample is exactly its radius from that corner's arc centre.
     const centres = [
-      { x: r, y: -r },
-      { x: 8 - r, y: -r },
-      { x: 8 - r, y: -6 + r },
-      { x: r, y: -6 + r },
+      { x: r, y: r },
+      { x: 8 - r, y: r },
+      { x: 8 - r, y: 6 - r },
+      { x: r, y: 6 - r },
     ]
     assert(
       verts.every((v) => centres.some((c) => near(Math.hypot(v.x - c.x, v.y - c.y), r, 1e-9))),
@@ -250,9 +252,9 @@ it('per-corner radii, and only the named corner is cut', () => {
     const { verts } = capture(rect)
     // Three square corners contribute one point each, the rounded one contributes seg+1.
     assert(verts.length === 3 + (seg + 1), 'a square corner is one point, a rounded one is an arc')
-    assert(hasVertexNear(verts, 10, 0) && hasVertexNear(verts, 10, -10) && hasVertexNear(verts, 0, -10), 'the three square corners are still sharp')
+    assert(hasVertexNear(verts, 10, 0) && hasVertexNear(verts, 10, 10) && hasVertexNear(verts, 0, 10), 'the three square corners are still sharp')
     assert(!hasVertexNear(verts, 0, 0), 'and the top-left one is not')
-    assert(hasVertexNear(verts, 2, 0) && hasVertexNear(verts, 0, -2), 'its arc meets the two edges at the tangent points')
+    assert(hasVertexNear(verts, 2, 0) && hasVertexNear(verts, 0, 2), 'its arc meets the two edges at the tangent points')
 })
 
 it('oversized radii scale down together, keeping their proportions', () => {
@@ -275,14 +277,14 @@ it('the stroke follows the rounded outline, not the square one', () => {
     const seg = 4
     const r = 2
     const sw = 0.5
-    const rect = new Rect({ width: 12, height: 12, cornerRadius: r, cornerSegments: seg, strokeWidth: sw })
+    const rect = new Rect({ width: 12, height: 12, cornerRadius: r, cornerSegments: seg, strokeWidth: sw, stroke: 'black' })
     const { verts } = capture(rect)
     const stroke = verts.filter((v) => !v.isFill)
     assert(stroke.length > 0, 'a rounded rect strokes its outline')
     // The corner the stroke rides is an arc, so its outer edge sits at r + sw/2 from the arc
     // centre - not out at the square corner a miter join would have reached.
-    const centre = { x: r, y: -r }
-    const nearCorner = stroke.filter((v) => v.x < r && v.y > -r)
+    const centre = { x: r, y: r }
+    const nearCorner = stroke.filter((v) => v.x < r && v.y < r)
     assert(nearCorner.length > 0, 'some stroke geometry lies over the rounded corner')
     const dists = nearCorner.map((v) => Math.hypot(v.x - centre.x, v.y - centre.y))
     // The arc is a polyline, so its miter-joined outer edge is the offset POLYGON, which
@@ -291,7 +293,7 @@ it('the stroke follows the rounded outline, not the square one', () => {
     const miter = 1 / Math.cos(Math.PI / 2 / seg / 2)
     assert(near(Math.max(...dists), r + (sw / 2) * miter, 1e-9), 'the outer stroke edge is the arc offset by half the stroke width, mitered')
     assert(near(Math.min(...dists), r - sw / 2, 1e-9), 'and the inner edge is exactly that much inside the arc')
-    assert(!hasVertexNear(stroke, -sw / 2, sw / 2), 'the square outer miter corner is not emitted')
+    assert(!hasVertexNear(stroke, -sw / 2, -sw / 2), 'the square outer miter corner is not emitted')
 })
 
 it('cornerRadius is geometry: changing it invalidates the cache and bumps the lane epoch', () => {
@@ -368,9 +370,11 @@ it('offsetX/offsetY shift the pivot (applied before scale/rotation, translation-
 //     assembled equivalent using the same Matrix4x4 primitives, so this specifically
 //     verifies ORDER (rotation sign/trig itself is covered by the math self-test). ---
 it('localMatrix composes translate(x,y) * rotate(rotation) * scale(scaleX,scaleY) *', () => {
-    const rect = new Rect({ x: 40, y: -10, rotation: 0.7, scaleX: 2, scaleY: 0.5, offsetX: 3, offsetY: -2 })
+    // The node's field is degrees; the composition it is checked against is radians, which is
+    // the one conversion localMatrix() performs. See math/angle.ts.
+    const rect = new Rect({ x: 40, y: -10, rotation: 40, scaleX: 2, scaleY: 0.5, offsetX: 3, offsetY: -2 })
     const expected = Matrix4x4.translation(new Vector3(40, -10, 0))
-      .mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), 0.7)))
+      .mul(Matrix4x4.rotationQuaternion(Quaternion.fromAxisAngle(Vector3.unitZ(), degToRad(40))))
       .mul(Matrix4x4.scaling(new Vector3(2, 0.5, 1)))
       .mul(Matrix4x4.translation(new Vector3(-3, 2, 0)))
     const p = new Vector3(1.5, -4.25, 0)
@@ -434,9 +438,21 @@ it('stroke/lineJoin/lineCap/miterLimit live on Shape itself now, one declaration
 
     assert(rect instanceof Shape && circle instanceof Shape && polyline instanceof Shape && path instanceof Shape, 'all four extend Shape directly')
 
-    assert(rect.stroke[3] === 1 && circle.stroke[3] === 1 && polyline.stroke[3] === 1 && path.stroke[3] === 1, 'stroke defaults to opaque black across every shape kind')
-    assert(rect.strokeWidth === 0 && circle.strokeWidth === 0 && path.strokeWidth === 0, 'strokeWidth defaults to 0 (no stroke) for fillable shapes')
-    assert(polyline.strokeWidth === 1, 'Polyline overrides the default to a visible 1-unit stroke (it is stroke-only)')
+    // No paint of any kind unless it is asked for, so an options-free shape of any kind draws
+    // nothing at all - it is still there, still measured and still pickable.
+    assert(
+      rect.stroke === null && circle.stroke === null && polyline.stroke === null && path.stroke === null,
+      'stroke is absent by default across every shape kind',
+    )
+    assert(rect.fill === null && circle.fill === null && path.fill === null, 'and so is fill')
+    assert(
+      !rect.hasStroke() && !rect.hasFill() && !polyline.hasStroke(),
+      'so neither hasFill() nor hasStroke() is satisfied',
+    )
+    assert(
+      rect.strokeWidth === 2 && circle.strokeWidth === 2 && path.strokeWidth === 2 && polyline.strokeWidth === 2,
+      'strokeWidth defaults to 2 everywhere - a width waiting for a colour, not a stroke',
+    )
 
     assert(rect.lineJoin === 'miter', "Rect inherits Shape's default lineJoin ('miter' suits its 90deg corners exactly)")
     assert(circle.lineJoin === 'round', "Circle overrides the default to 'round' so its segmented rim doesn't facet")
@@ -760,7 +776,7 @@ it('shadow atlas sizing: driven only by things a transform cannot change', () =>
     // turned by rotation (that is what worldAxisScale extracts - lengths, not direction).
     const offset = shadowWorldOffset(4, 6, 2, 3)
     assert(offset.x === 8, 'offsetX scales with the absolute x scale')
-    assert(offset.y === -18, 'offsetY is downward-positive, so it flips against a y-up scene')
+    assert(offset.y === 18, 'offsetY is downward-positive, which is the direction +y already points')
 
     // A 90-degree rotation matrix: the axes have swapped direction but each is still unit
     // length, so the offset keeps its magnitude and stays world-axis aligned.
@@ -864,7 +880,8 @@ it('shadow vertex/object formats line up with the WGSL structs', () => {
 // paint comes out at alpha 1. The test is one-sided: a wrong "translucent" costs a draw
 // call, a wrong "opaque" punches a hole in the picture.
 it('what may be drawn in the opaque pass', () => {
-    assert(isOpaqueShape(new Rect({ width: 1, height: 1 })), 'a default shape is opaque - opaque fill, opaque stroke')
+    assert(!isOpaqueShape(new Rect({ width: 1, height: 1 })), 'a shape with no fill paints only transparent fragments, so it is not opaque')
+    assert(isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'black' })), 'an opaque fill with no stroke is opaque')
     assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: [1, 0, 0, 0.4] })), 'a translucent fill is not')
     assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: [1, 0, 0, 0] })), 'nor an invisible one')
 
@@ -888,7 +905,7 @@ it('what may be drawn in the opaque pass', () => {
     assert(!isOpaqueShape(gradient([])), 'a gradient with no stops paints nothing, and is not opaque')
 
     // The partition keeps both halves in rank order, and hands an unmixed lane straight back.
-    const solid = () => new Rect({ width: 1, height: 1 })
+    const solid = () => new Rect({ width: 1, height: 1, fill: 'black' })
     const clear = () => new Rect({ width: 1, height: 1, fill: [0, 0, 0, 0.5] })
     {
       const shapes = [solid(), solid(), solid()]
@@ -1153,7 +1170,7 @@ it('The gather (render/gather.ts)', () => {
 // ahead of what is behind it - and the classifier is the only thing standing between that and
 // a hole in the picture.
 it('object opacity keeps a shape out of the opaque pass', () => {
-    const solid = new Rect({ width: 1, height: 1 })
+    const solid = new Rect({ width: 1, height: 1, fill: 'black' })
     assert(isOpaqueShape(solid), 'sanity: opaque colours, default opacity')
 
     solid.opacity = 0.5
@@ -1169,9 +1186,9 @@ it('object opacity keeps a shape out of the opaque pass', () => {
     assert(!isOpaqueShape(faded), 'opacity 1 does not make a translucent fill opaque')
 
     // And it reaches the partition, which is what actually orders the draw.
-    const a = new Rect({ width: 1, height: 1 })
-    const b = new Rect({ width: 1, height: 1, opacity: 0.5 })
-    const c = new Rect({ width: 1, height: 1 })
+    const a = new Rect({ width: 1, height: 1, fill: 'black' })
+    const b = new Rect({ width: 1, height: 1, fill: 'black', opacity: 0.5 })
+    const c = new Rect({ width: 1, height: 1, fill: 'black' })
     const split = partitionByOpacity([a, b, c], [0.1, 0.2, 0.3])
     assert(split.translucentStart === 2, 'the faded shape is counted as translucent')
     assert(split.shapes[2] === b, 'and moved into the translucent tail')
@@ -1375,14 +1392,14 @@ it('the colour properties take either form', () => {
     // Every one of these stores the tuple, whatever it was given: the batchers read them per
     // object per frame and never see a string.
     const shape = new Rect({ width: 1, height: 1, fill: 'tomato', stroke: '#0f08', shadowColor: 'rgb(0 0 255)' })
-    assert(near(shape.fill[0], 0xff / 255) && near(shape.fill[1], 0x63 / 255), 'a fill given as a keyword')
-    assert(near(shape.stroke[3], 0x88 / 255), 'a stroke given as short hex with alpha')
+    assert(near(shape.fill![0], 0xff / 255) && near(shape.fill![1], 0x63 / 255), 'a fill given as a keyword')
+    assert(near(shape.stroke![3], 0x88 / 255), 'a stroke given as short hex with alpha')
     assert(near(shape.shadowColor[2], 1), 'a shadow colour given as rgb()')
     assert(Array.isArray(shape.fill), 'and every one of them reads back as the tuple')
 
     // Assignment after construction goes through the same conversion.
     shape.fill = 'transparent'
-    assert(shape.fill[3] === 0, 'assigning a string converts it too')
+    assert(shape.fill![3] === 0, 'assigning a string converts it too')
     shape.fill = [0.25, 0.5, 0.75, 1]
     assert(near(shape.fill[1], 0.5), 'and the tuple still works')
 
@@ -1400,6 +1417,204 @@ it('the colour properties take either form', () => {
     assert(isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'red', stroke: 'black' })), 'opaque strings are opaque')
     assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'rgba(255,0,0,0.5)' })), 'and translucent ones are not')
     assert(!isOpaqueShape(new Rect({ width: 1, height: 1, fill: 'transparent' })), 'transparent included')
+})
+
+//
+// Nothing paints unless it was asked to. An options-free shape is a real node - measured,
+// picked, stacked - that draws no pixels, which is what makes "add a rectangle" and "make a
+// rectangle visible" two separate decisions rather than one with a black default.
+it('a shape with no paint asked for draws nothing, and is still entirely there', () => {
+    const bare = new Rect({ width: 100, height: 60 })
+    assert(bare.fill === null && bare.stroke === null, 'no fill and no stroke unless given')
+    assert(!bare.hasFill() && !bare.hasStroke(), 'so it paints neither')
+    assert(bare.fillPriority === 'none', "and its fill mechanism reads 'none'")
+
+    // The triangles are still there. This is the whole reason 'none' is a fill TYPE rather
+    // than a reason to skip tessellation: picking runs against these, so an unfilled shape
+    // stays clickable over its face instead of only along an outline it may not even have.
+    const { verts, tris } = capture(bare)
+    assert(verts.length === 4 && tris.length === 2, 'its fill triangles are tessellated regardless')
+    assert(bare.hitTestLocal(50, 30), 'so a point inside it still hits')
+    assert(near(bare.localBounds().max.x, 100), 'and it measures its full size')
+
+    // A width with no colour is not a stroke. Both halves are needed, which is what stops a
+    // default width from putting an outline on everything.
+    assert(bare.strokeWidth === 2, 'strokeWidth defaults to 2')
+    assert(capture(new Rect({ width: 10, height: 10, stroke: 'red' })).verts.length > 4, 'a colour turns that width into geometry')
+    assert(capture(new Rect({ width: 10, height: 10, strokeWidth: 0, stroke: 'red' })).verts.length === 4, 'and a zero width takes it away again')
+
+    // A gradient with no stops has nothing to paint with either, by the same rule. Read
+    // through a function so the compiler cannot narrow the getter to whatever was last
+    // assigned - the whole point here is that the two differ.
+    const priorityOf = (s: Rect): FillPriority => s.fillPriority
+    const empty = new Rect({ width: 10, height: 10, fill: 'red' })
+    empty.fillPriority = 'linear-gradient'
+    assert(priorityOf(empty) === 'none', 'a gradient with no stops resolves to none')
+    empty.fillLinearGradientColorStops = [0, 'red', 1, 'blue']
+    assert(priorityOf(empty) === 'linear-gradient', 'and back again once it has stops')
+})
+
+it("the fill types the shader branches on, 'none' included", () => {
+    assert(FILL_TYPE_CODE.none === 3, "no fill encodes to fill type 3")
+    const bare = new Rect({ width: 1, height: 1 })
+    assert(FILL_TYPE_CODE[bare.fillPriority] === 3, 'which is what an unpainted shape sends')
+})
+
+//
+// A segment material resolves its priority against ITS OWN paint, exactly as a shape does
+// against its own. The base it inherits from is already resolved, so a stroke-only shape
+// reads 'none' there - and copying that into a segment that supplies a fill would draw the
+// segment's colour as nothing. This is the custom-shape junction-dot case: a fill-less
+// route whose describe() styles each dot with fill().
+it('a segment fill paints on a shape that has no fill of its own', () => {
+    class Dotted extends CustomShape {
+      protected override describe(ctx: ShapeContext): void {
+        ctx.moveTo(0, 0)
+        ctx.lineTo(100, 0)
+        ctx.style({ stroke: 'teal', strokeWidth: 10 })
+        ctx.stroke()
+        ctx.style({ fill: 'crimson' })
+        ctx.beginPath()
+        ctx.circle(100, 0, 8)
+        ctx.fill()
+      }
+    }
+    const dotted = new Dotted() // no fill and no stroke of its own
+    assert(dotted.fillPriority === 'none', 'the shape itself still has nothing to fill with')
+
+    const dot = dotted.materials().find((m) => m.fill !== null)
+    assert(dot !== undefined, 'the styled dot contributes a material carrying its colour')
+    assert(dot!.fillPriority === 'color', "and that material's priority is 'color', not the shape's 'none'")
+    assert(near(dot!.fill![0], 0xdc / 255), 'in the colour the style asked for')
+
+    // The emptiness rule still applies to the segment's OWN choice: a gradient with no
+    // stops has nothing to paint with, whoever chose it.
+    class EmptyGradient extends CustomShape {
+      protected override describe(ctx: ShapeContext): void {
+        ctx.style({ fill: 'red', fillPriority: 'linear-gradient' })
+        ctx.rect(0, 0, 10, 10)
+        ctx.fill()
+      }
+    }
+    const styled = new EmptyGradient().materials().find((m) => m.fill !== null)
+    assert(styled !== undefined && styled.fillPriority === 'none', 'a segment gradient with no stops resolves to none')
+})
+
+//
+// What a colour is NOT. The tuple check is positive - four finite numbers - because the object
+// record cannot defend itself: `f32.set` ignores a scalar completely and takes only as many
+// channels as a short array holds, leaving the rest of the record holding the previous object's
+// colour. Both of those draw something plausible, so neither is traceable back to the
+// assignment that caused it. They are refused here instead, where the value still has a name.
+it('a colour is a string or four finite numbers, and nothing else gets through', () => {
+    const rejects = (value: unknown, what: string) => {
+      let threw = false
+      try {
+        parseColor(value as ColorInput)
+      } catch {
+        threw = true
+      }
+      assert(threw, `rejects ${what}`)
+    }
+    rejects(42, 'a bare number')
+    rejects(null, 'null')
+    rejects(undefined, 'undefined')
+    rejects([1, 0], 'a two-element array')
+    rejects([1, 0, 0], 'a three-element array')
+    rejects([1, 0, 0, 1, 1], 'a five-element array')
+    rejects([1, 0, 0, Number.NaN], 'a tuple carrying NaN')
+    rejects(['1', '0', '0', '1'], 'a tuple of strings')
+    rejects({ r: 1, g: 0, b: 0, a: 1 }, 'an object that is not a tuple')
+
+    const tuple: RGBA = [0.1, 0.2, 0.3, 0.4]
+    assert(parseColor(tuple) === tuple, 'while a real tuple is still passed straight through')
+})
+
+//
+// A stop list is written one of two ways, and both arrive here. The flat form is what a
+// canvas-style API hands over; the object form is what reads better in source. A leading
+// number tells them apart, which is unambiguous because a stop object is never a number.
+it('gradient stops: the flat form and the object form describe the same gradient', () => {
+    const shape = new Rect({ width: 1, height: 1 })
+
+    shape.fillLinearGradientColorStops = [0, 'red', 0.5, 'blue', 1, [0, 1, 0, 1]]
+    const flat = shape.fillLinearGradientColorStops
+    assert(flat.length === 3, 'three offset/colour pairs make three stops')
+    assert(flat[0].offset === 0 && near(flat[0].color[0], 1), 'the first pair is offset 0, red')
+    assert(flat[1].offset === 0.5 && near(flat[1].color[2], 1), 'the second is 0.5, blue')
+    assert(near(flat[2].color[1], 1), 'and a tuple works inside the flat form too')
+
+    shape.fillRadialGradientColorStops = [
+      { offset: 0, color: 'red' },
+      { offset: 0.5, color: 'blue' },
+      { offset: 1, color: [0, 1, 0, 1] },
+    ]
+    const objects = shape.fillRadialGradientColorStops
+    assert(
+      JSON.stringify(objects) === JSON.stringify(flat),
+      'the two forms produce byte-identical stop lists',
+    )
+
+    assert(parseStops([]).length === 0, 'an empty list is empty in either reading')
+})
+
+//
+// Everything a stop list can be written wrong. Each of these used to travel: `parseColor` let
+// any non-string past, so a flat array read as stop objects yielded `{offset: undefined,
+// color: undefined}` per element - an offset that lands in the record as NaN, and a colour the
+// batcher destructures and dies on, several layers from the assignment.
+it('gradient stops: what is refused, and where', () => {
+    const rejects = (value: unknown, what: string) => {
+      let threw = false
+      try {
+        parseStops(value as ColorStopsInput)
+      } catch {
+        threw = true
+      }
+      assert(threw, `rejects ${what}`)
+    }
+    rejects([0, 'red', 0.5], 'a flat list with a colour missing')
+    rejects([{ color: 'red' }], 'a stop with no offset')
+    rejects([{ offset: Number.NaN, color: 'red' }], 'an offset of NaN')
+    rejects([{ offset: Number.POSITIVE_INFINITY, color: 'red' }], 'an infinite offset')
+    rejects([{ offset: '0', color: 'red' }], 'an offset written as a string')
+    rejects([{ offset: 0 }], 'a stop with no colour')
+    rejects([{ offset: 0, color: 'notacolour' }], 'a stop whose colour cannot be read')
+
+    // The cap bounds the per-object storage record, so a longer list has nowhere to go. It is
+    // raised rather than truncated: a gradient quietly missing its last colours still draws,
+    // and looks like a colour-picking mistake rather than a limit.
+    const nine = Array.from({ length: MAX_GRADIENT_STOPS + 1 }, (_, i) => ({ offset: i / 8, color: 'red' }))
+    rejects(nine, `${MAX_GRADIENT_STOPS + 1} stops, one past the cap`)
+    assert(parseStops(nine.slice(0, MAX_GRADIENT_STOPS)).length === MAX_GRADIENT_STOPS, 'while the cap itself is fine')
+})
+
+//
+// The tuple is what the shape IS, and every comparison the engine makes uses it. The written
+// form is kept beside it for the code on the other side - a swatch showing which preset is
+// selected, a serializer writing a document back out in the vocabulary its author used.
+it('a colour reads back both as the tuple and as it was written', () => {
+    const shape = new Rect({ width: 1, height: 1, fill: 'tomato', stroke: '#0f08', shadowColor: 'rgb(0 0 255)' })
+    assert(shape.fillInput === 'tomato', "fillInput gives back the word that was written")
+    assert(Array.isArray(shape.fill), 'while fill is still the tuple it renders through')
+    assert(shape.strokeInput === '#0f08', 'the same for a stroke')
+    assert(shape.shadowColorInput === 'rgb(0 0 255)', 'and a shadow colour')
+
+    // A tuple is its own written form, and comes back as the same instance.
+    const tuple: RGBA = [0.25, 0.5, 0.75, 1]
+    shape.fill = tuple
+    assert(shape.fillInput === tuple, 'a tuple reads back identically')
+
+    // The written form tracks the LAST assignment, not the first.
+    shape.fill = 'rebeccapurple'
+    assert(shape.fillInput === 'rebeccapurple', 'reassignment replaces it')
+
+    // Including the flat form of a stop list, which no amount of reading the parsed stops
+    // would recover.
+    const written = [0, 'red', 1, 'blue']
+    shape.fillLinearGradientColorStops = written
+    assert(shape.fillLinearGradientColorStopsInput === written, 'a stop list reads back as written')
+    assert(shape.fillLinearGradientColorStops.length === 2, 'while the parsed form is two stops')
 })
 
 //
@@ -1451,8 +1666,8 @@ it('...including the parts that only a real outline gets right', () => {
     // the nesting rule is shared code, not a second implementation.
     class Ring extends CustomShape {
       protected override describe(ctx: ShapeContext): void {
-        ctx.rect(-60, 60, 120, 120)
-        ctx.rect(-25, 25, 50, 50)
+        ctx.rect(-60, -60, 120, 120)
+        ctx.rect(-25, -25, 50, 50)
         ctx.fill()
       }
     }
@@ -1460,7 +1675,7 @@ it('...including the parts that only a real outline gets right', () => {
     assert(ring.hitTestLocal(-45, 0), 'the solid part of a ring hits')
     assert(!ring.hitTestLocal(0, 0), 'and the hole does not')
 
-    // rect() places its corner the way a Rect node does - top-left, extending down in a y-up
+    // rect() places its corner the way a Rect node does - top-left, extending down in a y-down
     // scene - so the two can be written interchangeably without anything flipping.
     const box = new Ring().localBounds()
     assert(near(box.min.y, -60) && near(box.max.y, 60), 'rect(x, y, w, h) hangs downward from (x, y)')
@@ -1503,7 +1718,7 @@ it('segments carry their own properties', () => {
     const wire = new Wire()
     const materials = wire.materials()
     assert(materials.length === 4, 'the shape itself plus one record per distinct paint')
-    assert(near(materials[1].stroke[0], 1) && near(materials[3].stroke[2], 1), 'each record holds its own stroke colour')
+    assert(near(materials[1].stroke![0], 1) && near(materials[3].stroke![2], 1), 'each record holds its own stroke colour')
 
     const used = new Set(capture(wire).verts.map((v) => v.material))
     assert(used.size === 3 && !used.has(0), 'every segment is painted by the style it was added in')
@@ -1710,6 +1925,7 @@ it('...and noticing when the scale it was built against has moved', () => {
       new Polyline({
         points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
         closed: false,
+        stroke: 'black',
         strokeWidth: 10,
         strokeScaleEnabled: false,
       })

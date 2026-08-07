@@ -23,13 +23,13 @@ export function buildStressScene(scene: Scene): SceneContent {
   const movers: { node: Circle | Rect; baseX: number; baseY: number; phase: number }[] = []
 
   const originX = (-(COLUMNS - 1) * SPACING) / 2
-  const originY = ((ROWS - 1) * SPACING) / 2
+  const originY = -((ROWS - 1) * SPACING) / 2
 
   for (let i = 0; i < COLUMNS * ROWS; i++) {
     const col = i % COLUMNS
     const row = Math.floor(i / COLUMNS)
     const baseX = originX + col * SPACING
-    const baseY = originY - row * SPACING
+    const baseY = originY + row * SPACING
     const hue = (col / COLUMNS) * 0.6 + 0.15
     const shared = {
       x: baseX,
@@ -48,7 +48,7 @@ export function buildStressScene(scene: Scene): SceneContent {
         : // Pivoted at its middle so the squares sit on the same centres as the circles
           // they alternate with, and orbit the same way - a Rect's own origin is its
           // top-left corner.
-          root.addChild(new Rect({ name: `stress-${i}`, width: 40, height: 40, offsetX: 20, offsetY: -20, ...shared }))
+          root.addChild(new Rect({ name: `stress-${i}`, width: 40, height: 40, offsetX: 20, offsetY: 20, ...shared }))
     movers.push({ node, baseX, baseY, phase: (i % 17) * 0.37 })
   }
 
@@ -58,7 +58,7 @@ export function buildStressScene(scene: Scene): SceneContent {
       x: originX,
       // The top row does not stop at originY: every shape carries its own radius and drifts
       // another 12 on top of that, so the heading starts above all three.
-      y: originY + 106,
+      y: originY - 106,
       text: `${COLUMNS * ROWS} shadows, one draw call`,
       style: { fontStyle: 'bold', fontSize: 34, color: DARK },
     }),
@@ -67,7 +67,7 @@ export function buildStressScene(scene: Scene): SceneContent {
     new MSDFText({
       name: 'stress-note',
       x: originX,
-      y: originY + 62,
+      y: originY - 62,
       text: 'Each has its own baked silhouette; the drift re-bakes none of them.',
       style: { fontSize: 18, color: SLATE },
     }),
@@ -80,7 +80,7 @@ export function buildStressScene(scene: Scene): SceneContent {
       t += dt * speed
       for (const m of movers) {
         m.node.x = m.baseX + Math.cos(t + m.phase) * 12
-        m.node.y = m.baseY + Math.sin(t * 0.8 + m.phase) * 12
+        m.node.y = m.baseY - Math.sin(t * 0.8 + m.phase) * 12
       }
     },
   }
