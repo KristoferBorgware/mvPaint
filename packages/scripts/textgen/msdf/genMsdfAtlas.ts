@@ -200,7 +200,7 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
   }
 
   reportSkipped(skipped)
-  console.log(`Wrote ${faces.length} MSDF atlases to packages/scripts/out/msdf/`)
+  console.log(`Wrote ${faces.length} MSDF atlases to packages/scripts/textgen/out/msdf/`)
   // An application's layer size is the largest page across the styles of ONE family, so this is
   // the worst case rather than what any single family allocates. Four layers of it, at four
   // bytes a texel, is what a family costs in texture memory.

@@ -6,8 +6,8 @@ dist-ssr
 
 # What the font generators write. Deliberately not committed: an atlas is an application's
 # asset, and copying the ones you want out of here into your own font folder is the step that
-# makes that true. See packages/scripts/README.md.
-packages/scripts/out
+# makes that true. See packages/scripts/textgen/README.md.
+packages/scripts/textgen/out
 
 # Editor
 .vscode/*
@@ -26,14 +26,14 @@ vite.config.js
 package.json.prepack-backup
 # The generators' input folder is a font library a developer fills, downloaded rather than
 # authored, so it stays out of the repository.
-packages/scripts/fonts/*.woff2
-packages/scripts/fonts/*.ttf
+packages/scripts/textgen/fonts/*.woff2
+packages/scripts/textgen/fonts/*.ttf
 
 # Except the four Inter faces the repository itself needs: packages/ttf's self-test and the
 # polygon atlas self-test parse them, the example app's Runtime TTF scene imports two of them,
 # and the atlases committed under packages/example-app/public/fonts/ are generated from them.
 # Without these a fresh clone cannot run npm test or npm run dev.
-!packages/scripts/fonts/Inter-400-normal.ttf
-!packages/scripts/fonts/Inter-400-italic.ttf
-!packages/scripts/fonts/Inter-700-normal.ttf
-!packages/scripts/fonts/Inter-700-italic.ttf
+!packages/scripts/textgen/fonts/Inter-400-normal.ttf
+!packages/scripts/textgen/fonts/Inter-400-italic.ttf
+!packages/scripts/textgen/fonts/Inter-700-normal.ttf
+!packages/scripts/textgen/fonts/Inter-700-italic.ttf

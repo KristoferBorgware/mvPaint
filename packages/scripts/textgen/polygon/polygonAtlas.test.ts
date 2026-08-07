@@ -10,7 +10,7 @@
 // until someone remembers to re-run the tool AND re-copy. This turns "someone remembers" into a
 // failing test, for the one application this repository has.
 //
-//   npx vitest run packages/scripts/text/polygon/polygonAtlas.test.ts
+//   npx vitest run packages/scripts/textgen/polygon/polygonAtlas.test.ts
 
 import { expect, it } from 'vitest'
 import { readdir, readFile } from 'node:fs/promises'
@@ -192,7 +192,7 @@ it('the atlases the app has copied in are the ones this tool produces', async ()
       assert(
         rebuilt === committed,
         `${name} is up to date with the font and this generator - if this fails, run ` +
-          'npm run gen:polygons and copy packages/scripts/out/polygons/ into the app',
+          'npm run gen:polygons and copy packages/scripts/textgen/out/polygons/ into the app',
       )
     }
 })

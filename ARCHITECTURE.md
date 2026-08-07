@@ -1369,7 +1369,7 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Loading SVG as pixels | `image/ImageTexture.ts` (`rasterizeSvgPixels`), `image/svgSize.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
-| Generating those assets | `packages/scripts/text/msdf/`, `text/polygon/`, `text/fontSources.ts` |
+| Generating those assets | `packages/scripts/textgen/msdf/`, `packages/scripts/textgen/polygon/`, `textgen/fontSources.ts` |
 | An application supplying them | `webgpu/FontBook.ts`, `webgl/GlFontBook.ts`, `packages/example-app/src/fonts/` |
 | Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |

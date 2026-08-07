@@ -44,7 +44,7 @@ parsing is opt-in through [`@mvpaint/ttf`](packages/ttf).
 
 ## 1. Source fonts
 
-Font files live in `packages/scripts/fonts/` as `.ttf`, `.otf` or `.woff2`. The directory is
+Font files live in `packages/scripts/textgen/fonts/` as `.ttf`, `.otf` or `.woff2`. The directory is
 enumerated — no tool holds a list of typefaces — so adding a face means dropping a file in.
 
 A `.woff2` is a brotli-compressed sfnt whose `glyf` and `loca` tables are stored re-encoded.
@@ -83,20 +83,20 @@ Sources are ordered by, in turn:
 3. **How many glyphs the file holds**, then **its name**, so the order never depends on the
    order the folder happens to be read in.
 
-Enumeration, identification and grouping live in `packages/scripts/text/fontSources.ts`.
+Enumeration, identification and grouping live in `packages/scripts/textgen/fontSources.ts`.
 
 ---
 
 ## 2. Atlas generation
 
-Two generators read the same directory and the same charset, declared once in `text/charset.ts`.
+Two generators read the same directory and the same charset, declared once in `textgen/charset.ts`.
 Both paths cover identical characters deliberately: switching a node between them must not change
 which glyphs are missing. The charset is also what decides how a face is assembled, since it is
 the set each of a face's files is asked to draw part of.
 
 ```bash
-npm run gen:msdf       # -> packages/scripts/out/msdf/
-npm run gen:polygons   # -> packages/scripts/out/polygons/
+npm run gen:msdf       # -> packages/scripts/textgen/out/msdf/
+npm run gen:polygons   # -> packages/scripts/textgen/out/polygons/
 npm run gen:fonts      # both, over one charset
 
 npm run gen:fonts -- --charset latin        # a named set
@@ -126,7 +126,7 @@ European text for those faces.
 A wider set means a larger page. The MSDF packer shrinks each page to the glyphs it was given —
 `ascii` packs to around 300×300, `latin1` to 476×469, `latin` to 661×655 — against a 2048 cap.
 
-### MSDF atlas — `text/msdf/genMsdfAtlas.ts`
+### MSDF atlas — `textgen/msdf/genMsdfAtlas.ts`
 
 Wraps `msdf-bmfont-xml`. Per face it emits a PNG and a JSON:
 
@@ -156,7 +156,7 @@ passes. Each pass after the first is handed the packer state and the page the la
 adds its glyphs to both: the page grows to fit, and what is already on it keeps the position it
 was packed at.
 
-### Polygon atlas — `text/polygon/genPolygonAtlas.ts`
+### Polygon atlas — `textgen/polygon/genPolygonAtlas.ts`
 
 Emits one JSON per face. Per glyph: the outline flattened to closed rings of **integer font
 units**, plus box, advance, and — per file — `unitsPerEm`, vertical metrics, the decoration
@@ -171,12 +171,12 @@ fraction of the size the same values would be as floats.
 
 Outline extraction is `@mvpaint/ttf`'s — the same code that parses a font at runtime — so a baked
 glyph and a live-parsed one are identical geometry. The self-test in
-`packages/scripts/text/polygon/polygonAtlas.test.ts` asserts that, and that the committed copies
+`packages/scripts/textgen/polygon/polygonAtlas.test.ts` asserts that, and that the committed copies
 match what the tool produces today.
 
 ### Output is not committed
 
-`packages/scripts/out/` is gitignored. Copying the atlases you want into your application is a
+`packages/scripts/textgen/out/` is gitignored. Copying the atlases you want into your application is a
 deliberate step: an atlas is the *application's* asset, and regenerating never silently changes
 what ships.
 
@@ -185,8 +185,8 @@ what ships.
 ## 3. Distribution
 
 ```
-packages/scripts/fonts/          source .ttf files (generator input)
-packages/scripts/out/            generated atlases (gitignored)
+packages/scripts/textgen/fonts/          source .ttf files (generator input)
+packages/scripts/textgen/out/            generated atlases (gitignored)
         ↓ copied by hand
 <your app>/fonts/msdf/           PNG + JSON per style
 <your app>/fonts/polygons/       outlines JSON per style
@@ -458,9 +458,9 @@ the same `VectorFonts` interface, at the cost of a parser in the bundle.
 
 | Concern | Files |
 | --- | --- |
-| Source enumeration, face identity, woff2 unpacking | `packages/scripts/text/fontSources.ts` |
-| The charset both atlases cover | `packages/scripts/text/charset.ts` |
-| Generators | `packages/scripts/text/msdf/`, `packages/scripts/text/polygon/` |
+| Source enumeration, face identity, woff2 unpacking | `packages/scripts/textgen/fontSources.ts` |
+| The charset both atlases cover | `packages/scripts/textgen/charset.ts` |
+| Generators | `packages/scripts/textgen/msdf/`, `packages/scripts/textgen/polygon/` |
 | Shaper | `packages/engine/src/text/layout.ts` |
 | MSDF metrics, style ladder | `packages/engine/src/text/msdfMetrics.ts`, `msdfProvider.ts` |
 | Outline atlas reader | `packages/engine/src/text/PolygonFont.ts` |

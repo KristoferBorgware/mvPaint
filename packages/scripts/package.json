@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "gen:msdf": "tsx --conditions=development text/msdf/genMsdfAtlas.ts",
-    "gen:polygons": "tsx --conditions=development text/polygon/genPolygonAtlas.ts",
-    "gen:fonts": "tsx --conditions=development text/genFonts.ts",
+    "gen:msdf": "tsx --conditions=development textgen/msdf/genMsdfAtlas.ts",
+    "gen:polygons": "tsx --conditions=development textgen/polygon/genPolygonAtlas.ts",
+    "gen:fonts": "tsx --conditions=development textgen/genFonts.ts",
     "test": "vitest run --root ../.. packages/scripts"
   },
   "dependencies": {

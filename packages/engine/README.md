@@ -119,8 +119,3 @@ type declarations, and no CommonJS build.
 ## Licence
 
 MIT — see [LICENSE](./LICENSE).
-
-That is the whole of it: this package contains no font data, so no font licence applies to
-anything it ships. Whatever typeface you generate atlases from carries its own terms, and they
-are between you and that typeface — this repository's own Inter set, and the SIL Open Font
-Licence that travels with it, lives with the example app under `public/fonts/`.

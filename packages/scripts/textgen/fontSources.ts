@@ -39,10 +39,10 @@ import type { FontStyle } from '@mvpaint/engine/core'
 import { DEFAULT_CHARSET } from './charset'
 
 /** The folder both generators read. Everything in it that is a font file is generated. */
-export const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fonts')
+export const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), 'fonts')
 
 /** Where both generators write. Committed nowhere - copy what you want into your app. */
-export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'out')
+export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'out')
 
 const FONT_EXTENSIONS = new Set(['.ttf', '.otf', '.woff2'])
 

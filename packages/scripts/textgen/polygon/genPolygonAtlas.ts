@@ -192,7 +192,7 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
   }
 
   reportSkipped(skipped)
-  console.log(`Wrote ${faces.length} polygon atlases to packages/scripts/out/polygons/`)
+  console.log(`Wrote ${faces.length} polygon atlases to packages/scripts/textgen/out/polygons/`)
   console.log('Copy the ones your application draws with into its own font folder.')
 }
 
