@@ -256,9 +256,16 @@ Two conventions:
 children, and `Group` and `Layer` extend that. `Shape` extends `Node` directly and adds
 everything that paints.
 
-- **`Group`** behaves as a single unit: it places its contents, sizes itself to them, hides them
-  together, and a drag inside it moves the whole group.
-- **`Layer`** names a slice of the scene and toggles it with one `enabled` flag. It is not a
+The attribute set on `Node` follows Konva's, so a Konva scene reads here without translation:
+`width`/`height`, `visible`, `opacity`, `zIndex`, `listening`, `preventDefault`, `draggable`,
+`dragDistance` and `dragBoundFunc` sit alongside the transform, with `position`, `scale`,
+`skew`, `offset`, `size` and `absolutePosition` as compound accessors over the components.
+`globalCompositeOperation`, `transformsEnabled` and `filters` are not implemented — see
+`ARCHITECTURE.md` for what each would take.
+
+- **`Group`** behaves as a single unit: it places its contents, measures itself against them,
+  hides and fades them together, and a drag inside it moves the whole group.
+- **`Layer`** names a slice of the scene and takes it out with `visible = false`. It is not a
   separate canvas and not a draw-order boundary; shapes inside stay individually selectable.
 
 Lifecycle: `node.remove()` detaches a node and leaves it reusable. `node.destroy()` disposes it
@@ -326,7 +333,9 @@ so it holds under non-uniform scale and skew.
 
 **`opacity`** fades a whole object — fill, stroke, gradient, glyph, texture and shadow — without
 modifying its colours. It multiplies with each colour's own alpha and excludes the shape from
-the opaque pass.
+the opaque pass. It is every node's, and it multiplies through the chain, so fading a group
+fades what is in it; `absoluteOpacity()` is that product. Overlapping children of a faded group
+blend against one another, since each object is composited on its own.
 
 **Shadows.** The Canvas2D model (colour, blur, offset, opacity) plus CSS `box-shadow`'s spread.
 Blurred silhouettes are baked into a shared atlas keyed on geometry, so moving, rotating or

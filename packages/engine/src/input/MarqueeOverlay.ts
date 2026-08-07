@@ -85,8 +85,9 @@ export class MarqueeOverlay extends Container {
     const thickness = this.strokeWidth / (zoom > 0 ? zoom : 1)
     const halfW = width / 2
     const halfH = height / 2
-    this.placeEdge('top', cx, cy + halfH, width + thickness, thickness)
-    this.placeEdge('bottom', cx, cy - halfH, width + thickness, thickness)
+    // The scene is y-down, so the top edge is the one at the SMALLER y.
+    this.placeEdge('top', cx, cy - halfH, width + thickness, thickness)
+    this.placeEdge('bottom', cx, cy + halfH, width + thickness, thickness)
     this.placeEdge('left', cx - halfW, cy, thickness, height + thickness)
     this.placeEdge('right', cx + halfW, cy, thickness, height + thickness)
   }

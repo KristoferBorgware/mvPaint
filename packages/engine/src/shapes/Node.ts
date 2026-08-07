@@ -7,8 +7,21 @@
 // The transform lives here rather than on Shape because placing yourself in your parent is
 // not a drawing concern: a Group places the things inside it and draws nothing at all, and
 // a group and a shape have to compose IDENTICALLY or the same gesture would move them
-// differently. Shape adds what actually affects rendering - size, fill, stroke, shadow,
-// stacking order - on top of this.
+// differently. Shape adds what is specific to painting - fill, stroke, shadow, pickability -
+// on top of this.
+//
+// WHAT ELSE IS HERE, and why it is not on Shape. Every attribute Konva puts on its Node is on
+// this one, declared once: width/height, visible, opacity, zIndex, listening, preventDefault,
+// draggable, dragDistance and dragBoundFunc. Two of them govern a whole subtree - `visible`
+// takes everything under it out of the render and out of picking, and `opacity` multiplies
+// through the chain (see absoluteOpacity) - so a single field on a Group would otherwise have
+// had to be a second, independent copy of the one on Shape, with the same name and the same
+// meaning.
+//
+// Three of them are carried but not consulted on a container: `zIndex`, `width` and `height`.
+// Only a Shape occupies a slot in the render order or draws from a size, and a group's extent
+// is measured from what it holds rather than stored (see Group.bounds). `draggable` is read on
+// a Shape and on a Group, which is the pair draggableGroup() walks.
 //
 // nodeName/nodeType plus matches()/find()/findOne()/findAncestor(s)() implement CSS-like
 // selectors: '#foo' by id, '.foo' by name, and a bare word by nodeName (the concrete
@@ -20,8 +33,12 @@
 // set<Key>() method when the class declares one - some attributes (Text's runs) are
 // read-only properties paired with a method that also invalidates a cache, so a plain
 // assignment would either miss that or throw. attrs is a plain-object snapshot built from
-// attrKeys(), which each class overrides to append its own attribute names to its parent's;
-// the base Node's are just id and name.
+// attrKeys(), which each class overrides to append its own attribute names to its parent's.
+//
+// The compound accessors - position, scale, skew, offset, size and absolutePosition - read and
+// write the components above in pairs. They are deliberately NOT in attrKeys(): attrs is a
+// snapshot of the backing fields, and a compound listed there would report every value twice
+// and give setAttr two racing ways to write one field.
 //
 // on()/off()/once()/fire() make every node an event target. Listeners are keyed by event
 // type, each optionally tagged with a dot-namespace ('click.mytool') so a whole group can
@@ -46,6 +63,7 @@ import { bumpObjectRecordEpoch } from './contentEpoch'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Quaternion } from '../math/Quaternion'
 import { Vector3 } from '../math/Vector3'
+import type { Vector2Like } from '../math/Vector2'
 import {
   cloneNodeEvent,
   createNodeEvent,
@@ -81,6 +99,15 @@ interface ListenerEntry {
 /** A selector string (see Node.matches) or a predicate called directly with the node. */
 export type Selector = string | ((node: Node) => boolean)
 
+/** See Node.dragBoundFunc. Both the argument and the result are world-space positions. */
+export type DragBoundFunc = (position: Vector2Like, node: Node) => Vector2Like
+
+/** width and height together - see Node.size. */
+export interface SizeLike {
+  width: number
+  height: number
+}
+
 /** Every field localMatrix() reads - a complete transform snapshot. See captureTransform. */
 export interface NodeTransform {
   x: number
@@ -110,6 +137,25 @@ export interface NodeOptions {
   skewX?: number
   /** Shear: y shifts by skewY per unit x. See Node.skewY. */
   skewY?: number
+  /** Default 0. Drawn from by the shapes that have a size - see Node.width. */
+  width?: number
+  height?: number
+  /** Hides this node and everything under it. Default true. */
+  visible?: boolean
+  /** Whether events fire on this node and travel through it. Default true. See Node.listening. */
+  listening?: boolean
+  /** Whether a press on this node suppresses the browser's own handling. Default true. */
+  preventDefault?: boolean
+  /** Transparency, 0 to 1, multiplied through the ancestor chain. Default 1. See Node.opacity. */
+  opacity?: number
+  /** Scene-wide stacking order. Default 0 here; a Shape takes the next counter value instead. */
+  zIndex?: number
+  /** Can a pointer drag reposition this node? Default false. See Node.draggable. */
+  draggable?: boolean
+  /** How far the pointer travels before a drag on this node starts. See Node.dragDistance. */
+  dragDistance?: number
+  /** Constrains where a drag may put this node. See Node.dragBoundFunc. */
+  dragBoundFunc?: DragBoundFunc
 }
 
 /** [[1, skewX], [skewY, 1]]: x slides by skewX per unit y, y by skewY per unit x. */
@@ -142,6 +188,62 @@ export class Node {
 
   /** When false, events neither fire on this node nor travel through it. See the header. */
   listening = true
+
+  /**
+   * Whether a press on this node also suppresses the browser's own response to the raw event -
+   * text selection, a scroll, the native drag of an image.
+   *
+   * Read off the node under the pointer, for the presses that node is the subject of (see
+   * input/SceneInputDispatcher). The canvas's own gestures - a transformer handle, a
+   * middle-button pan, a pinch, the wheel, the context menu - suppress the default whatever
+   * this says, since no node is their subject.
+   */
+  preventDefault = true
+
+  /**
+   * Whether this node and everything under it takes part in the scene.
+   *
+   * False removes the whole subtree from the render order and from everything derived from it:
+   * nothing draws, nothing can be picked, nothing is caught by a marquee. It is a property of
+   * this node alone - each descendant keeps its own value, so showing an ancestor again brings
+   * back exactly what was visible before.
+   *
+   * The walks turn back at a hidden node rather than asking each shape about its ancestors, so
+   * hiding a subtree of ten thousand shapes costs one check (see scene/picking.ts).
+   */
+  visible = true
+
+  /**
+   * Whether a pointer drag over this node repositions it (see input/SceneInputDispatcher).
+   *
+   * On a Group it means something slightly different and stronger: a press on any shape INSIDE
+   * a draggable group takes hold of the GROUP, which is what makes a group feel like one object
+   * under the pointer. Those two are the tiers draggableGroup() walks; on a Layer or a bare
+   * Container the field is carried and nothing reads it.
+   */
+  draggable = false
+
+  /**
+   * How far the pointer must travel, in CSS pixels, before a drag on this node begins.
+   * Undefined - the default - defers to the dispatcher's own threshold.
+   *
+   * Raise it for a node that is easy to nudge by accident; drop it to 0 for one that should
+   * follow the pointer from the first move. It governs when the drag STARTS, not what counts as
+   * a click: a press that never travels far enough for either is still a click.
+   */
+  dragDistance?: number
+
+  /**
+   * Constrains where a drag may put this node: called with the world-space position the drag
+   * wants, returning the one it gets. Undefined - the default - is unconstrained.
+   *
+   * World space, not the parent's, so a constraint is written in the coordinates the scene is
+   * laid out in rather than in whatever frame the node's ancestors happen to impose. The
+   * dispatcher maps the result back through the parent before assigning x/y.
+   *
+   *   node.dragBoundFunc = (p) => ({ x: p.x, y: 0 })   // a slider: x only
+   */
+  dragBoundFunc?: DragBoundFunc
 
   // --- transform (see the header for what localMatrix() composes them into) ------------
 
@@ -245,6 +347,87 @@ export class Node {
     bumpObjectRecordEpoch()
   }
 
+  // --- size, transparency, stacking -----------------------------------------------------
+
+  protected _width = 0
+  protected _height = 0
+
+  /**
+   * The node's own size, in its local units. Which part of the shape it describes is the
+   * shape's business - a Rect spans it, a Circle derives it from its radius, an Image defaults
+   * it to its texture's - and a container draws from it not at all: a Group's extent is
+   * measured from what it holds (see Group.bounds), never stored.
+   */
+  get width(): number {
+    return this._width
+  }
+  set width(value: number) {
+    this._width = value
+  }
+  get height(): number {
+    return this._height
+  }
+  set height(value: number) {
+    this._height = value
+  }
+
+  private _opacity = 1
+  /**
+   * This node's transparency, 0 (invisible) to 1 (solid), multiplied into every fragment it
+   * paints - fill, stroke, gradient, glyph, texture and shadow alike.
+   *
+   * It MULTIPLIES THROUGH THE CHAIN, so a shape at 0.5 inside a group at 0.5 paints at 0.25;
+   * absoluteOpacity() is that product and is what the render lanes read. Fading a group fades
+   * everything in it.
+   *
+   * The subtree is composited per object rather than as a unit, which shows wherever two of a
+   * faded group's children overlap: each is blended against the other rather than the pair
+   * being blended once against the background. Compositing once means drawing the subtree to an
+   * offscreen target, and this is the value-level fade instead.
+   *
+   * Separate from the alpha in `fill`/`stroke`, and multiplied with that too. A colour's alpha
+   * is part of how a shape is PAINTED and belongs to the design; this is a property of the
+   * object, the thing an editor's opacity slider drives and an animation fades.
+   */
+  get opacity(): number {
+    return this._opacity
+  }
+  set opacity(value: number) {
+    if (value === this._opacity) return
+    this._opacity = value
+    bumpObjectRecordEpoch()
+  }
+
+  private _zIndex = 0
+  /**
+   * Where this node sits in the scene-wide stack: higher is in FRONT, resolved by the
+   * renderer's depth buffer. Only a Shape occupies a slot in that order, and a Shape assigns
+   * itself the next number from a running counter at construction (see zOrder.ts) so that
+   * things stack in the order they were made; on a container the field is carried and nothing
+   * reads it.
+   *
+   * Set it directly to restack: `shape.zIndex = nextZIndex()` brings a shape to the front, and
+   * any negative value puts it behind everything that took its number from the counter.
+   */
+  get zIndex(): number {
+    return this._zIndex
+  }
+  set zIndex(value: number) {
+    if (value === this._zIndex) return
+    this._zIndex = value
+    bumpObjectRecordEpoch()
+  }
+
+  /**
+   * This node's opacity times every ancestor's - what the render lanes paint with, and what
+   * decides whether a shape may go in the opaque pass (see render/opacity.ts).
+   */
+  absoluteOpacity(): number {
+    let value = this._opacity
+    for (let node = this.parent; node && value !== 0; node = node.parent) value *= node.opacity
+    return value
+  }
+
   // Set by destroy(), and never unset - see isDestroyed.
   private destroyed = false
 
@@ -283,6 +466,16 @@ export class Node {
     this.offsetY = o.offsetY ?? 0
     this.skewX = o.skewX ?? 0
     this.skewY = o.skewY ?? 0
+    this.width = o.width ?? 0
+    this.height = o.height ?? 0
+    this.visible = o.visible ?? true
+    this.listening = o.listening ?? true
+    this.preventDefault = o.preventDefault ?? true
+    this.opacity = o.opacity ?? 1
+    this.zIndex = o.zIndex ?? 0
+    this.draggable = o.draggable ?? false
+    this.dragDistance = o.dragDistance
+    this.dragBoundFunc = o.dragBoundFunc
   }
 
   hasName(name: string): boolean {
@@ -305,7 +498,29 @@ export class Node {
   /** Attribute keys getAttr()/setAttr()/attrs expose on this node. Override to append the
    * subclass's own keys on top of super.attrKeys(). */
   protected attrKeys(): readonly string[] {
-    return ['id', 'name', 'x', 'y', 'scaleX', 'scaleY', 'rotation', 'offsetX', 'offsetY', 'skewX', 'skewY']
+    return [
+      'id',
+      'name',
+      'x',
+      'y',
+      'width',
+      'height',
+      'rotation',
+      'scaleX',
+      'scaleY',
+      'skewX',
+      'skewY',
+      'offsetX',
+      'offsetY',
+      'visible',
+      'opacity',
+      'zIndex',
+      'listening',
+      'preventDefault',
+      'draggable',
+      'dragDistance',
+      'dragBoundFunc',
+    ]
   }
 
   getAttr(key: string): unknown {
@@ -472,6 +687,81 @@ export class Node {
     this.cachedWorldLocal = local
     this.cachedWorldParent = parentWorld
     return world
+  }
+
+  // --- compound accessors ---
+  //
+  // Each reads and writes a pair of the fields above, for callers that carry a point or a size
+  // around as one value. They are not attributes - see the header on why attrKeys() lists the
+  // components instead.
+
+  /** x and y together. */
+  get position(): Vector2Like {
+    return { x: this.x, y: this.y }
+  }
+  set position(value: Vector2Like) {
+    this.x = value.x
+    this.y = value.y
+  }
+
+  /** scaleX and scaleY together. */
+  get scale(): Vector2Like {
+    return { x: this.scaleX, y: this.scaleY }
+  }
+  set scale(value: Vector2Like) {
+    this.scaleX = value.x
+    this.scaleY = value.y
+  }
+
+  /** skewX and skewY together. */
+  get skew(): Vector2Like {
+    return { x: this.skewX, y: this.skewY }
+  }
+  set skew(value: Vector2Like) {
+    this.skewX = value.x
+    this.skewY = value.y
+  }
+
+  /** offsetX and offsetY together. */
+  get offset(): Vector2Like {
+    return { x: this.offsetX, y: this.offsetY }
+  }
+  set offset(value: Vector2Like) {
+    this.offsetX = value.x
+    this.offsetY = value.y
+  }
+
+  /** width and height together. */
+  get size(): SizeLike {
+    return { width: this.width, height: this.height }
+  }
+  set size(value: SizeLike) {
+    this.width = value.width
+    this.height = value.height
+  }
+
+  /**
+   * The world point this node's local origin lands on - where x/y actually put it once every
+   * ancestor's transform has been applied. Writing it moves the node so that its origin lands
+   * on the given world point, whatever the chain above does.
+   *
+   * The pivot is not in it: localMatrix() applies offsetX/offsetY to the node's CONTENTS, so
+   * the origin is the point x/y names either way, and getter and setter are exact inverses.
+   */
+  get absolutePosition(): Vector2Like {
+    if (!this.parent) return { x: this.x, y: this.y }
+    const p = this.parent.worldMatrix().transformPoint(new Vector3(this.x, this.y, 0))
+    return { x: p.x, y: p.y }
+  }
+  set absolutePosition(value: Vector2Like) {
+    if (!this.parent) {
+      this.x = value.x
+      this.y = value.y
+      return
+    }
+    const local = this.parent.worldMatrix().inverse().transformPoint(new Vector3(value.x, value.y, 0))
+    this.x = local.x
+    this.y = local.y
   }
 
   // --- traversal / search (uniform over leaves and containers) ---

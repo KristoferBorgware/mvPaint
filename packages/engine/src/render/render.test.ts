@@ -466,10 +466,11 @@ it('stroke/lineJoin/lineCap/miterLimit live on Shape itself now, one declaration
 it('repeated tessellate() calls reuse the cache; markGeometryDirty() forces a rebuild', () => {
     class CountingShape extends Shape {
       buildCalls = 0
-      size = 10
+      /** Not `size`, which every Node has as the width/height pair. */
+      side = 10
       protected override buildGeometry(sink: MeshSink): void {
         this.buildCalls++
-        const h = this.size / 2
+        const h = this.side / 2
         const a = sink.vertex(-h, -h, true)
         const b = sink.vertex(h, -h, true)
         const c = sink.vertex(h, h, true)
@@ -480,13 +481,13 @@ it('repeated tessellate() calls reuse the cache; markGeometryDirty() forces a re
     const shape = new CountingShape()
     const first = capture(shape)
     assert(shape.buildCalls === 1, 'first tessellate() call runs buildGeometry()')
-    assert(near(first.verts[1].x, 5), 'cached geometry reflects size at first tessellation (10/2)')
+    assert(near(first.verts[1].x, 5), 'cached geometry reflects the side at first tessellation (10/2)')
 
     const second = capture(shape)
     assert(shape.buildCalls === 1, 'a second tessellate() call with no markGeometryDirty() reuses the cache')
     assert(second.verts.length === first.verts.length, 'replayed geometry has the same vertex count')
 
-    shape.size = 40
+    shape.side = 40
     const stale = capture(shape)
     assert(shape.buildCalls === 1, 'mutating a geometry-affecting field alone does not invalidate the cache')
     assert(near(stale.verts[1].x, 5), 'so tessellate() still replays the OLD geometry until told otherwise')
@@ -494,7 +495,7 @@ it('repeated tessellate() calls reuse the cache; markGeometryDirty() forces a re
     shape.markGeometryDirty()
     const fresh = capture(shape)
     assert(shape.buildCalls === 2, 'markGeometryDirty() forces the next tessellate() to call buildGeometry() again')
-    assert(near(fresh.verts[1].x, 20), 'the rebuilt geometry reflects the new size (40/2)')
+    assert(near(fresh.verts[1].x, 20), 'the rebuilt geometry reflects the new side (40/2)')
 
     // Picking (scene/picking.ts) tessellates independently for hit-testing - it shares the
     // same cache, so repeated picks against an unchanged shape don't re-run buildGeometry().
@@ -1165,10 +1166,10 @@ it('The gather (render/gather.ts)', () => {
 })
 
 //
-// The one thing that MUST be true of Shape.opacity. It scales the alpha of every fragment
-// the object paints, so a shape at 0.5 with entirely opaque colours still cannot write depth
-// ahead of what is behind it - and the classifier is the only thing standing between that and
-// a hole in the picture.
+// The one thing that MUST be true of opacity. It scales the alpha of every fragment the object
+// paints, so a shape at 0.5 with entirely opaque colours still cannot write depth ahead of what
+// is behind it - and the classifier is the only thing standing between that and a hole in the
+// picture.
 it('object opacity keeps a shape out of the opaque pass', () => {
     const solid = new Rect({ width: 1, height: 1, fill: 'black' })
     assert(isOpaqueShape(solid), 'sanity: opaque colours, default opacity')
@@ -1193,6 +1194,37 @@ it('object opacity keeps a shape out of the opaque pass', () => {
     assert(split.translucentStart === 2, 'the faded shape is counted as translucent')
     assert(split.shapes[2] === b, 'and moved into the translucent tail')
     assert(split.shapes[0] === a && split.shapes[1] === c, 'leaving the opaque head in order')
+})
+
+//
+// Opacity multiplies through the chain (Node.opacity), so the classifier has to ask for the
+// ABSOLUTE value. A shape at 1 inside a group at 0.5 paints half-transparent fragments, and one
+// that went into the opaque pass on the strength of its own opacity would write depth ahead of
+// everything it should be blending with.
+it('a faded ancestor takes its descendants out of the opaque pass with it', () => {
+    const group = new Group()
+    const solid = group.addChild(new Rect({ width: 1, height: 1, fill: 'black' }))
+    assert(isOpaqueShape(solid), 'sanity: an opaque shape in an untouched group')
+
+    group.opacity = 0.5
+    assert(solid.opacity === 1, 'the shape\'s own opacity is untouched - nothing is written down onto it')
+    assert(near(solid.absoluteOpacity(), 0.5), 'while its absolute opacity carries the group\'s')
+    assert(!isOpaqueShape(solid), 'so it leaves the opaque pass')
+
+    // Every level multiplies, however deep, and the shape's own is one of the factors.
+    const inner = group.addChild(new Group({ opacity: 0.5 }))
+    const deep = inner.addChild(new Rect({ width: 1, height: 1, fill: 'black', opacity: 0.5 }))
+    assert(near(deep.absoluteOpacity(), 0.125), 'three halves make an eighth')
+
+    group.opacity = 1
+    assert(isOpaqueShape(solid), 'and restoring the group restores the shape')
+
+    // Taking the shape out of the chain takes the ancestor's fade with it, because the value is
+    // read from the chain rather than copied into the node when the chain changed.
+    group.opacity = 0
+    assert(solid.absoluteOpacity() === 0, 'an invisible group makes its contents invisible')
+    solid.remove()
+    assert(solid.absoluteOpacity() === 1, 'and a shape that has left is back to its own')
 })
 
 //

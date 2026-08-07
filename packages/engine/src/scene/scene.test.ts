@@ -393,7 +393,7 @@ it('a hidden group prunes nested subtrees too, however deep', () => {
     assert(!collectZOrder(scene).includes(leaf), 'and so is hiding one in the middle')
 })
 
-it('a layer in a real scene: invisible to everything except its own `enabled` switch', () => {
+it('a layer in a real scene: invisible to everything except its own `visible` switch', () => {
     const scene = new Scene()
     const layer = scene.root.addChild(new Layer({ name: 'background', x: 200 }))
     const inLayer = layer.addChild(new Rect({ width: 40, height: 40 }))
@@ -408,8 +408,8 @@ it('a layer in a real scene: invisible to everything except its own `enabled` sw
 
     // Switching the layer off takes the whole subtree out of everything derived from the
     // render order, in one move, and puts it back untouched.
-    layer.enabled = false
-    assert(!collectZOrder(scene).includes(inLayer), 'a disabled layer takes its contents out of the render order')
+    layer.visible = false
+    assert(!collectZOrder(scene).includes(inLayer), 'a hidden layer takes its contents out of the render order')
     assert(pickNode(scene, 220, 20) === null, 'and out of picking')
     assert(
       !nodesInBox(scene, { x: 100, y: -200 }, { x: 400, y: 200 }).includes(inLayer),
@@ -418,13 +418,38 @@ it('a layer in a real scene: invisible to everything except its own `enabled` sw
     assert(collectZOrder(scene).includes(loose), 'while leaving everything outside it alone')
     assert(pickNode(scene, -480, 20) === loose, 'which is still pickable')
 
-    // `enabled` is the layer's own property, not something written onto its children: a shape
+    // `visible` is the layer's own property, not something written onto its children: a shape
     // that was hidden before is still hidden after, and one that was not is not.
     inLayer.visible = false
-    layer.enabled = true
-    assert(!collectZOrder(scene).includes(inLayer), 're-enabling brings back what was visible, not what was not')
+    layer.visible = true
+    assert(!collectZOrder(scene).includes(inLayer), 'showing it again brings back what was visible, not what was not')
     inLayer.visible = true
     assert(collectZOrder(scene).includes(inLayer), 'and the shape is back once it is visible again')
+})
+
+//
+// `visible` is every node's, so the walk turns back at whatever tier says no - a group, a
+// layer, or a plain Container that is neither. Nothing has to know which kind it found.
+it('a hidden bare Container prunes its subtree exactly as a group or layer does', () => {
+    const scene = new Scene()
+    const box = scene.root.addChild(new Container('holder'))
+    const inside = box.addChild(centredRect({ width: 40, height: 40 }))
+    const outside = scene.root.addChild(centredRect({ x: -500, width: 40, height: 40 }))
+
+    assert(collectZOrder(scene).includes(inside), 'a shape in a plain container renders')
+    assert(pickNode(scene, 0, 0) === inside, 'and is picked')
+
+    box.visible = false
+    assert(!collectZOrder(scene).includes(inside), 'hiding the container takes it out of the render order')
+    assert(pickNode(scene, 0, 0) === null, 'and out of picking')
+    assert(collectZOrder(scene).includes(outside), 'leaving what is not inside it alone')
+
+    // The root is a Container too, which is the same statement at the top of the tree.
+    box.visible = true
+    scene.root.visible = false
+    assert(collectZOrder(scene).length === 0, 'a hidden root is an empty scene')
+    scene.root.visible = true
+    assert(collectZOrder(scene).length === 2, 'and showing it brings back everything that was visible')
 })
 
 it('a layer contributes NO ordering: zIndex still decides, scene-wide', () => {
@@ -456,13 +481,13 @@ it('layers nest, and nest with groups, without any of them learning about the ot
 
     // Either switch prunes the leaf, at whatever depth it sits: the walk turns back at the
     // first one that says no.
-    inner.enabled = false
+    inner.visible = false
     assert(!collectZOrder(scene).includes(leaf), 'the inner layer prunes it')
-    inner.enabled = true
+    inner.visible = true
     group.visible = false
     assert(!collectZOrder(scene).includes(leaf), 'a group above a layer prunes it')
     group.visible = true
-    layer.enabled = false
+    layer.visible = false
     assert(!collectZOrder(scene).includes(leaf), 'and so does a layer above a group')
 })
 

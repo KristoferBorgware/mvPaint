@@ -385,7 +385,7 @@ export class MeshBatcher {
       const depth = depths[i] ?? 0.5
       // One opacity for the whole shape, written into every record it produces - it is a
       // property of the OBJECT, not of one of its materials.
-      const opacity = shape.opacity
+      const opacity = shape.absoluteOpacity()
       const materials = shape.materials()
 
       for (let m = 0; m < this.objectCounts[i]; m++, object++) {

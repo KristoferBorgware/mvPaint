@@ -53,7 +53,7 @@ import {
   type ResizeAnchor,
   type TransformerAnchor,
 } from '../shapes/transformerMath'
-import { draggedPosition } from './nodeDrag'
+import { boundedPosition, draggedPosition } from './nodeDrag'
 import { MarqueeTool } from './MarqueeTool'
 import { hasListener } from '../events/listenerCensus'
 import { deviceFor, eventNamesFor, type PointerAction, type PointerDevice } from '../events/eventNames'
@@ -117,6 +117,12 @@ interface NodeDragSession {
   startPositions: Vector2Like[]
   anchorWorld: Vector2
   active: boolean
+  /**
+   * The node the press took hold of - the shape under the pointer, or the group it belongs to.
+   * It is what the gesture is ABOUT, so it is the one whose dragDistance decides when the drag
+   * starts, even when the transformer's whole selection then travels with it.
+   */
+  grabbed: TransformableNode
 }
 
 /** A drag on a transformer handle: resize (eight anchors) or rotate. */
@@ -485,6 +491,7 @@ export class SceneInputDispatcher {
       startPositions: nodes.map((node) => ({ x: node.x, y: node.y })),
       anchorWorld,
       active: false,
+      grabbed,
     }
     return true
   }
@@ -495,7 +502,9 @@ export class SceneInputDispatcher {
 
     if (!drag.active) {
       const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
-      if (moved <= this.tapThreshold) return
+      // The grabbed node may set its own distance; the dispatcher's threshold is the default
+      // for everything that does not. See Node.dragDistance.
+      if (moved <= (drag.grabbed.dragDistance ?? this.tapThreshold)) return
       drag.active = true
       this.setCursor('grabbing')
       this.fireOnNodes('dragstart', drag.nodes)
@@ -505,7 +514,7 @@ export class SceneInputDispatcher {
     if (!world) return
     drag.nodes.forEach((node, i) => {
       const start = drag.startPositions[i]
-      const next = draggedPosition(node, start.x, start.y, drag.anchorWorld, world)
+      const next = boundedPosition(node, draggedPosition(node, start.x, start.y, drag.anchorWorld, world))
       node.x = next.x
       node.y = next.y
     })
@@ -620,13 +629,26 @@ export class SceneInputDispatcher {
     if (this.grabContent && world) {
       if (this.dragNodes && this.armDrag(p.x, p.y, hit)) {
         this.restartGesture()
-        e.preventDefault()
+        this.suppressDefault(e, hit)
         return
       }
     }
 
     this.restartGesture()
-    e.preventDefault()
+    this.suppressDefault(e, hit)
+  }
+
+  /**
+   * Suppresses the browser's own response to a press - text selection, a scroll, a native image
+   * drag - unless the node under the pointer asked to keep it (see Node.preventDefault). Empty
+   * space answers like a node that did not ask.
+   *
+   * Only the presses a NODE is the subject of come through here. The canvas's own gestures - a
+   * transformer handle, a middle-button pan, a pinch, the wheel, the context menu - suppress
+   * unconditionally, since there is nothing under them whose opinion it would be.
+   */
+  private suppressDefault(e: PointerEvent, hit: Node | null): void {
+    if (hit?.preventDefault ?? true) e.preventDefault()
   }
 
   private onPointerMove = (e: PointerEvent): void => {
@@ -677,6 +699,9 @@ export class SceneInputDispatcher {
     if (this.pointers.size === 0) {
       const moved = Math.hypot(pointer.x - pointer.downX, pointer.y - pointer.downY)
       const hadMarquee = this.marquee.active
+      // The dispatcher's own threshold, never a node's dragDistance: this asks whether the
+      // press was a CLICK, which is a question about the gesture rather than about whatever it
+      // landed on, and a node that is hard to start dragging is not thereby hard to click.
       const wasTap = !this.multiTouch && moved <= this.tapThreshold
 
       this.endTransform()

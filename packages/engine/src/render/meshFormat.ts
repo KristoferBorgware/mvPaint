@@ -99,7 +99,7 @@ export const MESH_OBJECT_ID_MASK = 0x7fffffff
 //   88  gradientEnd: vec2<f32>                 (8)
 //   96  gradientEndRadius: f32
 //   100 stopPositions: array<f32, MAX_GRADIENT_STOPS>       (32)
-//   132 opacity: f32 (the object's own transparency - see Shape.opacity)
+//   132 opacity: f32 (the object's transparency times every ancestor's - see Node.opacity)
 //   136 (8 bytes padding, vec4 alignment)
 //   144 stopColors: array<vec4<f32>, MAX_GRADIENT_STOPS>    (128)
 //   272 fillColor: vec4<f32>                   (16) - used when fillType == color

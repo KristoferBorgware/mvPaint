@@ -4,26 +4,29 @@
 // chain, and the render lanes already compose that (child_world = parent_world *
 // child_local), so a shape inside a group needs no special handling anywhere downstream.
 //
-// A group has NO SIZE OF ITS OWN. Its extent is whatever it currently holds, measured on
-// demand - the same relationship the transformer's frame has with the nodes it wraps, and
-// for the same reason: a stored width and height would be a second, independent claim about
-// the same thing, and would be wrong the moment a child moved. Add a shape to a group and
-// the group grows; move that shape and the group follows it; empty the group and it has no
-// extent at all (an invalid AABB, not a zero-sized one - there is a difference between a
-// group holding nothing and a group holding something infinitely small).
+// A GROUP IS MEASURED, NOT SIZED. bounds() reports whatever it currently holds, computed on
+// demand - the same relationship the transformer's frame has with the nodes it wraps, and for
+// the same reason: a stored extent would be a second, independent claim about the same thing,
+// and would be wrong the moment a child moved. Add a shape to a group and the group grows; move
+// that shape and the group follows it; empty the group and it has no extent at all (an invalid
+// AABB, not a zero-sized one - there is a difference between a group holding nothing and a
+// group holding something infinitely small). The width/height every Node carries are along for
+// the ride here, and nothing measures a group from them.
 //
 // Groups nest. bounds() recurses through child groups, composing each one's local matrix on
 // the way down, so a group of groups measures the leaves.
 //
-// WHAT A GROUP GOVERNS FOR ITS SUBTREE.
+// WHAT A GROUP GOVERNS FOR ITS SUBTREE - all of it inherited from Node, which is what lets a
+// group and a shape answer the same questions the same way:
 //
 //   visible   - false hides everything inside, not just the group. Nothing draws, and
 //               nothing can be picked either, since an invisible node is not a candidate.
-//   listening - inherited from Node: false makes the whole subtree inert to events.
+//   opacity   - multiplied through the chain, so fading a group fades what is in it.
+//   listening - false makes the whole subtree inert to events.
 //   draggable - a press on a shape inside a draggable group drags the GROUP (see
 //               input/SceneInputDispatcher). This is what makes a group feel like one
 //               object under the pointer rather than a folder its contents happen to
-//               share.
+//               share, and it is the one of the four a Group reads differently from a Shape.
 //
 // Note which of those is NOT here: nothing about selection. What is selected is an
 // application's own idea (see Transformer's header), and an application that wants a click
@@ -37,16 +40,11 @@
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Container } from './Container'
-import { Layer } from './Layer'
 import { Node, type NodeOptions } from './Node'
 import { Shape } from './Shape'
 
-export interface GroupOptions extends NodeOptions {
-  /** Hide the whole subtree. Default true (shown). */
-  visible?: boolean
-  /** Does a drag on a shape inside this group move the group? Default true. */
-  draggable?: boolean
-}
+/** A group adds no options of its own - everything it takes is a Node's. */
+export type GroupOptions = NodeOptions
 
 /**
  * A node's own bounds in its own local space, or null for something with nothing to
@@ -63,22 +61,6 @@ export const shapeGeometryBounds: LocalBoundsResolver = (node) =>
 
 export class Group extends Container {
   override readonly nodeName: string = 'Group'
-
-  /** Hides this group and everything under it. See the header. */
-  visible = true
-
-  /** Whether a drag starting on a descendant moves this group. See the header. */
-  draggable = false
-
-  constructor(options: GroupOptions = {}) {
-    super(options)
-    this.visible = options.visible ?? true
-    this.draggable = options.draggable ?? false
-  }
-
-  protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'visible', 'draggable']
-  }
 
   /**
    * The extent of everything this group holds, in the group's OWN local space - each
@@ -116,8 +98,8 @@ export class Group extends Container {
 
 /**
  * Accumulate a container's contents into `box`, recursing through the containers that merely
- * hold things - a nested Group, and a Layer, which is the same in this respect - and skipping
- * a hidden group or a disabled layer whole rather than shape by shape.
+ * hold things - a nested Group, or a Layer, which is the same in this respect - and skipping a
+ * hidden subtree whole rather than shape by shape.
  *
  * A free function rather than a method because it has to run over a Layer as readily as a
  * Group, and a Layer is deliberately not one.
@@ -129,18 +111,12 @@ function encapsulateChildren(
   boundsOf: LocalBoundsResolver,
 ): void {
   for (const child of container.children) {
+    if (!child.visible) continue
     const toBox = into.mul(child.localMatrix())
-    if (child instanceof Group) {
-      if (!child.visible) continue
+    if (child instanceof Container) {
       encapsulateChildren(child, box, toBox, boundsOf)
       continue
     }
-    if (child instanceof Layer) {
-      if (!child.enabled) continue
-      encapsulateChildren(child, box, toBox, boundsOf)
-      continue
-    }
-    if (child instanceof Shape && !child.visible) continue
     const local = boundsOf(child)
     if (!local || !local.valid()) continue
     box.encapsulate(local.transformed(toBox))
@@ -154,10 +130,13 @@ function encapsulateChildren(
  */
 export type TransformableNode = Shape | Group
 
-/** True if this node, or anything above it, is a hidden group. */
-export function hiddenByGroup(node: Node): boolean {
+/**
+ * True if anything above this node is hidden, so the node does not draw however its own
+ * `visible` reads. The node itself is not tested - that one the caller has in front of it.
+ */
+export function hiddenByAncestor(node: Node): boolean {
   for (let p = node.parent; p; p = p.parent) {
-    if (p instanceof Group && !p.visible) return true
+    if (!p.visible) return true
   }
   return false
 }

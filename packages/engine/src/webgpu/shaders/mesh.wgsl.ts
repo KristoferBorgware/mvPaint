@@ -166,7 +166,7 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
 
   // The object's own transparency, applied last and to the alpha only - the pipeline blends
   // straight (non-premultiplied) alpha, so scaling rgb here would darken the shape instead of
-  // fading it. See Shape.opacity, and render/opacity.ts for why anything below 1 keeps the
+  // fading it. See Node.opacity, and render/opacity.ts for why anything below 1 keeps the
   // shape out of the opaque pass.
   color.a = color.a * obj.opacity;
 

@@ -19,7 +19,7 @@ import { Vector2 } from '../math/Vector2'
 import { Vector3 } from '../math/Vector3'
 import { Camera2D } from '../camera/Camera2D'
 import { Scene } from '../scene/Scene'
-import { draggedPosition } from './nodeDrag'
+import { boundedPosition, draggedPosition } from './nodeDrag'
 import { screenToWorld } from './viewport'
 import { SceneInputDispatcher } from './SceneInputDispatcher'
 import { attachSceneInput, type SceneInputHost } from './sceneInput'
@@ -230,6 +230,114 @@ it('draggable: off by default, opted into per node', () => {
     assert(!centredRect().draggable, 'a shape is not draggable unless it says so')
     assert(centredRect({ draggable: true }).draggable, 'draggable is turned on per node')
     assert(!new Group().draggable, 'a group is not draggable either')
+    assert(!new Container().draggable, 'and neither is a plain container - it is every node\'s field')
+})
+
+//
+// dragBoundFunc constrains a drag in WORLD space (see Node.dragBoundFunc), so the two
+// conversions around it have to be exact inverses: a function that returns its argument
+// unchanged must leave the node exactly where the unconstrained math put it, whatever the
+// parent chain does to the frame in between.
+it('dragBoundFunc is applied in world space and mapped back through the parent', () => {
+    const root = new Container()
+    // A parent that translates, turns and doubles - so parent space and world space share no
+    // axis, and a constraint written in one would be visibly wrong if applied in the other.
+    const frame = root.addChild(new Group({ x: 200, y: -50, rotation: 90, scaleX: 2, scaleY: 2 }))
+    const node = frame.addChild(centredRect({ x: 10, y: 4, width: 10, height: 10 }))
+
+    const wanted = { x: 30, y: -12 }
+    assert(boundedPosition(node, wanted) === wanted, 'a node with no bound function is handed its position back')
+
+    node.dragBoundFunc = (p) => p
+    const through = boundedPosition(node, wanted)
+    assert(near(through.x, wanted.x) && near(through.y, wanted.y), 'and an identity bound is a round trip, not a rotation')
+
+    // A slider: y pinned in WORLD terms. The parent is turned a quarter turn, so pinning the
+    // world y is a statement about the node's local x - which is the whole reason the function
+    // is not simply handed the parent-space value.
+    node.dragBoundFunc = (p) => ({ x: p.x, y: 0 })
+    const pinned = boundedPosition(node, wanted)
+    const world = frame.worldMatrix().transformPoint(new Vector3(pinned.x, pinned.y, 0))
+    assert(near(world.y, 0), 'the constrained position really does land on world y = 0')
+
+    // The node is passed as the second argument, for one function shared across many nodes.
+    let seen: unknown = null
+    node.dragBoundFunc = (p, n) => {
+      seen = n
+      return p
+    }
+    boundedPosition(node, wanted)
+    assert(seen === node, 'the node itself comes with the position')
+})
+
+//
+// dragDistance and preventDefault are both read off the node the press is ABOUT, which is what
+// makes them per-node rather than per-canvas. Driven through the dispatcher because that is
+// where "the node the press is about" is decided.
+it('dragDistance is the grabbed node\'s, and preventDefault is the hit node\'s', () => {
+    const listeners = new Map<string, (e: never) => void>()
+    const canvas = {
+      addEventListener: (type: string, fn: (e: never) => void) => listeners.set(type, fn),
+      removeEventListener: (type: string) => listeners.delete(type),
+      setPointerCapture: () => {},
+      releasePointerCapture: () => {},
+      hasPointerCapture: () => false,
+      getBoundingClientRect: () => ({ left: 0, top: 0 }),
+      style: { cursor: '' },
+    }
+
+    const root = new Container()
+    const stubborn = root.addChild(centredRect({ name: 'stubborn', width: 40, height: 40, draggable: true }))
+    let under: Shape | null = stubborn
+
+    resetListenerCensus()
+    const dispatcher = new SceneInputDispatcher(canvas as unknown as HTMLCanvasElement, {
+      root,
+      pick: () => under,
+      toWorld: (x, y) => new Vector2(x, y),
+    })
+
+    let suppressed = 0
+    const send = (type: string, x: number, y: number) =>
+      listeners.get(type)?.({ pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientX: x, clientY: y, shiftKey: false, altKey: false, preventDefault: () => { suppressed++ }, type } as never)
+
+    // The dispatcher's own threshold is 6, so a 10px move would ordinarily start the drag.
+    stubborn.dragDistance = 30
+    send('pointerdown', 0, 0)
+    send('pointermove', 10, 0)
+    assert(stubborn.x === 0, 'a node that asked for more distance has not started moving yet')
+    send('pointermove', 40, 0)
+    assert(near(stubborn.x, 40), 'and starts once the pointer has travelled that far')
+    send('pointerup', 40, 0)
+
+    // 0 is the other end: the node follows the pointer from the first move.
+    const eager = root.addChild(centredRect({ name: 'eager', width: 40, height: 40, draggable: true, dragDistance: 0 }))
+    under = eager
+    send('pointerdown', 0, 0)
+    send('pointermove', 1, 0)
+    assert(near(eager.x, 1), 'dragDistance 0 starts the drag on the first move')
+    send('pointerup', 1, 0)
+
+    // preventDefault, read off the node under the pointer rather than off the canvas.
+    suppressed = 0
+    send('pointerdown', 0, 0)
+    send('pointerup', 0, 0)
+    assert(suppressed === 1, 'a press on an ordinary node suppresses the browser default')
+
+    eager.preventDefault = false
+    suppressed = 0
+    send('pointerdown', 0, 0)
+    send('pointerup', 0, 0)
+    assert(suppressed === 0, 'and a node that asked to keep it keeps it')
+
+    under = null
+    suppressed = 0
+    send('pointerdown', 500, 500)
+    send('pointerup', 500, 500)
+    assert(suppressed === 1, 'empty space answers like a node that never asked')
+
+    dispatcher.destroy()
+    resetListenerCensus()
 })
 
 //

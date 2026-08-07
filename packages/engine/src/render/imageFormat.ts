@@ -20,7 +20,7 @@ export const IMAGE_VERTEX_FLOATS = 5 // 32-bit slots per vertex (2 + 2 + 1)
 //   0   model: mat4x4<f32>   (64)
 //   64  tint: vec4<f32>      (16)
 //   80  depth: f32 (NDC z in (0,1) - the same zIndex-derived value the other lanes use)
-//   84  opacity: f32 (the object's own transparency - see Shape.opacity)
+//   84  opacity: f32 (the object's transparency times every ancestor's - see Node.opacity)
 //   88  (8 bytes padding, to a 16-byte multiple)
 //   96  end
 //

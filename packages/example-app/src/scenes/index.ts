@@ -59,7 +59,7 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'layers',
     title: 'Layers',
     description:
-      "Layer: a transform container with an enabled switch, without the picking and bounds aggregation a Group adds. It is not a render target and contributes no ordering - the scene draws in one pass and zIndex sorts scene-wide, so two layers interleave. enabled gates the subtree without touching a node's own visible. Click the paired group/layer blocks to compare hit testing.",
+      "Layer: a transform container without the picking and bounds aggregation a Group adds. It is not a render target and contributes no ordering - the scene draws in one pass and zIndex sorts scene-wide, so two layers interleave. Its visible gates the whole subtree without touching a node's own. Click the paired group/layer blocks to compare hit testing.",
     build: buildLayerScene,
   },
   {

@@ -167,7 +167,7 @@ export class GlTextBatcher {
 
       f32.set(node.worldMatrix().toGPU(), base)
       f32[base + TEXT_OBJECT_DEPTH_OFFSET / 4] = depths.get(node) ?? 0.5
-      f32[base + TEXT_OBJECT_OPACITY_OFFSET / 4] = node.opacity
+      f32[base + TEXT_OBJECT_OPACITY_OFFSET / 4] = node.absoluteOpacity()
       // Floats, not reinterpreted integer bits - see GlObjectTexture.ts's header.
       f32[base + TEXT_OBJECT_FILL_TYPE_OFFSET / 4] = FILL_TYPE_CODE[material.fillPriority]
 

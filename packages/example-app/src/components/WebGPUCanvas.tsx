@@ -3,6 +3,8 @@ import Stats from 'stats.js'
 import {
   createSceneRenderer,
   Camera2D,
+  Group,
+  Shape,
   Transformer,
   type TransformableNode,
   type Node,
@@ -232,10 +234,14 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       // `keepDragOptOut` is how a scene keeps a node OUT of that: groupScene turns one group
       // off deliberately, to show what draggable: false does, and a blanket pass would undo
       // exactly the thing it is demonstrating.
+      //
+      // Shapes and Groups only. `draggable` is on every Node, but those are the two tiers a
+      // drag reads it from (see Group's draggableGroup), and the root is a bare Container -
+      // turning it on there would say every press takes hold of the whole scene.
       const optedOut = new Set<Node>(contentRef.current.keepDragOptOut ?? [])
       sceneGraph.root.traversePreOrder((node) => {
-        const draggable = node as Node & { draggable?: boolean }
-        if (draggable.draggable !== undefined && !optedOut.has(node)) draggable.draggable = true
+        if (!(node instanceof Shape || node instanceof Group)) return
+        if (!optedOut.has(node)) node.draggable = true
       })
 
       // Re-frame: each scene lays itself out around the origin, so a pan left over from the

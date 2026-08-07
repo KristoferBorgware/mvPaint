@@ -21,7 +21,6 @@ import { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
-import { Layer } from '../shapes/Layer'
 import { MSDFText } from '../shapes/MSDFText'
 import type { FontFamilies } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
@@ -84,23 +83,23 @@ export function hitTestText(text: MSDFText, fonts: FontFamilies, worldX: number,
 }
 
 /**
- * Every Shape (mesh shape or MSDFText) matching `predicate`, stable-sorted ascending by
+ * Every visible Shape (mesh shape or MSDFText) matching `predicate`, stable-sorted ascending by
  * zIndex (Array.prototype.sort is stable per spec, so ties keep scene-traversal order).
  * The renderer and pickNode() both build on this so "what's on top" and "what's under
  * the depth test" can never disagree.
  *
- * A hidden Group takes its whole subtree out with it, and a disabled Layer does the same;
- * the walk turns back at one rather than testing each shape's ancestors. Hiding a group -
- * or switching off a layer - of ten thousand shapes should cost one check, where asking
- * every shape about its ancestors would cost more the deeper the scene nests.
+ * A hidden node takes its whole subtree out with it, whatever tier it is - the walk turns back
+ * at one rather than testing each shape's ancestors. Hiding a group, a layer or a bare
+ * container of ten thousand shapes costs one check, where asking every shape about its
+ * ancestors would cost more the deeper the scene nests. `predicate` therefore never has to ask
+ * about visibility; it is for whatever else the caller is narrowing to.
  *
- * That is also the ONLY thing a layer does here. It contributes no ordering: its contents
- * are collected in place and sorted by their own zIndex alongside everything else, so a
- * scene that uses layers stacks exactly as the same scene without them would.
+ * A layer contributes no ordering: its contents are collected in place and sorted by their own
+ * zIndex alongside everything else, so a scene that uses layers stacks exactly as the same
+ * scene without them would.
  */
 function collectShapes(node: Node, predicate: (shape: Shape) => boolean, out: Shape[]): void {
-  if (node instanceof Group && !node.visible) return
-  if (node instanceof Layer && !node.enabled) return
+  if (!node.visible) return
   if (node instanceof Shape && predicate(node)) out.push(node)
   if (node instanceof Container) {
     for (const child of node.children) collectShapes(child, predicate, out)
@@ -130,7 +129,7 @@ function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean)
  */
 export function collectZOrder(scene: Scene, sorted = true): Shape[] {
   const all: Shape[] = []
-  collectShapes(scene.root, (shape) => shape.visible, all)
+  collectShapes(scene.root, () => true, all)
   return sorted ? all.sort((a, b) => a.zIndex - b.zIndex) : all
 }
 
@@ -148,7 +147,7 @@ export function depthForRank(rank: number, count: number): number {
  * candidates are then skipped rather than matched.
  */
 export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: FontFamilies): PickableNode | null {
-  const ordered = collectSortedShapes(scene, (shape) => shape.visible && shape.pickable)
+  const ordered = collectSortedShapes(scene, (shape) => shape.pickable)
   for (let i = ordered.length - 1; i >= 0; i--) {
     const node = ordered[i]
     if (node instanceof MSDFText) {

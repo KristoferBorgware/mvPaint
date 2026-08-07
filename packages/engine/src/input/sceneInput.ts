@@ -445,11 +445,13 @@ export function attachSceneInput(
     // A fixed number of SCREEN pixels per press, so a key-pan feels the same however far the
     // view is zoomed in.
     const step = cameraInput.keyPanStep / Math.max(1e-6, host.camera.zoom)
+    // Each key moves the view the way it points. The scene is y-down, so moving the view UP is
+    // a smaller camera y - camera.y is the top edge of what is on screen (see Camera2D).
     switch (event.key) {
       case 'ArrowLeft': if (!cameraInput.pan) return; host.camera.x -= step; break
       case 'ArrowRight': if (!cameraInput.pan) return; host.camera.x += step; break
-      case 'ArrowUp': if (!cameraInput.pan) return; host.camera.y += step; break
-      case 'ArrowDown': if (!cameraInput.pan) return; host.camera.y -= step; break
+      case 'ArrowUp': if (!cameraInput.pan) return; host.camera.y -= step; break
+      case 'ArrowDown': if (!cameraInput.pan) return; host.camera.y += step; break
       case '+':
       case '=': if (!cameraInput.zoom) return; applyZoom(centre.x, centre.y, clampZoom(host.getZoom() * cameraInput.keyZoomStep)); break
       case '-':

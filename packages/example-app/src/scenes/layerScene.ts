@@ -4,10 +4,10 @@
 // boundary - the whole scene is drawn in one pass and zIndex decides what is on top, scene-
 // wide. So the four sections below are each about what a layer does and does NOT do:
 //
-//   top left      three layers of one picture, each switching its slice off with `enabled`
+//   top left      three layers of one picture, each switching its slice off with `visible`
 //   top right     two layers interleaving by zIndex, which a stack of canvases could not do
 //   bottom left   the same four blocks in a group and in a layer - click them and compare
-//   bottom right  a layer's transform reaches its contents, and `enabled` never touches a
+//   bottom right  a layer's transform reaches its contents, and `visible` never touches a
 //                 shape's own `visible`
 
 import { Circle, Group, Layer, Polyline, Rect, MSDFText, type ColorInput, type Scene } from '@mvpaint/engine'
@@ -135,10 +135,10 @@ export function buildLayerScene(scene: Scene): SceneContent {
   root.addChild(caption(-130, 260, 'in a Layer: click one, get that one'))
   root.addChild(label(-470, 300, 'the same four blocks in each container - click them and compare'))
 
-  // --- the transform reaches the contents, and `enabled` is the layer's own --------------
+  // --- the transform reaches the contents, and `visible` is the layer's own --------------
   //
   // The layer slides, and everything in it slides with it - it carries a transform because
-  // every Node does. The blinking dot is the second point: `enabled` is a property OF THE
+  // every Node does. The blinking dot is the second point: `visible` is a property OF THE
   // LAYER and is never written onto its children, so when the layer comes back the dot is in
   // whatever state its own `visible` is in, rather than being forced back on with the rest.
   const drifting = root.addChild(new Layer({ name: 'drifting', x: 235, y: 180 }))
@@ -158,8 +158,8 @@ export function buildLayerScene(scene: Scene): SceneContent {
 
       // Two layers of the schematic, on different cycles, so the picture is sometimes whole,
       // sometimes routes-only, sometimes bare plate.
-      routes.enabled = Math.sin(t * 0.7) > -0.35
-      pins.enabled = Math.sin(t * 1.1 + 1.6) > -0.2
+      routes.visible = Math.sin(t * 0.7) > -0.35
+      pins.visible = Math.sin(t * 1.1 + 1.6) > -0.2
 
       // The layer's own transform, which its contents follow without knowing anything moved.
       drifting.x = 235 + Math.sin(t * 0.9) * 45
@@ -167,7 +167,7 @@ export function buildLayerScene(scene: Scene): SceneContent {
       // The dot blinks on its own fast cycle; the layer switches on a slower one. The two do
       // not interact: when the layer returns, the dot is wherever its own cycle has it.
       blinker.visible = Math.sin(t * 4) > 0
-      drifting.enabled = Math.sin(t * 0.5 + 2.2) > -0.5
+      drifting.visible = Math.sin(t * 0.5 + 2.2) > -0.5
     },
   }
 }

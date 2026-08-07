@@ -190,7 +190,7 @@ export class GlMeshBatcher {
       const model = shape.worldMatrix().toGPU()
       const depth = depths[i] ?? 0.5
       // One opacity for the whole shape, written into every record it produces.
-      const opacity = shape.opacity
+      const opacity = shape.absoluteOpacity()
       const materials = shape.materials()
 
       for (let m = 0; m < this.objectCounts[i]; m++, object++) {

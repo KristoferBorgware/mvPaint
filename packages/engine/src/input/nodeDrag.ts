@@ -37,3 +37,26 @@ export function draggedPosition(
 
   return { x: startX + dx, y: startY + dy }
 }
+
+/**
+ * Where the node's x/y should land once its own dragBoundFunc has had the position, or the
+ * unconstrained answer when it has none.
+ *
+ * The function is handed a WORLD position and returns one (see Node.dragBoundFunc), so a
+ * constraint is written in the coordinates the scene is laid out in. Both conversions go
+ * through the parent's world matrix, which is what makes them exact inverses: a function that
+ * returns its argument unchanged leaves the node exactly where `local` put it.
+ */
+export function boundedPosition(node: Node, local: Vector2Like): Vector2Like {
+  const bound = node.dragBoundFunc
+  if (!bound) return local
+
+  const parent = node.parent
+  if (!parent) return bound({ x: local.x, y: local.y }, node)
+
+  const parentWorld = parent.worldMatrix()
+  const world = parentWorld.transformPoint(new Vector3(local.x, local.y, 0))
+  const wanted = bound({ x: world.x, y: world.y }, node)
+  const back = parentWorld.inverse().transformPoint(new Vector3(wanted.x, wanted.y, 0))
+  return { x: back.x, y: back.y }
+}

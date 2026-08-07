@@ -28,7 +28,7 @@
 // Anchors are held at a constant SCREEN size: their world size is divided by the camera
 // zoom, so a handle stays comfortably clickable whether the view is zoomed way in or out.
 //
-// Parts stay Shape.visible = true permanently, attached or not - hiding them is done by
+// Parts stay visible = true permanently, attached or not - hiding them is done by
 // scaling to zero instead (see hideAll()). Toggling visible would drop them out of
 // collectZOrder's traversal (see scene/picking.ts), changing the mesh batcher's shape SET
 // the instant a set is attached or cleared - and MeshBatcher.rebuild() re-tessellates and

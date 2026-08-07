@@ -164,7 +164,7 @@ export class ShadowBatcher {
       // solid shadow would look like two objects. Folded into the colour here rather than
       // carried in the record, because this lane already multiplies an opacity into the alpha
       // on the CPU and one more factor costs nothing.
-      f32[colorBase + 3] = c[3] * shape.shadowOpacity * shape.opacity
+      f32[colorBase + 3] = c[3] * shape.shadowOpacity * shape.absoluteOpacity()
 
       // The slot, read fresh: a shape still waiting on its first bake (or one the atlas had
       // no room for) gets a zero-size quad, which rasterizes nothing, rather than sampling

@@ -196,7 +196,7 @@ export class ImageBatcher {
       f32[tintBase + 2] = t[2]
       f32[tintBase + 3] = t[3]
       f32[base + IMAGE_OBJECT_DEPTH_OFFSET / 4] = depths.get(image) ?? 0.5
-      f32[base + IMAGE_OBJECT_OPACITY_OFFSET / 4] = image.opacity
+      f32[base + IMAGE_OBJECT_OPACITY_OFFSET / 4] = image.absoluteOpacity()
     })
 
     this.device.queue.writeBuffer(this.objectBuffer, 0, buf)

@@ -47,15 +47,16 @@ class Star extends CustomShape {
 
 /** A heart, from two cubics - the case a polygon cannot approximate without looking like one. */
 class Heart extends CustomShape {
+  // `span`, not `size`: every Node has a `size`, and it is the width/height pair.
   constructor(
-    private readonly size: number,
+    private readonly span: number,
     options: CustomShapeOptions = {},
   ) {
     super(options)
   }
 
   protected override describe(ctx: ShapeContext): void {
-    const s = this.size
+    const s = this.span
     ctx.moveTo(0, s)
     ctx.bezierCurveTo(-s * 1.4, -s * 0.35, -s * 0.55, -s * 1.15, 0, -s * 0.42)
     ctx.bezierCurveTo(s * 0.55, -s * 1.15, s * 1.4, -s * 0.35, 0, s)

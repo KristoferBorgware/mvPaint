@@ -81,14 +81,31 @@ transform** — position, rotation, scale, skew and pivot offset (`rotation` in 
 `math/angle.ts` for where the unit changes). Every node in the tree is
 placeable, drawable or not.
 
+It also carries every attribute Konva puts on its own `Node`, which is the reference this API is
+shaped after: `width`/`height`, `visible`, `opacity`, `zIndex`, `listening`, `preventDefault`,
+`draggable`, `dragDistance` and `dragBoundFunc` — plus the compound accessors `position`,
+`scale`, `skew`, `offset`, `size` and `absolutePosition`, which read and write the components in
+pairs. `attrKeys()` lists the components rather than the compounds, so `node.attrs` reports each
+value once. Three of Konva's are deliberately absent, each because of what this renderer is
+rather than what the attribute is: `globalCompositeOperation` (a canvas blend mode; here a
+pipeline per mode and a repack of the draw list), `transformsEnabled` (names an optimisation
+`localMatrix()` already performs unconditionally) and `filters` (Konva's run over a cached
+canvas; there is no cache-to-texture layer). `shapes/konvaParity.test.ts` pins all three claims.
+
+`visible` and `opacity` are the two that govern a whole subtree — a hidden node takes everything
+under it out of the render and out of picking, and opacity multiplies through the chain
+(`absoluteOpacity()`). `zIndex`, `width` and `height` are carried on a container and read on a
+`Shape`: only a shape occupies a slot in the render order or draws from a size.
+
 `Container extends Node` adds the child list. Traversal and search stay on `Node`, which calls
 a protected `eachChild()` that `Container` overrides — so any node can be walked uniformly and a
 leaf yields nothing.
 
-`Shape extends Node` adds everything that affects rendering: size, `zIndex`, `visible`,
-`pickable`, `draggable`, `opacity`, `overlay`, the full fill/stroke vocabulary, and the shadow
-fields. It is the base of every drawable — `Rect`, `Circle`, `Polyline`, `Path`, `Image`,
-`CustomShape`, and `Text` with its two subclasses `MSDFText` and `VectorText`.
+`Shape extends Node` adds what is specific to painting: `pickable`, `overlay`, the full
+fill/stroke vocabulary, and the shadow fields. It also takes its `zIndex` from the running
+counter rather than leaving it at 0. It is the base of every drawable — `Rect`, `Circle`,
+`Polyline`, `Path`, `Image`, `CustomShape`, and `Text` with its two subclasses `MSDFText` and
+`VectorText`.
 
 None of the paint is on by default. `fill` and `stroke` are absent until set, so a shape with
 neither draws nothing while remaining a full participant — measured, picked, stacked. Its fill
@@ -99,19 +116,21 @@ going unclickable in the middle. `hasFill()` and `hasStroke()` are the predicate
 
 `Group extends Container` (`shapes/Group.ts`) draws nothing and emits no geometry.
 It contributes a matrix in the middle of the chain, which world-matrix composition already
-handles, so a shape inside a group needs no special case downstream. A group has no size of its
-own: `group.bounds()` is computed on demand from whatever it currently holds, walking into
-nested groups and composing their matrices. Nothing caches it, so nothing needs invalidating
-when a child moves.
+handles, so a shape inside a group needs no special case downstream. A group is measured rather
+than sized: `group.bounds()` is computed on demand from whatever it currently holds, walking
+into nested groups and composing their matrices. Nothing caches it, so nothing needs
+invalidating when a child moves.
 
-A group governs three properties for its whole subtree: `visible`, `listening`, and
-`draggable` — a press on a shape inside a draggable group takes hold of the group.
+A group governs four properties for its whole subtree — `visible`, `opacity`, `listening` and
+`draggable` — all of them inherited from `Node`. Only the last it reads differently from a
+shape: a press on a shape inside a draggable group takes hold of the group.
 
-`Layer extends Container` (`shapes/Layer.ts`) names a slice of the scene and carries one
-`enabled` flag that takes that slice out of the render, out of picking and out of marquee
-selection. `enabled` stays on the layer: each shape keeps its own `visible`, so re-enabling
-restores exactly what was visible before. Stacking still comes from each shape's scene-wide
-`zIndex`, so shapes in different layers interleave by `zIndex` alone.
+`Layer extends Container` (`shapes/Layer.ts`) names a slice of the scene. Adding nothing of its
+own, it is the plainest container there is: `visible = false` takes the whole slice out of the
+render, out of picking and out of marquee selection, and it is a property of the layer alone —
+each shape keeps its own `visible`, so showing the layer again restores exactly what was visible
+before. Stacking still comes from each shape's scene-wide `zIndex`, so shapes in different
+layers interleave by `zIndex` alone.
 
 Because it extends `Container` rather than `Group`, `closestGroup()`, `outermostGroup()` and
 `draggableGroup()` walk past it and every shape inside stays independently pickable, draggable
@@ -649,7 +668,7 @@ transparent black in the shader and counts as translucent.
 
 ### Object opacity
 
-`Shape.opacity` (0…1, default 1) fades a whole object — fill, stroke, gradient, glyph, texture
+`Node.opacity` (0…1, default 1) fades a whole object — fill, stroke, gradient, glyph, texture
 and shadow — and multiplies with each color's own alpha, which stays untouched. It is the
 property an editor's opacity slider drives and an animation fades.
 
@@ -659,14 +678,17 @@ would darken the shape rather than fade it. The shadow lane needs no separate fi
 color alpha is already `shadowColor.a × shadowOpacity` on the CPU and object opacity is one
 more factor there — a faded shape's shadow fades with it.
 
-`isOpaqueShape()` checks `opacity < 1` **first**, ahead of any material, so opacity can only
-ever move a shape *out* of the opaque pass.
+`isOpaqueShape()` checks `absoluteOpacity() < 1` **first**, ahead of any material, so opacity
+can only ever move a shape *out* of the opaque pass.
 
-**It applies to one object, not a subtree.** Group opacity is a separate feature requiring an
-offscreen target and a single composite, because multiplying the value onto each child makes
-children show through *each other* where they overlap. The same applies in miniature to a shape
-whose parts are styled independently: `VectorText`'s runs are separate object records, so
-overlapping runs at partial opacity blend against one another.
+**It multiplies through the chain.** `absoluteOpacity()` is a node's own value times every
+ancestor's, and that product is what every lane writes into the object record — so fading a
+group fades what is in it. The subtree is composited per object rather than as a unit, which
+shows wherever two of a faded group's children overlap: each is blended against the other rather
+than the pair being blended once against the background. Compositing once means drawing the
+subtree to an offscreen target. The same applies in miniature to a shape whose parts are styled
+independently: `VectorText`'s runs are separate object records, so overlapping runs at partial
+opacity blend against one another.
 
 ### Shadows in the order
 
@@ -733,7 +755,7 @@ stride as exported constants):
 | `gradientEnd` | `vec2<f32>` | |
 | `gradientEndRadius` | `f32` | |
 | `stopPositions` | `array<f32, MAX_GRADIENT_STOPS>` | |
-| `opacity` | `f32` | `Shape.opacity` |
+| `opacity` | `f32` | `Node.absoluteOpacity()` |
 | `stopColors` | `array<vec4<f32>, MAX_GRADIENT_STOPS>` | |
 | `fillColor` | `vec4<f32>` | used when `fillType` is solid |
 | `strokeColor` | `vec4<f32>` | |

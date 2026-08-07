@@ -127,7 +127,7 @@ export class Rect extends Shape {
   cornerSegments?: number
 
   constructor(options: RectOptions = {}) {
-    super({ ...options, width: options.width ?? 0, height: options.height ?? 0 })
+    super(options)
     this.cornerRadius = options.cornerRadius ?? 0
     this.cornerSegments = options.cornerSegments
   }

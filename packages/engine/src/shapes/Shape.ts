@@ -1,15 +1,20 @@
 // Shape - the base for every drawable scene-graph node (Rect, Circle, Polyline, Path,
-// MSDFText, VectorText). Carries everything that affects RENDERING and is common to every
-// drawable: a settable size (width/height), visibility/pickability, stacking order
-// (zIndex), the complete fill/stroke styling API (flat color or gradient fill; stroke
-// color/width/join/cap/miter limit) and the shadow settings - all in one place rather than
-// split by how a shape happens to be drawn. Concrete shapes only add what's genuinely
-// specific to them (Rect: corner rounding; Circle: radius; Polyline: points; Path:
+// MSDFText, VectorText). Carries what is specific to PAINTING and is common to every drawable:
+// pickability, the overlay pass, the complete fill/stroke styling API (flat color or gradient
+// fill; stroke color/width/join/cap/miter limit) and the shadow settings - all in one place
+// rather than split by how a shape happens to be drawn. Concrete shapes only add what's
+// genuinely specific to them (Rect: corner rounding; Circle: radius; Polyline: points; Path:
 // contours; MSDFText/VectorText: runs and block layout).
 //
-// The TRANSFORM is not here: it lives on Node (see that file's header), because placing
-// yourself in your parent is not a drawing concern and a Group does it while drawing
-// nothing. x/y/rotation/scale/skew/offset are inherited and behave identically on both.
+// What every node carries is NOT here: the transform, plus width/height, visible, opacity,
+// zIndex, listening, preventDefault and the three drag fields all live on Node (see that
+// file's header). Placing and hiding yourself, fading, and being dragged are not drawing
+// concerns - a Group does all of them while drawing nothing - so a shape and a group have to
+// behave identically there or the same gesture would treat them differently.
+//
+// Two of those Shape does have an opinion about. It takes its zIndex from the running counter
+// (zOrder.ts) rather than leaving it at 0, since only a Shape occupies a slot in the render
+// order; and its width/height are read by the shapes that draw from a size.
 //
 // tessellate() caches its output (a list of local-space vertices + triangles) and
 // replays it into whatever sink is asking - the mesh batcher's rebuild - rather than
@@ -92,8 +97,6 @@ import { Node, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
 
 export interface ShapeOptions extends NodeOptions {
-  width?: number
-  height?: number
   /**
    * Where the shape sits in the scene-wide stack: higher renders in front, resolved by the
    * renderer's depth buffer (so mesh shapes and text can freely interleave). Ties fall back
@@ -112,21 +115,9 @@ export interface ShapeOptions extends NodeOptions {
    */
   zIndex?: number
   /**
-   * How transparent the whole object is, 0 (invisible) to 1 (solid). Default 1.
-   *
-   * Separate from the alpha in `fill`/`stroke`, and multiplied with them - which is the
-   * point. A colour's alpha is part of how the shape is PAINTED and belongs to the design;
-   * this is a property of the object, the thing an editor's opacity slider drives and an
-   * animation fades. Baking one into the other means a fade has to know and restore every
-   * colour it touched.
-   */
-  opacity?: number
-  /**
    * Draw in the always-on-top overlay pass (see webgpu/SceneRenderer). Default false.
    */
   overlay?: boolean
-  /** Can a pointer drag reposition this node? See Shape.draggable. Default false. */
-  draggable?: boolean
   /** Shadow tint. Default opaque black. */
   shadowColor?: ColorInput
   /** Canvas-style blur radius in local units (Gaussian sigma = blur/2). Default 0. */
@@ -170,58 +161,15 @@ export interface ShapeOptions extends NodeOptions {
 export abstract class Shape extends Node {
   override readonly nodeType: string = 'Shape'
 
-  /** Skipped by the renderer when false. */
-  visible = true
   /**
-   * The object's own transparency, 0 to 1, multiplied into every fragment it paints - fill,
-   * stroke, gradient, glyph, texture and its shadow alike.
+   * Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay).
    *
-   * It does NOT cascade. A group's opacity is a different feature and a much harder one:
-   * doing it correctly means drawing the group to an offscreen target and compositing that
-   * once, because multiplying the value down onto each child instead makes the children show
-   * through EACH OTHER wherever they overlap. Rather than ship the cheap version under the
-   * right name, this stays what it says it is: one object's transparency.
-   *
-   * A shape whose parts are styled independently (VectorText's runs) has the same caveat in
-   * miniature - each run is its own object record, so overlapping runs at opacity 0.5 blend
-   * against one another. Runs rarely overlap, which is why this is a note and not a blocker.
+   * Separate from `listening`, which governs whether events reach the node at all, and from
+   * `draggable`, which a drag needs on top of this: a drag only ever reaches a node that
+   * pickNode() returns, so `pickable = false` already rules one out.
    */
-  private _opacity = 1
-  get opacity(): number {
-    return this._opacity
-  }
-  set opacity(value: number) {
-    if (value === this._opacity) return
-    this._opacity = value
-    bumpObjectRecordEpoch()
-  }
-
-  /** Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay). */
   pickable = true
-  /**
-   * Whether a pointer drag over this node repositions it (see input/SceneInputDispatcher).
-   * A drag only ever reaches a node that pickNode() returns, so `pickable = false` already
-   * rules one out; this turns dragging off for a node that should still be selectable.
-   */
-  draggable = false
 
-  /**
-   * Where this shape sits in the scene-wide stack: higher is in FRONT. Assigned from a
-   * running counter at construction (see zOrder.ts), so shapes stack in the order they were
-   * made and a new one lands on top - the constructor overwrites this initialiser.
-   *
-   * Set it directly to restack: `shape.zIndex = nextZIndex()` brings it to the front, and any
-   * negative value puts it behind everything that took its number from the counter.
-   */
-  private _zIndex = 0
-  get zIndex(): number {
-    return this._zIndex
-  }
-  set zIndex(value: number) {
-    if (value === this._zIndex) return
-    this._zIndex = value
-    bumpObjectRecordEpoch()
-  }
   /**
    * When true the shape is drawn in the overlay pass, after everything else and without
    * writing depth - for editor furniture (selection frames, handles, rubber bands) that
@@ -277,22 +225,6 @@ export abstract class Shape extends Node {
    * Re-bakes the atlas texture when changed.
    */
   shadowForStrokeEnabled = true
-
-  protected _width = 0
-  protected _height = 0
-
-  get width(): number {
-    return this._width
-  }
-  set width(value: number) {
-    this._width = value
-  }
-  get height(): number {
-    return this._height
-  }
-  set height(value: number) {
-    this._height = value
-  }
 
   private fillValue: RGBA | null = null
   /**
@@ -538,15 +470,11 @@ export abstract class Shape extends Node {
 
   constructor(options: ShapeOptions = {}) {
     super(options)
-    this.width = options.width ?? 0
-    this.height = options.height ?? 0
     // No explicit value means "on top of what exists", which is what a caller who has not
     // thought about stacking almost always wants. An explicit one is taken as given and does
     // NOT advance the counter - see ShapeOptions.zIndex for what that costs.
     this.zIndex = options.zIndex ?? nextZIndex()
-    this.opacity = options.opacity ?? 1
     this.overlay = options.overlay ?? false
-    this.draggable = options.draggable ?? false
     this.shadowColor = options.shadowColor ?? [0, 0, 0, 1]
     this.shadowBlur = options.shadowBlur ?? 0
     this.shadowSpread = options.shadowSpread ?? 0
@@ -568,11 +496,7 @@ export abstract class Shape extends Node {
   protected override attrKeys(): readonly string[] {
     return [
       ...super.attrKeys(),
-      'visible',
       'pickable',
-      'draggable',
-      'zIndex',
-      'opacity',
       'overlay',
       'shadowColor',
       'shadowBlur',
@@ -582,8 +506,6 @@ export abstract class Shape extends Node {
       'shadowOpacity',
       'shadowEnabled',
       'shadowForStrokeEnabled',
-      'width',
-      'height',
       'fill',
       'fillPriority',
       'fillLinearGradientStartPoint',

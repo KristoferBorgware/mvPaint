@@ -22,9 +22,11 @@
 //
 // So this covers the mesh lane, which is the one that can answer.
 //
-// Shape.opacity is checked for every lane that gets here, ahead of any material: it scales
-// the alpha of every fragment the object produces, so it can only ever move a shape OUT of
-// the opaque pass, never into it.
+// A shape's absoluteOpacity() is checked for every lane that gets here, ahead of any material:
+// it scales the alpha of every fragment the object produces, so it can only ever move a shape
+// OUT of the opaque pass, never into it. The ABSOLUTE value, because opacity multiplies through
+// the ancestor chain (see Node.opacity) and a shape inside a faded group is as translucent as
+// one faded itself.
 
 import type { Shape } from '../shapes/Shape'
 import type { MeshMaterial } from './meshFormat'
@@ -64,12 +66,12 @@ export function isOpaqueMaterial(material: MeshMaterial): boolean {
  * drawn as one unit, so one translucent run makes the whole thing translucent.
  */
 export function isOpaqueShape(shape: Shape): boolean {
-  // The object's own transparency multiplies every fragment it paints, so anything below 1
-  // disqualifies the shape however solid its colours are. This check has to come FIRST and
-  // has to exist: an opacity the classifier could not see is the exact shape of the bug the
-  // header warns about - a wrong "opaque" writes depth ahead of everything behind it and
-  // punches a hole in the picture.
-  if (shape.opacity < 1) return false
+  // Transparency multiplies every fragment the object paints, so anything below 1 disqualifies
+  // the shape however solid its colours are - including a 1 of its own under a faded ancestor.
+  // This check has to come FIRST and has to exist: an opacity the classifier could not see is
+  // the exact shape of the bug the header warns about - a wrong "opaque" writes depth ahead of
+  // everything behind it and punches a hole in the picture.
+  if (shape.absoluteOpacity() < 1) return false
   const materials = shape.materials()
   // Shape carries the whole fill/stroke vocabulary itself, which is what the batcher falls
   // back to when a shape declares no materials at all.

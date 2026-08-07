@@ -21,7 +21,7 @@ import { Rect, type RectOptions } from './Rect'
 import { Polyline } from './Polyline'
 import type { StrokeAlign } from '../render/stroke'
 import type { Shape } from './Shape'
-import { Group, closestGroup, draggableGroup, hiddenByGroup, outermostGroup, type TransformableNode } from './Group'
+import { Group, closestGroup, draggableGroup, hiddenByAncestor, outermostGroup, type TransformableNode } from './Group'
 import { nextZIndex, peekZIndex, resetAutoZIndex } from './zOrder'
 import { Layer } from './Layer'
 import { MSDFText } from './MSDFText'
@@ -1105,9 +1105,9 @@ it('which group a node belongs to, for an application deciding what a click mean
     assert(closestGroup(leaf) === inner, 'the closest group is the one directly holding the node')
     assert(outermostGroup(leaf) === outer, 'the outermost is the whole assembly')
     assert(closestGroup(loose) === null && outermostGroup(loose) === null, 'a node in no group is in no group')
-    assert(hiddenByGroup(leaf) === false, 'nothing above it is hidden')
+    assert(hiddenByAncestor(leaf) === false, 'nothing above it is hidden')
     outer.visible = false
-    assert(hiddenByGroup(leaf), 'until something above it is')
+    assert(hiddenByAncestor(leaf), 'until something above it is')
 
     // Which group a DRAG takes hold of is a different question: it stops at the first group
     // that has opted out, because reaching past one to an outer group would move the very
@@ -1130,13 +1130,16 @@ it('a layer is NOT a group, which is the entire point of it being its own class'
     assert(closestGroup(leaf) === null, 'a shape in a layer is in no group')
     assert(outermostGroup(leaf) === null, 'so an application selecting the assembly selects nothing')
     assert(draggableGroup(leaf) === null, 'and a drag on it takes hold of the shape, not the layer')
-    assert(hiddenByGroup(leaf) === false, 'a layer is not something that can hide it as a group')
-    layer.enabled = false
-    assert(hiddenByGroup(leaf) === false, 'not even switched off - that is the render walk\'s job, not this one\'s')
 
-    // The one thing it shares with a group: a group ABOVE a layer still governs it, because
-    // the ancestor walks stop at Groups wherever they are and a Layer is simply not one.
-    layer.enabled = true
+    // Hiding IS shared - `visible` is every node's, and hiddenByAncestor() asks about any of
+    // them - because taking a subtree out of the picture is not a claim about selection.
+    assert(hiddenByAncestor(leaf) === false, 'nothing above it is hidden')
+    layer.visible = false
+    assert(hiddenByAncestor(leaf), 'and a hidden layer hides what is in it, exactly as a group would')
+
+    // The one selection question it shares with a group: a group ABOVE a layer still governs
+    // it, because the ancestor walks stop at Groups wherever they are and a Layer is not one.
+    layer.visible = true
     const group = new Group()
     group.addChild(layer)
     assert(closestGroup(leaf) === group, 'a group above a layer is still the shape\'s group')
@@ -1148,10 +1151,10 @@ it('a layer is measured through, so a group holding one sizes itself to the cont
     layer.addChild(new Rect({ width: 10, height: 10 }))
 
     assert(near(group.bounds().max.x, 110), "a layer's contents count towards the group's extent, through its transform")
-    layer.enabled = false
-    assert(!group.bounds().valid(), 'and a disabled layer takes them out whole, like a hidden group')
-    layer.enabled = true
-    assert(near(group.bounds().max.x, 110), 're-enabling brings back exactly what was there')
+    layer.visible = false
+    assert(!group.bounds().valid(), 'and a hidden layer takes them out whole, like a hidden group')
+    layer.visible = true
+    assert(near(group.bounds().max.x, 110), 'showing it again brings back exactly what was there')
 })
 
 it('a layer\'s transform composes like any node\'s; it is a Container, nothing more', () => {
@@ -1161,8 +1164,8 @@ it('a layer\'s transform composes like any node\'s; it is a Container, nothing m
     assert(near(at.x, 55) && near(at.y, -20), 'moving a layer moves what is inside it')
 
     assert(layer.nodeName === 'Layer' && layer.nodeType === 'Layer', 'and it names itself')
-    assert(new Layer().enabled === true, 'a layer is on unless it is asked not to be')
-    assert(new Layer({ enabled: false }).enabled === false, 'which the option sets')
+    assert(new Layer().visible === true, 'a layer is on unless it is asked not to be')
+    assert(new Layer({ visible: false }).visible === false, 'which the option sets')
 })
 
 it('a group carries the same transform vocabulary a shape does', () => {

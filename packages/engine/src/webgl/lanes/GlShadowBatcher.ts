@@ -128,7 +128,7 @@ export class GlShadowBatcher {
       // solid shadow would look like two objects. Folded into the colour here rather than
       // carried in the record, because this lane already multiplies an opacity into the alpha
       // on the CPU and one more factor costs nothing.
-      f32[colorBase + 3] = c[3] * shape.shadowOpacity * shape.opacity
+      f32[colorBase + 3] = c[3] * shape.shadowOpacity * shape.absoluteOpacity()
 
       // Read fresh every frame: a shape still waiting on its first bake, or one the atlas had
       // no room for, gets a zero-size quad rather than sampling whatever sits at uv 0.
