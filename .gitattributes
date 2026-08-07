@@ -5,10 +5,13 @@
 # fails there while passing in CI - which is worse than not having it, because the one thing it
 # exists to catch is a stale atlas nobody remembered to regenerate.
 #
-# Pinning these to LF makes the comparison mean what it says everywhere.
-packages/example-app/src/fonts/msdf/*.json eol=lf
-packages/example-app/src/fonts/polygons/*.json eol=lf
-packages/engine/src/text/fonts/*.json eol=lf
+# Pinning these to LF makes the comparison mean what it says everywhere. The patterns match an
+# atlas by its own name and its immediate folder rather than by a path from the root, so an
+# application that keeps its font folder somewhere else is still covered - a pattern anchored to
+# one application's layout goes quiet when that layout changes, and a silent pin reads exactly
+# like a passing test until someone runs the suite on Windows.
+**/*.polygons.json eol=lf
+**/fonts/msdf/*.json eol=lf
 
 # The atlases' other half, and the fonts they come from. Git detects these as binary on its own;
 # saying so explicitly costs nothing and removes any chance of a newline being "helpfully"
