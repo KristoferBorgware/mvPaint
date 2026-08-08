@@ -31,6 +31,10 @@ import { PolygonFontBook, type PolygonFontJson } from './PolygonFont'
 import { MSDFText } from '../shapes/MSDFText'
 import { bumpFontEpoch } from '../shapes/contentEpoch'
 import { VectorText } from '../shapes/VectorText'
+import { UniformMSDFText } from '../shapes/UniformMSDFText'
+import { UniformVectorText } from '../shapes/UniformVectorText'
+import { registerFontFamily } from '../resources/FontRegistry'
+import { toDecorations, toFontStyle } from '../shapes/singleRun'
 import type { RGBA } from '../render/meshFormat'
 // NEITHER kind of atlas is the engine's - it ships no typeface - so both come from the example
 // app's asset folder by path, a test fixture reaching across the workspace the same way
@@ -493,6 +497,12 @@ const vectorFonts = new PolygonFontBook([
 ])
 const regularVector = vectorFonts.fontByIndex(0)!
 
+// A font reaches the engine by being registered under a name - there is no way to hand a book to
+// a node. So the suite registers the outlines it just built and every VectorText below names it,
+// which is also the only exercise registerFontFamily() gets.
+const VECTOR_FAMILY = 'test-outlines'
+registerFontFamily(VECTOR_FAMILY, { vector: vectorFonts })
+
 it('the atlas is in font units, and its vertical metrics are coherent', () => {
     const m = regularVector.metrics
     assert(m.size === regularVector.unitsPerEm, 'metrics are expressed in font units, so size is unitsPerEm')
@@ -609,7 +619,7 @@ it('VectorText tessellates into the mesh lane, one material per (run feature, co
     const red: RGBA = [1, 0, 0, 1]
     const blue: RGBA = [0, 0, 1, 1]
     const node = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       runs: [
         { text: 'Red', style: { fontSize: 48, color: red } },
         { text: 'Blue', style: { fontSize: 48, color: blue } },
@@ -636,9 +646,9 @@ it('VectorText tessellates into the mesh lane, one material per (run feature, co
 })
 
 it('decorations, highlights and outlines are separate materials and separate geometry', () => {
-    const plain = new VectorText({ fonts: vectorFonts, text: 'Hi', style: { fontSize: 40 } })
+    const plain = new VectorText({ fontFamily: VECTOR_FAMILY, text: 'Hi', style: { fontSize: 40 } })
     const decorated = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       text: 'Hi',
       style: { fontSize: 40, underline: true, highlight: [1, 1, 0, 1] },
     })
@@ -648,7 +658,7 @@ it('decorations, highlights and outlines are separate materials and separate geo
     // A per-letter outline is stroke geometry, so it takes the material's stroke colour
     // rather than its fill - exactly like a stroked Rect or Path.
     const outlined = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       text: 'Hi',
       style: { fontSize: 40, strokeColor: [0, 0, 0, 1], strokeWidth: 2 },
     })
@@ -668,16 +678,16 @@ it('decorations, highlights and outlines are separate materials and separate geo
     const spiky = (text: string) => ({ text, style: { fontSize: 60, strokeColor: [0, 0, 0, 1] as RGBA, strokeWidth: 16 } })
     const height = (shape: VectorText) => shape.localBounds().max.y - shape.localBounds().min.y
     const spikes = (text: string) =>
-      height(new VectorText({ fonts: vectorFonts, lineJoin: 'miter', ...spiky(text) })) >
-      height(new VectorText({ fonts: vectorFonts, ...spiky(text) })) * 1.15
+      height(new VectorText({ fontFamily: VECTOR_FAMILY, lineJoin: 'miter', ...spiky(text) })) >
+      height(new VectorText({ fontFamily: VECTOR_FAMILY, ...spiky(text) })) * 1.15
 
-    assert(new VectorText({ fonts: vectorFonts, ...spiky('AWM') }).lineJoin === 'round', 'VectorText defaults to round joins')
+    assert(new VectorText({ fontFamily: VECTOR_FAMILY, ...spiky('AWM') }).lineJoin === 'round', 'VectorText defaults to round joins')
     assert(['A', 'W', 'M', 'V', 'X', 'Z', 'K'].some(spikes), 'miter joins spike far past the letterforms')
-    assert(new VectorText({ fonts: vectorFonts, lineJoin: 'bevel', ...spiky('A') }).lineJoin === 'bevel', 'an explicit join still wins')
+    assert(new VectorText({ fontFamily: VECTOR_FAMILY, lineJoin: 'bevel', ...spiky('A') }).lineJoin === 'bevel', 'an explicit join still wins')
 
     // Faux bold thickens the letterform, so its ring must take the FILL colour (and any
     // gradient), not the stroke slot - which a real outline may be using at the same time.
-    const bolded = new VectorText({ fonts: vectorFonts, text: 'Hi', style: { fontSize: 40, fauxBold: true } })
+    const bolded = new VectorText({ fontFamily: VECTOR_FAMILY, text: 'Hi', style: { fontSize: 40, fauxBold: true } })
     const boldedVerts = recordGeometry(bolded).verts
     assert(boldedVerts.length > recordGeometry(plain).verts.length, 'faux bold adds a dilation ring')
     assert(boldedVerts.every((v) => v.isFill), 'the dilation ring is fill geometry, leaving the stroke slot free')
@@ -685,7 +695,7 @@ it('decorations, highlights and outlines are separate materials and separate geo
 
 it('being mesh geometry is the point: picking and bounds come for free', () => {
     const node = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       text: 'Box',
       style: { fontSize: 60, highlight: [1, 1, 0, 1] },
     })
@@ -702,7 +712,7 @@ it('being mesh geometry is the point: picking and bounds come for free', () => {
     // A gradient run's glyphs use the mesh lane's own gradient; its decorations stay flat,
     // matching what the MSDF shader does for non-glyph quads.
     const gradient = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       text: 'G',
       style: {
         fontSize: 60,
@@ -729,16 +739,16 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     }
 
     // Baseline shift moves a run's outline by exactly the shift, and nothing else with it.
-    const plain = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40 } }] })
-    const raised = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: 15 } }] })
-    const lowered = new VectorText({ fonts: vectorFonts, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: -15 } }] })
+    const plain = new VectorText({ fontFamily: VECTOR_FAMILY, runs: [{ text: 'x', style: { fontSize: 40 } }] })
+    const raised = new VectorText({ fontFamily: VECTOR_FAMILY, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: 15 } }] })
+    const lowered = new VectorText({ fontFamily: VECTOR_FAMILY, runs: [{ text: 'x', style: { fontSize: 40, baselineShift: -15 } }] })
     assert(Math.abs(boundsOf(raised).y0 - (boundsOf(plain).y0 - 15)) < 1e-6, 'a positive baseline shift lifts the outline by exactly that much')
     assert(Math.abs(boundsOf(lowered).y0 - (boundsOf(plain).y0 + 15)) < 1e-6, 'a negative baseline shift drops it')
     assert(Math.abs(boundsOf(raised).x0 - boundsOf(plain).x0) < 1e-6, 'and moves it vertically only')
 
     // A superscript run rides above its neighbour without disturbing the pen.
     const superscript = new VectorText({
-      fonts: vectorFonts,
+      fontFamily: VECTOR_FAMILY,
       runs: [
         { text: 'x', style: { fontSize: 40 } },
         { text: '2', style: { fontSize: 24, baselineShift: 16 } },
@@ -752,7 +762,7 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     // Alignment offsets the geometry within the block; justify stretches to fill it.
     const wrapped = 'align this text so it wraps'
     const aligned = (align: 'left' | 'center' | 'right' | 'justify') =>
-      boundsOf(new VectorText({ fonts: vectorFonts, text: wrapped, style: { fontSize: 20 }, maxWidth: 200, align }))
+      boundsOf(new VectorText({ fontFamily: VECTOR_FAMILY, text: wrapped, style: { fontSize: 20 }, maxWidth: 200, align }))
     const left = aligned('left')
     const center = aligned('center')
     const right = aligned('right')
@@ -763,8 +773,8 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     assert(justify.x1 <= 200 + 1e-6, 'and stops at the wrap width')
 
     // Vertical flow: glyphs stack downward, and columns advance to the LEFT.
-    const vertical = new VectorText({ fonts: vectorFonts, text: 'AB\nCD', style: { fontSize: 40 }, orientation: 'vertical' })
-    const horizontal = new VectorText({ fonts: vectorFonts, text: 'AB\nCD', style: { fontSize: 40 } })
+    const vertical = new VectorText({ fontFamily: VECTOR_FAMILY, text: 'AB\nCD', style: { fontSize: 40 }, orientation: 'vertical' })
+    const horizontal = new VectorText({ fontFamily: VECTOR_FAMILY, text: 'AB\nCD', style: { fontSize: 40 } })
     assert(vertical.shaped().lineCount === 2, 'a newline starts a second column')
     assert(recordGeometry(vertical).verts.length === recordGeometry(horizontal).verts.length, 'the same four glyphs are tessellated either way')
     const columnQuads = vertical.shaped().quads.filter((q) => q.isGlyph)
@@ -775,8 +785,8 @@ it('block layout reaches the GEOMETRY, not just the shaped quads', () => {
     // One run, one column: set vertically it is a tall narrow strip, set horizontally a wide
     // short one. (The two-column node above is NOT the comparison to make - two columns of two
     // glyphs and two lines of two glyphs happen to occupy almost the same box.)
-    const strip = boundsOf(new VectorText({ fonts: vectorFonts, text: 'ABCD', style: { fontSize: 40 }, orientation: 'vertical' }))
-    const line = boundsOf(new VectorText({ fonts: vectorFonts, text: 'ABCD', style: { fontSize: 40 } }))
+    const strip = boundsOf(new VectorText({ fontFamily: VECTOR_FAMILY, text: 'ABCD', style: { fontSize: 40 }, orientation: 'vertical' }))
+    const line = boundsOf(new VectorText({ fontFamily: VECTOR_FAMILY, text: 'ABCD', style: { fontSize: 40 } }))
     assert(strip.y1 - strip.y0 > 2 * (line.y1 - line.y0), 'a single column is far taller than the same text on a line')
     assert(strip.x1 - strip.x0 < line.x1 - line.x0, 'and far narrower')
 })
@@ -1058,4 +1068,229 @@ it('a curve is ignored for vertical text, which has no single baseline to lay on
     const withPath = layoutText([run('AB', { fontSize: 30 })], { orientation: 'vertical', textPath: { path } }, fonts)
     assert(withPath.quads.length === plain.quads.length, 'vertical text is unchanged by a curve')
     assert(withPath.quads.every((q) => q.rotation === 0), 'and none of it is turned')
+})
+
+// --- padding: blank space inside the block ----------------------------------------------------
+//
+// It has to do BOTH halves - move the text and grow the block - or it is not padding: a version
+// that only moved the glyphs would leave the measured size wrong, and everything that reads a
+// block's size (bounds, hit-testing, a highlight drawn behind it) would be short by twice it.
+
+it('padding insets the text and grows the block by twice it', () => {
+    const plain = layoutText([run('Hi there', { fontSize: 30 })], {}, fonts)
+    const padded = layoutText([run('Hi there', { fontSize: 30 })], { padding: 12 }, fonts)
+
+    assert(near(padded.width, plain.width + 24), 'the block is twice the padding wider')
+    assert(near(padded.height, plain.height + 24), 'and twice the padding taller')
+
+    const plainGlyphs = plain.quads.filter((q) => q.isGlyph)
+    const paddedGlyphs = padded.quads.filter((q) => q.isGlyph)
+    assert(paddedGlyphs.length === plainGlyphs.length, 'the same glyphs are laid out')
+    for (let i = 0; i < plainGlyphs.length; i++) {
+      assert(near(paddedGlyphs[i].x0 - plainGlyphs[i].x0, 12), 'each one moved right by the padding')
+      assert(near(paddedGlyphs[i].y0 - plainGlyphs[i].y0, 12), 'and down by it')
+    }
+    assert(near(padded.referenceBaseline - plain.referenceBaseline, 12), 'the first baseline moved with them')
+})
+
+it('padding does not change where the text wraps, only where the block ends', () => {
+    // maxWidth is the width the TEXT wraps at, so a padded block that wraps is wider than it by
+    // twice the padding and breaks in exactly the same places.
+    const text = 'wrap this sentence onto several lines'
+    const plain = layoutText([run(text, { fontSize: 20 })], { maxWidth: 160 }, fonts)
+    const padded = layoutText([run(text, { fontSize: 20 })], { maxWidth: 160, padding: 10 }, fonts)
+    assert(padded.lineCount === plain.lineCount, 'the same number of lines')
+    assert(near(padded.width, plain.width + 20), 'and a block twenty wider than the unpadded one')
+})
+
+it('padding centres the text within the padding, not on it', () => {
+    // Alignment measures against the width the text has to fill, which padding is not part of -
+    // otherwise a centred line would be pushed off-centre by exactly the padding.
+    const centred = layoutText([run('Hi', { fontSize: 20 })], { maxWidth: 200, align: 'center' }, fonts)
+    const padded = layoutText([run('Hi', { fontSize: 20 })], { maxWidth: 200, align: 'center', padding: 15 }, fonts)
+    const first = (s: typeof centred) => s.quads.filter((q) => q.isGlyph)[0]
+    assert(near(first(padded).x0 - first(centred).x0, 15), 'a centred line moves by the padding and no more')
+})
+
+it('padding insets a vertical block on its own axes', () => {
+    // Columns run to negative x from the origin, so the inset is negative there and positive on
+    // the other axis - the same "inside the block" either way.
+    const plain = layoutText([run('AB', { fontSize: 30 })], { orientation: 'vertical' }, fonts)
+    const padded = layoutText([run('AB', { fontSize: 30 })], { orientation: 'vertical', padding: 8 }, fonts)
+    assert(near(padded.width, plain.width + 16), 'twice the padding wider')
+    assert(near(padded.height, plain.height + 16), 'and twice the padding deeper')
+
+    const plainGlyphs = plain.quads.filter((q) => q.isGlyph)
+    const paddedGlyphs = padded.quads.filter((q) => q.isGlyph)
+    for (let i = 0; i < plainGlyphs.length; i++) {
+      assert(near(paddedGlyphs[i].x0 - plainGlyphs[i].x0, -8), 'each glyph moved in from the right edge')
+      assert(near(paddedGlyphs[i].y0 - plainGlyphs[i].y0, 8), 'and down from the top')
+    }
+})
+
+// --- uniform text: one style for the whole string ---------------------------------------------
+//
+// The facade's whole claim is that an attribute written on the node reaches the glyphs. Every
+// check below is one attribute, written and then read out of the run the node actually shapes -
+// because the failure being guarded against is not an exception, it is an assignment that
+// silently does nothing, which is exactly what `Shape.fill` did on a text node.
+
+const styleOf = (node: { runs: readonly TextRun[] }) => node.runs[0].style ?? {}
+
+it('a uniform text node is one run, sized and painted as Konva would', () => {
+    const label = new UniformMSDFText({ text: 'Hello' })
+    assert(label.runs.length === 1, 'exactly one run')
+    assert(label.runs[0].text === 'Hello', 'carrying the string')
+    assert(styleOf(label).fontSize === 12, "at Konva's default size, not the engine's 32")
+    assert(JSON.stringify(styleOf(label).color) === '[0,0,0,1]', 'and opaque black, which nothing else in this engine defaults to')
+
+    // Saying nothing about fill is what gets the black; saying `null` means what it says.
+    const unpainted = new UniformMSDFText({ text: 'Hello', fill: null })
+    assert(JSON.stringify(styleOf(unpainted).color) === '[0,0,0,0]', 'an explicit null is not the same as leaving it out')
+
+    // The two ways of saying "several styles" are what this class exists not to have.
+    expect(() => new UniformMSDFText({ runs: [{ text: 'a' }] } as never)).toThrow('one style for the whole string')
+    expect(() => new UniformMSDFText({ text: 'a', style: { fontSize: 9 } } as never)).toThrow('one style for the whole string')
+})
+
+it('fill, stroke and strokeWidth paint the glyphs', () => {
+    const label = new UniformMSDFText({ text: 'Hello' })
+
+    label.fill = 'red'
+    assert(JSON.stringify(styleOf(label).color) === '[1,0,0,1]', 'fill reaches the run, which is what a plain MSDFText ignores')
+
+    label.fill = null
+    assert(JSON.stringify(styleOf(label).color) === '[0,0,0,0]', 'and null paints nothing rather than falling back to black')
+
+    // A width with no colour is not a stroke - the same rule Shape.hasStroke() states.
+    label.strokeWidth = 3
+    assert(styleOf(label).strokeWidth === 0, 'a width alone draws no outline')
+    label.stroke = 'navy'
+    assert(styleOf(label).strokeWidth === 3, 'a colour with it does')
+    assert(JSON.stringify(styleOf(label).strokeColor) === '[0,0,0.5019607843137255,1]', 'in that colour')
+})
+
+it("fontStyle takes CSS's vocabulary and this engine's, and rejects the rest", () => {
+    assert(toFontStyle('normal') === 'regular', "'normal' is the plain face")
+    assert(toFontStyle('') === 'regular', 'and so is nothing at all')
+    assert(toFontStyle('bold') === 'bold', 'one word picks one face')
+    assert(toFontStyle('italic bold') === 'bold-italic', 'two words in either order pick the same one')
+    assert(toFontStyle('bold italic') === 'bold-italic', 'either order')
+    assert(toFontStyle('bold-italic') === 'bold-italic', "including this engine's own spelling of it")
+    assert(toFontStyle('OBLIQUE') === 'italic', 'case and CSS synonyms are accepted')
+    // A typo that silently drew regular is the kind of thing nobody finds.
+    expect(() => toFontStyle('semibold')).toThrow('nothing to draw with')
+
+    const label = new UniformMSDFText({ text: 'Hello', fontStyle: 'bold' })
+    assert(styleOf(label).fontStyle === 'bold', 'the node resolves it into the run')
+    assert(label.fontStyle === 'bold', 'and reads back what was written, not what it resolved to')
+    expect(() => { label.fontStyle = 'ultra' }).toThrow()
+    assert(label.fontStyle === 'bold', 'a rejected assignment leaves the node as it was')
+})
+
+it('textDecoration turns CSS rules into the two the shaper draws', () => {
+    assert(JSON.stringify(toDecorations('')) === '{"underline":false,"strikethrough":false}', 'nothing by default')
+    assert(toDecorations('underline').underline, 'one rule')
+    assert(toDecorations('line-through').strikethrough, 'the other, spelled as CSS spells it')
+    assert(toDecorations('strikethrough').strikethrough, 'or as this engine does')
+    const both = toDecorations('underline line-through')
+    assert(both.underline && both.strikethrough, 'and both together')
+    expect(() => toDecorations('overline')).toThrow('not a rule this draws')
+
+    const label = new UniformMSDFText({ text: 'Hello', textDecoration: 'underline' })
+    assert(styleOf(label).underline === true, 'the node puts it in the run')
+})
+
+it('writing any attribute re-shapes the node', () => {
+    const label = new UniformMSDFText({ text: 'Hello' })
+    const before = label.shaped(fonts).width
+
+    label.fontSize = 48
+    const bigger = label.shaped(fonts).width
+    assert(bigger > before * 3, 'a larger size is a wider block, measured through the shaper')
+
+    label.text = 'Hello there, at some length'
+    assert(label.shaped(fonts).width > bigger, 'and a longer string is wider still')
+
+    // Inherited from Text, but an accessor on this class so it invalidates like the rest.
+    const unpadded = label.shaped(fonts).height
+    label.padding = 20
+    assert(near(label.shaped(fonts).height, unpadded + 40), 'padding grows the block without being asked to re-shape')
+})
+
+it('a uniform text node measures itself, and other strings in its own style', () => {
+    const label = new UniformMSDFText({ text: 'Hello', fontSize: 24 })
+    assert(near(label.getTextWidth(fonts), label.shaped(fonts).width), 'getTextWidth is the shaped width')
+    assert(near(label.getTextHeight(fonts), label.shaped(fonts).height), 'and getTextHeight the shaped height')
+
+    const longer = label.measureSize('Hello there', fonts)
+    assert(longer.width > label.getTextWidth(fonts), 'another string measures wider')
+    assert(label.text === 'Hello', 'and measuring it did not disturb the node')
+
+    // padding is part of the block, so it is part of what a measurement reports.
+    const bare = label.measureSize('Hello', fonts).width
+    label.padding = 10
+    assert(near(label.measureSize('Hello', fonts).width, bare + 20), 'a measurement includes the padding')
+})
+
+it('the outline class is the same node with real geometry behind it', () => {
+    const label = new UniformVectorText({ fontFamily: VECTOR_FAMILY, text: 'Hi', fontSize: 40, fill: 'crimson' })
+    assert(label.runs.length === 1 && styleOf(label).fontSize === 40, 'one run, styled from the attributes')
+
+    // Its fonts are on the node, so it needs nothing passed in to measure.
+    assert(label.getTextWidth() > 0, 'it measures itself')
+    assert(label.measureSize('Hi there').width > label.getTextWidth(), 'and other strings too')
+
+    // Its glyphs are mesh geometry, so a colour change has to reach the materials the lane paints.
+    const crimson = label.materials().some((m) => m.fill !== null && m.fill[0] > 0.7 && m.fill[1] < 0.2)
+    assert(crimson, 'the fill attribute is what the mesh lane paints the glyphs with')
+    label.fill = 'navy'
+    assert(label.materials().some((m) => m.fill !== null && m.fill[2] > 0.4 && m.fill[0] < 0.1), 'and changing it repaints them')
+})
+
+// --- naming a font ----------------------------------------------------------------------------
+//
+// A font reaches the engine by being registered under a name; there is no way to hand a book to a
+// node. What is pinned here is the consequence nobody wants to discover at runtime: a name that
+// resolves to nothing draws nothing, rather than quietly borrowing whichever face loaded first.
+
+it('both text kinds name the same family', () => {
+    const outline = new VectorText({ text: 'Hi', fontFamily: VECTOR_FAMILY, style: { fontSize: 40 } })
+    assert(outline.fonts === vectorFonts, 'the name resolves to the registered book')
+    assert(outline.shaped().quads.length > 0, 'and the node shapes glyphs from it')
+
+    // The MSDF class carries the same attribute off the same base - one vocabulary for both.
+    const atlas = new MSDFText({ text: 'Hi', fontFamily: VECTOR_FAMILY })
+    assert(atlas.fontFamily === outline.fontFamily, 'fontFamily is Text\'s, not one subclass\'s')
+})
+
+it('a family nothing is registered under draws nothing, and says so once', () => {
+    const warnings: string[] = []
+    const realWarn = console.warn
+    console.warn = (message: string) => warnings.push(message)
+    try {
+      const missing = new VectorText({ text: 'Hi', fontFamily: 'no-such-family', style: { fontSize: 40 } })
+      assert(missing.fonts === undefined, 'nothing resolves')
+      assert(missing.shaped().quads.length === 0, 'so there is nothing to draw')
+      assert(missing.materials().length === 0, 'and no material for the mesh lane to paint with')
+
+      // Every access re-resolves, because registering later has to take effect - but the warning
+      // is per name. A per-access warning would fill the console within a second of drawing.
+      missing.shaped()
+      missing.shaped()
+      assert(warnings.length === 1, 'warned once, not once per shaping')
+      assert(warnings[0].includes('no-such-family'), 'and the message names the family')
+    } finally {
+      console.warn = realWarn
+    }
+})
+
+it('registering a family afterwards reaches the nodes already naming it', () => {
+    const late = new VectorText({ text: 'Hi', fontFamily: 'arrives-late', style: { fontSize: 40 } })
+    assert(late.shaped().quads.length === 0, 'nothing to draw before it arrives')
+
+    registerFontFamily('arrives-late', { vector: vectorFonts })
+    // Not cached while unresolved, so the next access picks the book up - which is what lets a
+    // font fetched after the scene was built still draw.
+    assert(late.shaped().quads.length > 0, 'and glyphs once it has')
 })

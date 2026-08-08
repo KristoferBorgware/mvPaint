@@ -540,3 +540,54 @@ it('a moved node draws and picks where its new parent puts it', () => {
     assert(pickNode(scene, 200, 0) === shape, 'moved with keepWorldTransform, it is picked at the SAME point')
     assert(shape.parent === left, 'even though it now belongs to the other group')
 })
+
+// --- a scene's own lifetime -------------------------------------------------------------------
+//
+// Dropping the nodes releases everything a scene holds EXCEPT what lives on the device, which is
+// the one thing an application would otherwise have to remember by hand. own() is where that
+// memory lives, and dispose() is when it is acted on.
+
+it('Scene.own: a resource handed to the scene is released when the scene is', () => {
+    const scene = new Scene()
+    const released: string[] = []
+    const resource = (name: string) => ({ destroy: () => released.push(name) })
+
+    const first = scene.own(resource('texture'))
+    scene.own(resource('font-book'))
+    assert(typeof first.destroy === 'function', 'own() hands the resource straight back, so it can wrap the call that built it')
+
+    const shape = scene.root.addChild(new Rect({ width: 10, height: 10 }))
+    assert(released.length === 0, 'nothing is released before the scene is disposed')
+
+    scene.dispose()
+    assert(shape.isDestroyed, 'disposing destroys the tree')
+    // Reverse order, so anything built from another resource lets go before what it was built from.
+    assert(released.join(',') === 'font-book,texture', 'and releases what it owned, last first')
+    assert(scene.isDisposed, 'the scene says so')
+
+    scene.dispose()
+    assert(released.length === 2, 'disposing twice releases nothing a second time')
+    expect(() => scene.own(resource('late'))).toThrow('disposed')
+})
+
+it('Scene.dispose: releasing is not freeing when something else still holds it', () => {
+    // Two scenes drawing one picture is exactly the case reference counting exists for: the
+    // first to be disposed must not take the texture out from under the second.
+    let holders = 2
+    let freed = false
+    const shared = {
+      destroy: () => {
+        if (--holders === 0) freed = true
+      },
+    }
+
+    const a = new Scene()
+    const b = new Scene()
+    a.own(shared)
+    b.own(shared)
+
+    a.dispose()
+    assert(!freed && holders === 1, 'one scene letting go leaves the other one drawing')
+    b.dispose()
+    assert(freed, 'and the last one frees it')
+})

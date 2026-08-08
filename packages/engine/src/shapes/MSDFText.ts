@@ -15,53 +15,17 @@ import { Text, type TextOptions } from './Text'
 import { layoutText, type FontProvider, type ShapedText } from '../text/layout'
 import { fontEpoch } from './contentEpoch'
 
-export interface MSDFTextOptions extends TextOptions {
-  /**
-   * Which font family to draw with - a name the renderer resolves through its loaded families
-   * (see handle.setFonts). Omitted, or naming a family that is not loaded, draws with the
-   * default family, so a node built while its atlas is still being fetched shows text now and
-   * the right face once it arrives.
-   *
-   * A node-level choice, not a per-run one: a paragraph is one family, and mixing families
-   * within a node is not supported. Two nodes can be different families freely - the text lane
-   * splits its draw where the family changes, so that costs a draw call and nothing else.
-   */
-  fontFamily?: string
-}
+/** MSDFText adds nothing to Text's options; `fontFamily` names the atlases it samples. */
+export type MSDFTextOptions = TextOptions
 
 export class MSDFText extends Text {
   override readonly nodeName: string = 'MSDFText'
 
-  private familyName: string | undefined
   private shapedCache: ShapedText | null = null
   private shapedFontEpoch = -1
 
   constructor(options: MSDFTextOptions = {}) {
     super(options)
-    this.familyName = options.fontFamily
-  }
-
-  protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'fontFamily']
-  }
-
-  /** The family this node draws with; undefined means the default. */
-  get fontFamily(): string | undefined {
-    return this.familyName
-  }
-
-  /**
-   * Draw with a different family.
-   *
-   * Goes through invalidateShaping(), which drops THIS node's cached layout and marks the lane
-   * stale - so only this node re-shapes, and every other node's quads are repacked from the
-   * caches they already have. Deliberately not the font epoch, which is for a family's atlases
-   * being replaced underneath every node at once and re-shapes all of them.
-   */
-  set fontFamily(family: string | undefined) {
-    if (this.familyName === family) return
-    this.familyName = family
-    this.invalidateShaping()
   }
 
   /**

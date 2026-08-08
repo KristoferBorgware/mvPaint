@@ -46,6 +46,8 @@ import { createGl2Context } from './Gl2Context'
 import { describeAdapter } from '../systems/adapter'
 import { GlFontLibrary } from './GlFontLibrary'
 import { glImageFactory } from './GlImageTexture'
+import { cachingImageFactory } from '../resources/cachingImageFactory'
+import { ResourceCache } from '../resources/ResourceCache'
 import { GlSceneRenderer } from './GlSceneRenderer'
 
 export { GlImageTexture } from './GlImageTexture'
@@ -105,7 +107,9 @@ export async function createWebGl2SceneRenderer(
     throw cause
   }
 
-  const images = glImageFactory(gl, context.maxTextureSize)
+  // Cached in front, so a picture two nodes want is fetched, decoded and uploaded once. The
+  // cache belongs to this renderer because its textures belong to this context.
+  const images = cachingImageFactory(glImageFactory(gl, context.maxTextureSize), new ResourceCache())
 
   const resizer = new CanvasResizer(canvas)
   let running = true
@@ -219,6 +223,7 @@ export async function createWebGl2SceneRenderer(
     getFonts(family) {
       return fonts.sourcesOf(family)
     },
+    fonts,
     // A getter, not a captured reference: setCamera can replace it, and a handle holding the
     // camera from construction would keep handing back the old one.
     get camera() {

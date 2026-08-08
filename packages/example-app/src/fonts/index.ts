@@ -19,8 +19,30 @@
 // This puts one round trip before the first frame of text: the metrics JSON has to be in hand
 // before the renderer is created, because the shaper measures with it synchronously. See
 // loadMsdfAtlases below and its one caller, WebGPUCanvas.tsx.
+//
+// WHAT THIS FILE IS NOW: addresses, and nothing else. The fetching, the JSON content-type check
+// that catches a dev server answering a missing file with index.html, and the memo that keeps a
+// remount mid-flight from fetching twice all live in the engine (resources/fontSources.ts),
+// keyed on these URLs. Two applications asking for the same face share one fetch; asking again
+// after a switch costs nothing.
 
-import { PolygonFontBook, type MsdfAtlasSource, type MsdfFontJson, type PolygonFontJson, type PolygonFontSource, type FontStyle } from '@mvpaint/engine'
+import {
+  DEFAULT_FONT_FAMILY,
+  loadFontFamily,
+  loadMsdfAtlases as loadMsdfAtlasesFrom,
+  registerFontFamily,
+  vectorFontsFor,
+  type MsdfAtlasSource,
+  type FontStyle,
+} from '@mvpaint/engine'
+
+/**
+ * The name this application's typeface is registered under, and what every text node names.
+ *
+ * One name for both kinds of text: an `MSDFText` samples the distance-field atlases and a
+ * `VectorText` tessellates the outlines, and both say `fontFamily: INTER` to mean Inter.
+ */
+export const INTER = 'inter'
 
 /**
  * Where public/ is served from. `import.meta.env.BASE_URL` is '/' on the dev server and './'
@@ -36,48 +58,24 @@ const STYLES: readonly FontStyle[] = ['regular', 'bold', 'italic', 'bold-italic'
 const msdfUrl = (style: FontStyle, ext: 'png' | 'json') => `${BASE}fonts/msdf/inter-${style}.${ext}`
 const polygonUrl = (style: FontStyle) => `${BASE}fonts/polygons/inter-${style}.polygons.json`
 
-async function fetchJson<T>(url: string, what: string): Promise<T> {
-  const response = await fetch(url)
-  // Vite's dev server answers a missing public/ file through the SPA fallback: index.html,
-  // with a 200. The content type is the check that catches it, so both it and the status are
-  // tested here.
-  if (!response.ok) throw new Error(`Failed to load ${what} (${response.status} from ${url})`)
-  const type = response.headers.get('content-type') ?? ''
-  if (!type.includes('json')) throw new Error(`${url} returned ${type || 'no content type'}, not JSON - is ${what} missing from public/?`)
-  return (await response.json()) as T
-}
-
-let msdfPending: Promise<readonly MsdfAtlasSource[]> | null = null
 let msdfLoaded: readonly MsdfAtlasSource[] | null = null
 
 /**
  * The MSDF atlases, handed to `createSceneRenderer({ fonts })` - see WebGPUCanvas.tsx.
  *
- * Only the metrics are fetched here. Each source carries a URL for its PNG and the engine
- * fetches those itself, straight into a texture, so the four images never pass through this
- * module or the JS heap.
+ * Only the metrics are fetched. Each source carries a URL for its PNG and the engine fetches
+ * those itself, straight into a texture, so the four images never pass through this module or
+ * the JS heap.
  *
- * Memoized on the promise rather than the result, so a remount mid-flight shares one set of
- * fetches. A failure clears the memo, so the next call retries.
+ * Never released: a typeface is loaded before the first frame of text and drawn from until the
+ * page goes, so there is no moment at which letting go of it is the right thing.
  */
-export function loadMsdfAtlases(): Promise<readonly MsdfAtlasSource[]> {
-  if (!msdfPending) {
-    msdfPending = Promise.all(
-      STYLES.map(async (style): Promise<MsdfAtlasSource> => {
-        const json = await fetchJson<MsdfFontJson>(msdfUrl(style, 'json'), `the ${style} MSDF metrics`)
-        return { style, url: msdfUrl(style, 'png'), json }
-      }),
-    )
-      .then((sources) => {
-        msdfLoaded = sources
-        return sources
-      })
-      .catch((error: unknown) => {
-        msdfPending = null
-        throw error
-      })
-  }
-  return msdfPending
+export async function loadMsdfAtlases(): Promise<readonly MsdfAtlasSource[]> {
+  const loaded = await loadMsdfAtlasesFrom(
+    STYLES.map((style) => ({ style, metricsUrl: msdfUrl(style, 'json'), imageUrl: msdfUrl(style, 'png') })),
+  )
+  msdfLoaded = loaded.sources
+  return loaded.sources
 }
 
 /**
@@ -94,29 +92,17 @@ export function msdfAtlases(): readonly MsdfAtlasSource[] {
   return msdfLoaded
 }
 
-let polygonPending: Promise<PolygonFontBook> | null = null
-
 /**
- * Fetch the outline atlases into a PolygonFontBook - what a `VectorText` node is constructed
- * with. Nothing in the engine does this for you: outlines are supplied per node, through the
- * VectorFonts interface, and this is the application's side of it.
+ * Fetch the outline atlases and register them under `INTER`, so every `VectorText` naming that
+ * family can draw. Nothing is handed back: a node names a font, it is not given one.
  *
- * Lazy: these files belong to the vector path alone, so a scene drawing MSDF text never
- * requests them. Memoized the same way as the atlases above.
+ * Lazy: these files belong to the vector path alone, so a scene drawing MSDF text never requests
+ * them. Held for the life of the page, like the atlases above, so the book is never released.
  */
-export function loadVectorFonts(): Promise<PolygonFontBook> {
-  if (!polygonPending) {
-    polygonPending = Promise.all(
-      STYLES.map(async (style): Promise<PolygonFontSource> => {
-        const json = await fetchJson<PolygonFontJson>(polygonUrl(style), `the ${style} glyph atlas`)
-        return { style, json }
-      }),
-    )
-      .then((sources) => new PolygonFontBook(sources))
-      .catch((error: unknown) => {
-        polygonPending = null
-        throw error
-      })
-  }
-  return polygonPending
+export async function loadVectorFonts(): Promise<void> {
+  await loadFontFamily(INTER, { vector: STYLES.map((style) => ({ style, url: polygonUrl(style) })) })
+  // Registered under the default name as well, pointing at the same book, so a VectorText that
+  // names no family draws - exactly as an MSDFText that names none does. Two entries, one book.
+  const book = vectorFontsFor(INTER)
+  if (book) registerFontFamily(DEFAULT_FONT_FAMILY, { vector: book })
 }

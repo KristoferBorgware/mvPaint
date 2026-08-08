@@ -472,6 +472,9 @@ export class GlSceneRenderer {
   }
 
   destroy(): void {
+    // The scene first: it releases whatever was own()ed through it, and a texture is let go of
+    // while the context that holds it is still alive.
+    this.scene.dispose()
     this.captureTarget?.destroy()
     this.meshBatcher.destroy()
     this.textBatcher.destroy()

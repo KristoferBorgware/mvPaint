@@ -1,8 +1,8 @@
 // The half of @mvpaint/engine that runs anywhere: geometry, glyph metrics, the style ladder and
 // the outline tessellator. No device, no canvas, and - the point of the split - no assets.
 //
-// The main entry point imports the four MSDF atlas PNGs as `?url`, which only a bundler
-// resolves. That is right for an application, and fatal for everything that is not one:
+// The main entry point reaches the render paths, which only a bundler resolves. That is right
+// for an application, and fatal for everything that is not one:
 // @mvpaint/ttf and its self-test, the offline atlas generators in packages/scripts (run under
 // tsx), and any application code that wants to shape or measure text before a device exists.
 // Those import this entry point instead - `@mvpaint/engine/core` - and get plain modules node
@@ -16,6 +16,14 @@
 // choose: import '@mvpaint/engine' and this is part of it.
 
 export * from './math/Vector2'
+
+// Reference counting and the keyed store built on it. Device-free by construction - what goes
+// IN one may own a GPU texture, but the counting does not care.
+export * from './resources/SharedLifetime'
+export * from './resources/ResourceCache'
+export * from './resources/globalCache'
+export * from './resources/fontSources'
+export * from './resources/FontRegistry'
 
 export * from './svg/flattenPath'
 

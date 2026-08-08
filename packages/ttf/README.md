@@ -19,8 +19,8 @@ handle.scene.root.addChild(new VectorText({ fonts, text: 'Hello', style: { fontS
 `VectorText` normally draws from a **polygon atlas**: glyph outlines flattened once, offline
 (`@mvpaint/scripts`), and supplied by the application as data. That is the right default for any
 application whose fonts are known when it is built — it needs no parser at all, and the atlas is
-a fraction of the size of the font it came from. The engine itself ships neither, only the MSDF
-atlas behind `Text`.
+a fraction of the size of the font it came from. The engine ships neither, and no typeface of
+any kind.
 
 This package is for the case an atlas cannot cover: a font the application has never seen. A
 file the user just dropped in, a font picker over a directory, a document that names its own

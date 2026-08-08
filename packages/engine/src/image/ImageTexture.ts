@@ -18,6 +18,7 @@
 // The SVG rasterizer sits here too. It produces PIXELS - <img> decode, draw, getImageData -
 // and touches no GPU API at all, so both render paths hand its output to their own upload.
 
+import type { Shared } from '../resources/SharedLifetime'
 import type { SvgSizeOptions } from './svgSize'
 
 /** How texture coordinates outside [0,1] resolve. */
@@ -44,10 +45,15 @@ export function samplingKey(s: ImageSampling): string {
  * One decoded image on the GPU.
  *
  * Deliberately small: a size, which an Image node needs to resolve its default width/height
- * and its UVs (see image/imageUv.ts), and a release. A renderer that is handed one of these
- * knows which implementation it created and narrows to it; nothing in `shapes/` ever does.
+ * and its UVs (see image/imageUv.ts), a release, and the count of who is holding it. A renderer
+ * that is handed one of these knows which implementation it created and narrows to it; nothing
+ * in `shapes/` ever does.
+ *
+ * `destroy()` releases ONE holder. A texture built directly has exactly one, so destroying it
+ * frees it; a texture handed out twice by a cache has two, and the first destroy() only ends
+ * that caller's interest in it. See resources/SharedLifetime.ts.
  */
-export interface ImageTexture {
+export interface ImageTexture extends Shared {
   readonly width: number
   readonly height: number
   destroy(): void
@@ -67,20 +73,41 @@ export interface ImageTextureFactory {
    * Fetches and decodes an image, then uploads it. An SVG is rasterized at its own intrinsic
    * size - a document has no one right pixel size, so call `fromSvg` when the size or scale
    * should be yours to choose.
+   *
+   * SHARED BY URL. Two callers asking for the same address get the same texture, and two asking
+   * before either fetch lands share one request. Each is a holder, so each destroy()s it.
    */
   load(url: string): Promise<ImageTexture>
-  /** Uploads an already-decoded bitmap or canvas. The source is read once and not retained. */
-  fromSource(source: ImageBitmap | HTMLCanvasElement | OffscreenCanvas, label?: string): ImageTexture
+  /**
+   * Uploads an already-decoded bitmap or canvas. The source is read once and not retained.
+   *
+   * `key` opts into sharing. A bitmap is an object rather than an address, so nothing recognises
+   * a second call as the same picture unless the caller says what makes it one. `label` names
+   * the texture for a GPU debugger and keys nothing - a debug string that silently decided which
+   * callers share a texture would be a trap.
+   */
+  fromSource(source: ImageBitmap | HTMLCanvasElement | OffscreenCanvas, label?: string, key?: string): ImageTexture
   /**
    * Uploads raw RGBA8 pixels, row-major from the top-left, 4 bytes per pixel, straight
    * (non-premultiplied) alpha - which is what getImageData already holds, and what the image
    * lane's blend expects.
+   *
+   * `key` opts into sharing, on the same terms as fromSource.
    */
-  fromPixels(pixels: Uint8Array | Uint8ClampedArray, width: number, height: number, label?: string): ImageTexture
+  fromPixels(
+    pixels: Uint8Array | Uint8ClampedArray,
+    width: number,
+    height: number,
+    label?: string,
+    key?: string,
+  ): ImageTexture
   /**
    * Rasterizes an SVG document at a chosen size and uploads the result. What this produces is
    * pixels, fixed at that resolution - for something that must stay sharp at any zoom, load
    * the document as vectors instead (loadSvgDocument) and let it be geometry.
+   *
+   * SHARED BY DOCUMENT AND SIZE. The same markup at 24px and at 128px are two textures; asking
+   * twice for either is one raster.
    */
   fromSvg(svgText: string, options?: SvgRasterOptions): Promise<ImageTexture>
 }

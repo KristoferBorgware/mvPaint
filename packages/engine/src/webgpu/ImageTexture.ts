@@ -12,6 +12,7 @@
 // image/ImageTexture.ts and is shared with the WebGL fallback path.
 
 import { createAtlasBindGroupLayout } from './layouts'
+import { SharedLifetime } from '../resources/SharedLifetime'
 import {
   assertSvgFits,
   isSvgSource,
@@ -40,6 +41,7 @@ export interface GpuSvgRasterOptions extends SvgRasterOptions {
 export class GpuImageTexture implements ImageTexture {
   readonly width: number
   readonly height: number
+  readonly lifetime = new SharedLifetime()
 
   private readonly device: GPUDevice
   private readonly layout: GPUBindGroupLayout
@@ -205,7 +207,9 @@ export class GpuImageTexture implements ImageTexture {
     return bindGroup
   }
 
+  /** Releases one holder; the texture itself goes when the last of them lets go. */
   destroy(): void {
+    if (!this.lifetime.release()) return
     this.bindGroups.clear()
     this.texture.destroy()
   }

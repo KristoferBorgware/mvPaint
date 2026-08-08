@@ -11,25 +11,41 @@
 import { GlFontBook } from './GlFontBook'
 import { DEFAULT_FONT_FAMILY, type FontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
+import { warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
 export class GlFontLibrary implements FontFamilies {
   private readonly gl: WebGL2RenderingContext
   private readonly books = new Map<string, GlFontBook>()
+  /** What an unregistered name resolves to: no atlases, so no glyphs, so nothing drawn. */
+  private readonly unresolved: GlFontBook
 
-  private constructor(gl: WebGL2RenderingContext, fallback: GlFontBook) {
+  private constructor(gl: WebGL2RenderingContext, initial: GlFontBook, unresolved: GlFontBook) {
     this.gl = gl
-    this.books.set(DEFAULT_FONT_FAMILY, fallback)
+    this.unresolved = unresolved
+    this.books.set(DEFAULT_FONT_FAMILY, initial)
   }
 
   /** Build a library holding one family - the default, from `sources`, or empty if none. */
   static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontLibrary> {
-    return new GlFontLibrary(gl, await GlFontBook.load(gl, sources))
+    return new GlFontLibrary(gl, await GlFontBook.load(gl, sources), await GlFontBook.load(gl))
   }
 
-  /** The book a family name resolves to - the default family for an unknown or absent name. */
+  /**
+   * The book a family name resolves to. An absent name is the default family - the one a node
+   * gets when it does not choose. A name nothing was loaded under resolves to an EMPTY book, so
+   * the node draws nothing, and says so once in the console.
+   *
+   * There is no fallback face, because the engine ships no typeface: falling back would mean
+   * drawing in whatever the application happened to load first, under a name that asked for
+   * something else.
+   */
   bookFor(family: string | undefined): GlFontBook {
-    return (family !== undefined ? this.books.get(family) : undefined) ?? this.books.get(DEFAULT_FONT_FAMILY)!
+    if (family === undefined) return this.books.get(DEFAULT_FONT_FAMILY)!
+    const book = this.books.get(family)
+    if (book) return book
+    warnUnresolvedFamily(family, 'atlas')
+    return this.unresolved
   }
 
   resolveFamily(family: string | undefined): FontProvider {
@@ -50,7 +66,7 @@ export class GlFontLibrary implements FontFamilies {
     }
     const book = await GlFontBook.load(this.gl, sources)
     this.books.set(family, book)
-    // Nodes naming this family were falling back to the default and cached a layout against it.
+    // Nodes naming this family were drawing nothing and cached a layout that said so.
     bumpFontEpoch()
     bumpTextShapingEpoch()
   }
@@ -63,5 +79,6 @@ export class GlFontLibrary implements FontFamilies {
   destroy(): void {
     for (const book of this.books.values()) book.destroy()
     this.books.clear()
+    this.unresolved.destroy()
   }
 }

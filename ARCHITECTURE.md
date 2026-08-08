@@ -979,6 +979,28 @@ top-to-bottom in right-to-left columns. Text can be bent onto an arbitrary path
 (`text/textPath.ts`). Every run becomes one or more materials referenced by its quads.
 
 Coordinates are the node's local space: +x right, +y down, the block's top-left at the origin.
+`padding` insets the text within the block and grows the reported width and height by twice it,
+so everything measured from the block — bounds, hit-testing, a plate drawn behind it — sees it.
+It does not affect wrapping: `maxWidth` is the width the text wraps at.
+
+### One style for the whole string
+
+`UniformMSDFText` and `UniformVectorText` (`shapes/singleRun.ts`, plus one file each) keep exactly
+one run and rebuild it whenever an attribute is written, so `fontSize`, `fontStyle`,
+`textDecoration`, `letterSpacing`, `padding`, `fill`, `stroke` and `strokeWidth` are properties of
+the NODE. On a plain text node the last three are inert — a text lane paints from the run, and
+`Shape.fill` is not part of that — which is the mismatch these remove.
+
+The shared surface is a mixin because `MSDFText` and `VectorText` are both concrete and where a
+glyph comes from is the only thing separating them; TypeScript has no multiple inheritance, so the
+attributes are written over each rather than under both.
+
+**The constructor order is load-bearing.** `Shape`'s constructor assigns `this.fill`, and it runs
+before `Text`'s creates the run list and before the mixin's own fields initialise — so the
+overridden setter fires while everything it would read is undefined. A `ready` flag holds the
+rebuild off until the node is whole. Without it, the epoch bump inside `invalidateShaping()` is
+scene-wide, so one per text node built would re-shape every other text node as the scene was
+being populated.
 
 A `Text` drop shadow is a duplicate of the run's glyphs drawn behind them at an offset, styled
 per run. `VectorText` has real mesh geometry, so it honours the ordinary `Shape.shadow*` fields
@@ -997,8 +1019,8 @@ From there:
 
 | | Supplied as | Selected per node by | If not supplied |
 | --- | --- | --- | --- |
-| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing until `setFonts()` |
-| Outlines | `new VectorText({ fonts })`, any `VectorFonts` | `VectorText.fonts`, the object | nothing — the engine ships no outline data |
+| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing and warns once |
+| Outlines | `loadFontFamily(name, { vector })` or `registerFontFamily(name, { vector })` | `Text.fontFamily`, the same name | nothing — the engine ships no outline data, so `VectorText` draws nothing and warns once |
 
 Neither has to exist before the canvas does, which is what an atlas fetched from a CDN needs.
 The **scope** column is why they get there differently. Outlines own no GPU resource at all —
@@ -1276,6 +1298,7 @@ opening a second document — so `handle.destroy()` releases everything setup to
 | Canvas and window listeners, the touch-hold timer, the frame subscription | `input.destroy()` |
 | The selection frame and marquee rectangle | `destroy()`, not `remove()` |
 | A canvas the **engine** created | removed from the document; a caller's canvas is untouched |
+| The scene's nodes, and whatever it `own()`ed | `scene.dispose()`, first, while the device is still alive |
 | GPU buffers, atlases, the device | the render path's own `destroy()` |
 
 The furniture is *destroyed* rather than removed because a removed frame keeps holding whatever
@@ -1286,6 +1309,34 @@ up.
 GPU textures are the application's to release. `ImageTexture` is handed to the scene that asked
 for it, since one texture is often shared by several `Image` nodes and only the scene knows when
 it is finished with.
+
+### Shared resources
+
+`resources/` counts holders. `destroy()` on a texture releases **one**; the resource frees when
+the last of them lets go (`SharedLifetime`), and the entry keying it is dropped in the same step
+(`ResourceCache`). Two callers asking before a fetch lands share one request, counted as they
+arrive rather than when it settles — otherwise the builder could let go and free the resource
+underneath a waiter.
+
+The count lives on the resource rather than in a wrapper, because a render path narrows an
+`ImageTexture` to the implementation it created in order to reach its bind groups. A proxy would
+fail that narrowing, so `GpuImageTexture` and `GlImageTexture` each route `destroy()` through
+their own `lifetime` and the cache hands out the object itself.
+
+**Two layers, split by a hard fact:** a `GPUTexture` belongs to a device and cannot be handed to a
+second renderer, while a parsed glyph outline belongs to no device at all.
+
+| | scope | keyed by |
+| --- | --- | --- |
+| Image textures (`resources/cachingImageFactory.ts`, wrapping both paths' factories) | per renderer | URL, or document + resolved pixel size |
+| Parsed outlines and font metrics (`resources/fontSources.ts`) | global | the source URLs |
+
+Nothing keeps a second CPU copy of what is already on the GPU: the global layer caches the fetch
+and the parse, and the picture is deduplicated at the texture layer.
+
+`Scene.own()` is where a builder's hold acquires an end. The builder is the holder, not the
+`Image` node — one texture is often drawn by ten of them, so a node taking a reference would mean
+two places to get the accounting right instead of one.
 
 ---
 
@@ -1397,7 +1448,9 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Stroking, contours, SVG flattening | `render/stroke.ts`, `render/contours.ts`, `svg/flattenPath.ts` |
 | Loading SVG as polygons | `svg/loadSvg.ts`, `svg/shapeToPath.ts`, `svg/gradient.ts`, `svg/triangulate.ts` |
 | Loading SVG as pixels | `image/ImageTexture.ts` (`rasterizeSvgPixels`), `image/svgSize.ts` |
+| Sharing heavy resources | `resources/SharedLifetime.ts`, `ResourceCache.ts`, `cachingImageFactory.ts`, `fontSources.ts`, `globalCache.ts` |
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
+| One style for a whole string | `shapes/singleRun.ts`, `shapes/UniformMSDFText.ts`, `shapes/UniformVectorText.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
 | Generating those assets | `packages/scripts/textgen/msdf/`, `packages/scripts/textgen/polygon/`, `textgen/fontSources.ts` |
 | An application supplying them | `webgpu/FontBook.ts`, `webgl/GlFontBook.ts`, `packages/example-app/src/fonts/` |

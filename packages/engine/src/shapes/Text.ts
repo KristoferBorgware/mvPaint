@@ -23,6 +23,8 @@ export interface TextOptions extends ShapeOptions, TextLayoutOptions {
   runs?: TextRun[]
   text?: string
   style?: TextRunStyle
+  /** Which registered family to draw with - see Text.fontFamily. */
+  fontFamily?: string
 }
 
 export abstract class Text extends Shape {
@@ -31,6 +33,48 @@ export abstract class Text extends Shape {
   lineHeight: number
   direction: TextDirection
   orientation: TextOrientation
+  /**
+   * Blank space inside the block, in world px - see TextLayoutOptions.padding.
+   *
+   * An accessor rather than a plain field for the same reason Shape.strokeWidth is one: a
+   * subclass that keeps its run in step with its attributes has to hear the assignment. Like
+   * every other layout option here, changing it needs markDirty() to re-shape.
+   */
+  private _padding = 0
+  get padding(): number {
+    return this._padding
+  }
+  set padding(value: number) {
+    this._padding = value
+  }
+
+  private _fontFamily: string | undefined
+  /**
+   * Which registered family to draw with - one name, whichever kind of text this is.
+   *
+   * A font reaches the engine by being registered under a name (see resources/FontRegistry.ts),
+   * so this is how a node says WHICH TYPEFACE. What it does not say is how the glyphs are drawn:
+   * that is the class, chosen when the node is written - MSDFText samples a distance field,
+   * VectorText tessellates real contours - and the two have different strengths rather than being
+   * swappable. Two nodes of different kinds naming one family is the ordinary case.
+   *
+   * A name nothing is registered under draws NOTHING, and says so once in the console. The engine
+   * ships no typeface, so there is no face to fall back to.
+   *
+   * A node-level choice, not a per-run one: a paragraph is one family, and mixing families within
+   * a node is not supported. Two nodes can differ freely - the text lane splits its draw where
+   * the family changes, which is a draw call and nothing else.
+   */
+  get fontFamily(): string | undefined {
+    return this._fontFamily
+  }
+  set fontFamily(value: string | undefined) {
+    if (value === this._fontFamily) return
+    this._fontFamily = value
+    // Only this node re-shapes. Deliberately not the font epoch, which is for a family's contents
+    // being replaced underneath every node at once.
+    this.invalidateShaping()
+  }
   /** A curve for the text to follow; undefined lays it out on a straight baseline. */
   textPath: TextPathOptions | undefined
 
@@ -43,12 +87,28 @@ export abstract class Text extends Shape {
     this.lineHeight = options.lineHeight ?? 1
     this.direction = options.direction ?? 'ltr'
     this.orientation = options.orientation ?? 'horizontal'
+    this.padding = options.padding ?? 0
+    // The backing field, not the setter: the setter invalidates, and invalidateShaping() bumps a
+    // scene-wide epoch, so one per text node constructed would re-shape every other text node in
+    // the scene as it was being populated.
+    this._fontFamily = options.fontFamily
     this.textPath = options.textPath
     this.runsData = options.runs ?? (options.text !== undefined ? [{ text: options.text, style: options.style }] : [])
   }
 
   protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'runs', 'align', 'maxWidth', 'lineHeight', 'direction', 'orientation', 'textPath']
+    return [
+      ...super.attrKeys(),
+      'runs',
+      'align',
+      'maxWidth',
+      'lineHeight',
+      'direction',
+      'orientation',
+      'padding',
+      'fontFamily',
+      'textPath',
+    ]
   }
 
   get runs(): readonly TextRun[] {
@@ -94,6 +154,7 @@ export abstract class Text extends Shape {
       lineHeight: this.lineHeight,
       direction: this.direction,
       orientation: this.orientation,
+      padding: this.padding,
       textPath: this.textPath,
     }
   }

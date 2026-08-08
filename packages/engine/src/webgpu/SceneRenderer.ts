@@ -541,6 +541,9 @@ export class SceneRenderer {
   }
 
   destroy(): void {
+    // The scene first: it releases whatever was own()ed through it, and a texture is let go of
+    // while the device that holds it is still alive.
+    this.scene.dispose()
     this.batcher.destroy()
     this.textBatcher.destroy()
     this.imageBatcher.destroy()

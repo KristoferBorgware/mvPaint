@@ -21,17 +21,17 @@ import {
   type Vector2Like,
   type Scene,
   type TextPathOptions,
-  type VectorFonts,
 } from '@mvpaint/engine'
-import { loadVectorFonts } from '../fonts'
+import { INTER, loadVectorFonts } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
-let fonts: VectorFonts | null = null
+let ready = false
 
 /** The outline fonts, for the one node that draws its curved text through the mesh lane. */
 export async function prepareTextPathScene(): Promise<void> {
-  fonts = await loadVectorFonts()
+  await loadVectorFonts()
+  ready = true
 }
 
 /** Walks a curve end to end so it can be drawn as the polyline it already is. */
@@ -193,10 +193,10 @@ export function buildTextPathScene(scene: Scene): SceneContent {
   const outlineCenter = { x: 370, y: 320 }
   const outlineRing = circlePath(118, { center: outlineCenter })
   root.addChild(guide(outlineRing, 'tp-outline-guide'))
-  if (fonts) {
+  if (ready) {
     root.addChild(
       new VectorText({
-        fonts,
+        fontFamily: INTER,
         name: 'tp-outline-text',
         text: 'OUTLINE GLYPHS',
         style: { fontStyle: 'bold', fontSize: 22, color: CRIMSON, strokeColor: NAVY, strokeWidth: 1.2, letterSpacing: 1 },

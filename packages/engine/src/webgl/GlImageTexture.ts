@@ -10,6 +10,7 @@
 // so wrap and filter are parameters ON the texture, and re-applying them is only worth
 // skipping when they have not changed - which is what `applied` tracks.
 
+import { SharedLifetime } from '../resources/SharedLifetime'
 import {
   assertSvgFits,
   isSvgSource,
@@ -34,6 +35,7 @@ const filterMode = (gl: WebGL2RenderingContext, filter: ImageFilter): number =>
 export class GlImageTexture implements ImageTexture {
   readonly width: number
   readonly height: number
+  readonly lifetime = new SharedLifetime()
 
   private readonly gl: WebGL2RenderingContext
   private texture: WebGLTexture | null
@@ -94,7 +96,9 @@ export class GlImageTexture implements ImageTexture {
     this.applied = key
   }
 
+  /** Releases one holder; the texture itself goes when the last of them lets go. */
   destroy(): void {
+    if (!this.lifetime.release()) return
     if (this.texture) this.gl.deleteTexture(this.texture)
     this.texture = null
   }

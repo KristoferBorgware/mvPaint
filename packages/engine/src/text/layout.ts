@@ -15,8 +15,7 @@ import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, RGBA} from
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
 // From the metrics module, not from webgpu/FontBook which re-exports it: the shaper is pure
-// and must stay importable without dragging a render path - and its `?url` atlas imports -
-// in behind it.
+// and must stay importable without dragging a render path in behind it.
 import type { FontStyle } from './msdfProvider'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
 
@@ -101,6 +100,19 @@ export interface TextLayoutOptions {
   /** 'horizontal' (default) flows in lines; 'vertical' stacks glyphs in right-to-left columns. */
   orientation?: TextOrientation
   /**
+   * Blank space inside the block on all four sides, in world px. Default 0.
+   *
+   * It moves the text, and it grows the block: the first baseline sits `padding` lower, every
+   * line starts `padding` further along, and the reported width and height each gain twice it.
+   * So the block still starts at the node's origin, with the text inset within it - which is
+   * what makes padding visible to everything measured from the block (bounds, hit-testing, a
+   * highlight drawn behind it) rather than only to the glyphs.
+   *
+   * Wrapping is unaffected: `maxWidth` is the width the TEXT wraps at, so a padded block that
+   * wraps is `maxWidth + 2 x padding` across.
+   */
+  padding?: number
+  /**
    * Bend the finished block onto a curve (see text/textPath.ts). Everything else still
    * applies first - runs, kerning, wrapping, alignment, decorations - and the result is then
    * mapped onto the curve glyph by glyph.
@@ -120,7 +132,7 @@ export interface FontProvider {
   resolve(style: FontStyle): ResolvedStyle
 }
 
-/** The family name an MSDFText node gets when it asks for none, and the one every other falls back to. */
+/** The family name a text node gets when it asks for none. Not a fallback - see FontFamilies. */
 export const DEFAULT_FONT_FAMILY = 'default'
 
 /**
@@ -131,14 +143,21 @@ export const DEFAULT_FONT_FAMILY = 'default'
  * atlas index, so text can be measured, wrapped, culled and hit-tested with no renderer at all.
  * The GPU-owning implementation (webgpu/FontLibrary.ts) adds the textures.
  *
- * A family is named rather than handed over as an object so that an `MSDFText` stays plain data -
+ * A family is named rather than handed over as an object so that a text node stays plain data -
  * serializable, settable through setAttr, and constructible before any atlas has finished
- * loading. An unknown name resolves to the default family rather than failing, which is what
- * makes a node built while its atlas is still in flight draw something now and the right thing
- * once it arrives.
+ * loading. A node built while its atlas is in flight draws nothing until it lands, then re-shapes
+ * on the font epoch.
+ *
+ * THERE IS NO FALLBACK FACE. The engine ships no typeface, so a name nothing was loaded under
+ * resolves to an empty provider - no glyphs, nothing drawn - and says so once in the console.
+ * Falling back would mean drawing in whatever the application happened to load first, under a
+ * name that asked for something else.
  */
 export interface FontFamilies {
-  /** The provider for a family: the default family when the name is absent or not loaded. */
+  /**
+   * The provider for a family. An absent name is the default family - the one a node gets when
+   * it does not choose - and an unregistered name is an empty provider.
+   */
   resolveFamily(family: string | undefined): FontProvider
 }
 
@@ -455,9 +474,13 @@ function layoutHorizontal(
   const decorations: TextQuad[] = []
 
   const widths = lines.map((l) => lineExtent(l.entries, resolved))
+  // The width the TEXT occupies, which is what alignment measures against. Padding is added to
+  // the reported block width at the end and deliberately not here: aligning against a padded
+  // width would centre the text on the padding rather than within it.
   const blockWidth = maxWidth ?? Math.max(0, ...widths)
+  const padding = options.padding ?? 0
 
-  let topY = 0
+  let topY = padding
   let referenceBaseline = 0
   lines.forEach((l, li) => {
     let ascent = fallback.ascent
@@ -480,7 +503,7 @@ function layoutHorizontal(
     const alignOffset =
       align === 'right' ? blockWidth - widths[li] : align === 'center' ? (blockWidth - widths[li]) / 2 : 0
 
-    let pen = alignOffset
+    let pen = padding + alignOffset
     let spanRun = -1
     let spanStart = 0
     let spanEnd = 0
@@ -516,8 +539,9 @@ function layoutHorizontal(
   return {
     quads: [...highlights, ...shadows, ...glows, ...glyphs, ...decorations],
     materials,
-    width: blockWidth,
-    height: topY,
+    width: blockWidth + padding * 2,
+    // topY already carries the leading padding, having started there; this adds the trailing one.
+    height: topY + padding,
     lineCount: lines.length,
     referenceBaseline,
   }
@@ -656,14 +680,17 @@ function layoutVertical(
   const glows: TextQuad[] = []
   const glyphs: TextQuad[] = []
 
-  let columnX = 0
+  // Columns run to negative x from the origin, so the inset is negative on that axis and
+  // positive on the other - the same "inside the block" in both cases.
+  const padding = options.padding ?? 0
+  let columnX = -padding
   let maxDepth = 0
   for (const col of columns) {
     let columnWidth = 0
     for (const e of col) if (e.rr >= 0) columnWidth = Math.max(columnWidth, resolved[e.rr].fontSize)
     if (columnWidth === 0) columnWidth = 32
 
-    let penY = 0
+    let penY = padding
     for (const e of col) {
       if (e.rr >= 0 && e.glyph) {
         const rr = resolved[e.rr]
@@ -687,8 +714,9 @@ function layoutVertical(
   return {
     quads: [...shadows, ...glows, ...glyphs],
     materials,
-    width: -columnX,
-    height: maxDepth,
+    // Both already carry the leading padding, having started there; these add the trailing one.
+    width: -columnX + padding,
+    height: maxDepth + padding,
     lineCount: columns.length,
     referenceBaseline: 0,
   }

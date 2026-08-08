@@ -16,8 +16,8 @@
 // application's asset, not the engine's, which ships an MSDF fallback and no outlines at all. A
 // font the atlases do not cover is the other scene: Runtime TTF.
 
-import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
-import { loadVectorFonts } from '../fonts'
+import { MSDFText, VectorText, type Scene } from '@mvpaint/engine'
+import { INTER, loadVectorFonts } from '../fonts'
 import { CRIMSON, DARK, HIGHLIGHT, NAVY, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
 
@@ -28,16 +28,16 @@ const VERTICAL = 520
 
 // Held here rather than passed through the scene contract: parsed outlines own no GPU
 // resources, so nothing about them has to be handed out by the renderer.
-let fonts: VectorFonts | null = null
+let ready = false
 
 /** Fetch the glyph atlases. Called by the canvas before build(), and memoized downstream. */
 export async function prepareVectorTextScene(): Promise<void> {
-  fonts = await loadVectorFonts()
+  await loadVectorFonts()
+  ready = true
 }
 
 export function buildVectorTextScene(scene: Scene): SceneContent {
-  if (!fonts) throw new Error('Vector fonts are not loaded yet')
-  const book = fonts
+  if (!ready) throw new Error('Vector fonts are not loaded yet')
   const root = scene.root
 
   const label = (x: number, y: number, text: string, maxWidth?: number) =>
@@ -47,7 +47,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // implementation of one inside a text shader.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-title',
       x: LEFT,
       y: -350,
@@ -75,7 +75,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // --- the four styles, one node, one run each.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-styles',
       x: LEFT,
       y: -250,
@@ -92,7 +92,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // own material record on a single mesh object (see Shape.materials()).
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-runs',
       x: LEFT,
       y: -190,
@@ -109,7 +109,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // --- per-letter outline: the shared contour stroker, run over the glyph's own rings.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-outline',
       x: LEFT,
       y: -130,
@@ -124,7 +124,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // the shaper is the same code, only its output is consumed differently.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-paragraph',
       x: LEFT,
       y: -60,
@@ -143,7 +143,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   root.addChild(label(LEFT, 110, 'The same line, drawn each way:'))
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-compare-vector',
       x: LEFT,
       y: 140,
@@ -170,7 +170,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // has no rasterized shape to blur, so its shadow is an offset duplicate of the glyphs.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-shadow',
       x: RIGHT,
       y: -330,
@@ -185,7 +185,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   )
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-shadow-spread',
       x: RIGHT,
       y: -250,
@@ -203,7 +203,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // around the glyph's own contours rather than a distance-field threshold shift.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-glow',
       x: RIGHT,
       y: -150,
@@ -218,7 +218,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // O, which is a hole in the outline and therefore not part of the shape at all.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-pick',
       x: RIGHT,
       y: -40,
@@ -230,7 +230,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
 
   // Turning and growing under the animation - geometry, so it stays exact at any size.
   const spun = new VectorText({
-    fonts: book,
+    fontFamily: INTER,
     name: 'vt-spun',
     x: RIGHT + 190,
     y: 140,
@@ -246,7 +246,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   // a superscript is a real raised glyph rather than a smaller one nudged by eye.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-baseline',
       x: RIGHT,
       y: 240,
@@ -269,7 +269,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
   root.addChild(label(VERTICAL - 150, -372, 'orientation: vertical'))
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: INTER,
       name: 'vt-vertical',
       x: VERTICAL,
       y: -340,
@@ -293,7 +293,7 @@ export function buildVectorTextScene(scene: Scene): SceneContent {
     root.addChild(label(x, 350, align))
     root.addChild(
       new VectorText({
-        fonts: book,
+        fontFamily: INTER,
         name: `vt-align-${align}`,
         x,
         y: 375,

@@ -19,6 +19,8 @@ import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../
 import { FontLibrary } from './FontLibrary'
 import { createGpuContext } from './GpuContext'
 import { gpuImageFactory } from './ImageTexture'
+import { cachingImageFactory } from '../resources/cachingImageFactory'
+import { ResourceCache } from '../resources/ResourceCache'
 import { FrameRenderer, type FrameContext } from './FrameRenderer'
 import { SceneRenderer, SAMPLE_COUNT } from './SceneRenderer'
 
@@ -69,8 +71,10 @@ export async function createWebGpuSceneRenderer(
   })
 
   // One layout for every texture a scene builds, so the image lane can bind any of them
-  // without a pipeline change (see gpuImageFactory).
-  const images = gpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device))
+  // without a pipeline change (see gpuImageFactory) - and one cache in front of it, so a
+  // picture two nodes want is fetched, decoded and uploaded once (see cachingImageFactory).
+  // The cache belongs to this renderer because its textures belong to this device.
+  const images = cachingImageFactory(gpuImageFactory(gpu.device, createAtlasBindGroupLayout(gpu.device)), new ResourceCache())
 
 
   const resizer = new CanvasResizer(canvas)
@@ -190,6 +194,7 @@ export async function createWebGpuSceneRenderer(
     getFonts(family) {
       return fonts.sourcesOf(family)
     },
+    fonts,
     // A getter, not a captured reference: setCamera() below can replace it, and a handle
     // holding the camera from construction would keep handing back the old one.
     get camera() {

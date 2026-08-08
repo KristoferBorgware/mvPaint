@@ -24,6 +24,7 @@ import type { ColorInput } from '../render/color'
 import type { InputOptions } from '../input/inputOptions'
 import type { SceneInput } from '../input/sceneInput'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
+import type { FontFamilies } from '../text/layout'
 import type { GpuPowerPreference, RendererAdapter } from './adapter'
 
 /** Which render path drew this frame. `'auto'` is only an input; a renderer is always one. */
@@ -37,6 +38,23 @@ export type RenderPathKind = 'webgpu' | 'webgl2'
 export interface SceneResources {
   /** Build an image texture for whichever path is drawing - see image/ImageTexture.ts. */
   readonly images: ImageTextureFactory
+  /**
+   * The loaded font families, for measuring text.
+   *
+   * An MSDFText cannot measure itself: its glyphs live in atlases the renderer owns, so shaping
+   * takes a provider rather than reaching for one. This is that provider - what
+   * `UniformMSDFText.getTextWidth()` and `measureSize()` are given, and what anything sizing a
+   * box around a label needs:
+   *
+   * ```ts
+   * label.getTextWidth(fonts.resolveFamily(label.fontFamily))
+   * ```
+   *
+   * Read-only. Loading and replacing atlases go through `handle.setFonts()`, which also
+   * re-shapes what is already on screen. `VectorText` needs none of this - its outlines are on
+   * the node.
+   */
+  readonly fonts: FontFamilies
 }
 
 export interface SceneRendererHandle extends SceneResources {

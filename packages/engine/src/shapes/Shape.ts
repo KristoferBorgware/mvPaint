@@ -403,7 +403,21 @@ export abstract class Shape extends Node {
   get strokeInput(): ColorInput | null {
     return this.strokeWritten
   }
-  strokeWidth = 0
+  /**
+   * How wide the outline is drawn, in world units. 0 draws none whatever `stroke` says.
+   *
+   * An accessor rather than a plain field so that a subclass whose geometry is derived from it
+   * can hear the assignment - UniformMSDFText and UniformVectorText rebuild their run from it
+   * (see shapes/singleRun.ts). This one stores and nothing more: a stroke width is baked into
+   * the tessellation, so changing it still needs markGeometryDirty() like the rest of geometry.
+   */
+  private _strokeWidth = 0
+  get strokeWidth(): number {
+    return this._strokeWidth
+  }
+  set strokeWidth(value: number) {
+    this._strokeWidth = value
+  }
   /**
    * Which way the stroke expands from the outline it follows.
    *

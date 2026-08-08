@@ -16,7 +16,7 @@
 // input folder rather than copied into src/fonts/: this demo needs a real TTF at runtime, and a
 // TTF is a generator INPUT, not one of the atlases a developer copies out.
 
-import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
+import { MSDFText, VectorText, registerFontFamily, type Scene } from '@mvpaint/engine'
 import { TtfFontBook } from '@mvpaint/ttf'
 import { CRIMSON, DARK, SLATE, TEAL } from './palette'
 import type { SceneContent } from './types'
@@ -28,11 +28,18 @@ import interBoldTtf from '@mvpaint/scripts/textgen/fonts/Inter-700-normal.ttf?ur
 
 const LEFT = -430
 
-let fonts: VectorFonts | null = null
+/**
+ * The name these outlines are registered under. A font parsed at runtime goes into the registry
+ * like any other - there is no way to hand a book to a node - so this scene's typeface is reached
+ * exactly as the application's own is, by name.
+ */
+const RUNTIME_TTF = 'inter-runtime'
+
+let ready = false
 
 /** Fetch the font files and parse them. Called by the canvas before build(). */
 export async function prepareRuntimeTtfScene(): Promise<void> {
-  if (fonts) return
+  if (ready) return
   const [regular, bold] = await Promise.all(
     [interRegularTtf, interBoldTtf].map(async (url) => {
       const response = await fetch(url)
@@ -42,15 +49,17 @@ export async function prepareRuntimeTtfScene(): Promise<void> {
   )
   // Two styles, not four: a book synthesizes what it was not given, so italic below is a faux
   // slant of the real regular - which is exactly what the atlas-backed book would do.
-  fonts = await TtfFontBook.load([
-    { style: 'regular', data: regular },
-    { style: 'bold', data: bold },
-  ])
+  registerFontFamily(RUNTIME_TTF, {
+    vector: await TtfFontBook.load([
+      { style: 'regular', data: regular },
+      { style: 'bold', data: bold },
+    ]),
+  })
+  ready = true
 }
 
 export function buildRuntimeTtfScene(scene: Scene): SceneContent {
-  if (!fonts) throw new Error('The font file is not parsed yet')
-  const book = fonts
+  if (!ready) throw new Error('The font file is not parsed yet')
   const root = scene.root
 
   const label = (x: number, y: number, text: string) =>
@@ -58,7 +67,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
 
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: RUNTIME_TTF,
       name: 'ttf-title',
       x: LEFT,
       y: -260,
@@ -74,7 +83,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
   // atlases were built with, so the atlas-backed scenes space them instead of drawing them.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: RUNTIME_TTF,
       name: 'ttf-charset',
       x: LEFT,
       y: -110,
@@ -88,7 +97,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
   // only in where their outlines came from.
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: RUNTIME_TTF,
       name: 'ttf-styled',
       x: LEFT,
       y: 30,
@@ -107,7 +116,7 @@ export function buildRuntimeTtfScene(scene: Scene): SceneContent {
 
   root.addChild(
     new VectorText({
-      fonts: book,
+      fontFamily: RUNTIME_TTF,
       name: 'ttf-body',
       x: LEFT,
       y: 190,

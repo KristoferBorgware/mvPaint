@@ -31,16 +31,12 @@ import { Text, type TextOptions } from './Text'
 import type {MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import type { VectorFonts } from '../text/vectorGlyphs'
+import { vectorFontsFor, warnUnresolvedFamily } from '../resources/FontRegistry'
 import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
 import { quadCorner, type TextQuad } from '../text/textQuad'
 
-export interface VectorTextOptions extends TextOptions {
-  /**
-   * The outlines this node draws from - a PolygonFontBook over atlases the application
-   * supplies, or any other VectorFonts (see @mvpaint/ttf, which parses a font file at runtime).
-   */
-  fonts: VectorFonts
-}
+/** VectorText adds nothing to Text's options; `fontFamily` names the outlines it tessellates. */
+export type VectorTextOptions = TextOptions
 
 // Round joins on the dilation ring: a glow or a faux-bold thickening follows the letterform,
 // and a mitred corner would grow spikes out of every sharp junction in the outline.
@@ -74,16 +70,20 @@ interface ShapingResult {
   quadMaterials: number[]
 }
 
+/** What a node with no resolvable family shapes to: nothing, laid out at no size. */
+const NOTHING: ShapingResult = {
+  shaped: { quads: [], materials: [], width: 0, height: 0, lineCount: 0, referenceBaseline: 0 },
+  materials: [],
+  quadMaterials: [],
+}
+
 export class VectorText extends Text {
   override readonly nodeName: string = 'VectorText'
 
-  private fontsValue: VectorFonts
-
   private shapingCache: ShapingResult | null = null
 
-  constructor(options: VectorTextOptions) {
+  constructor(options: VectorTextOptions = {}) {
     super(options)
-    this.fontsValue = options.fonts
     // Round joins by default, unlike every other shape. A letterform has far sharper corners
     // than a rectangle or a hand-drawn path does - the apex of an A, the two of a W - and
     // Shape's default miter (limit 10) grows a spike out of each one. Measured on Inter at
@@ -93,30 +93,16 @@ export class VectorText extends Text {
     this.lineJoin = options.lineJoin ?? 'round'
   }
 
-  protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'fonts']
-  }
-
   /**
-   * The outlines this node draws from - this path's equivalent of `MSDFText.fontFamily`, except
-   * that the fonts themselves are handed over rather than named, since they own no GPU resource
-   * for a renderer to have to hold.
-   */
-  get fonts(): VectorFonts {
-    return this.fontsValue
-  }
-
-  /**
-   * Draw from a different set of outlines.
+   * The outlines this node draws from, resolved from `fontFamily` through the registry, or
+   * undefined when nothing is registered under that name.
    *
-   * Goes through invalidateShaping() like any other content change, so only this node re-shapes
-   * (and re-tessellates - its geometry IS its shaping) while every other node's packed quads
-   * are reused.
+   * Read-only and resolved on every access rather than held: a family registered after this node
+   * was built has to reach it, and the alternative is every node subscribing to the registry.
+   * Resolution is one Map lookup.
    */
-  set fonts(fonts: VectorFonts) {
-    if (this.fontsValue === fonts) return
-    this.fontsValue = fonts
-    this.invalidateShaping()
+  get fonts(): VectorFonts | undefined {
+    return this.fontFamily === undefined ? undefined : vectorFontsFor(this.fontFamily)
   }
 
   /** Shape the runs into quads + materials, cached until the content or layout changes. */
@@ -153,7 +139,7 @@ export class VectorText extends Text {
         return
       }
 
-      const mesh = this.fonts.fontByIndex(quad.atlasIndex)?.mesh(quad.codePoint)
+      const mesh = this.fonts?.fontByIndex(quad.atlasIndex)?.mesh(quad.codePoint)
       if (!mesh || mesh.vertices.length === 0) return
 
       const source = shaped.materials[quad.material]
@@ -213,10 +199,20 @@ export class VectorText extends Text {
 
   private ensureShaping(): ShapingResult {
     if (!this.shapingCache) {
+      const fonts = this.fonts
+      if (!fonts) {
+        // Nothing is registered under this name, so there are no glyphs to lay out and no shape
+        // to fall back to. Said once, in the console, rather than left as text that never appears.
+        if (this.fontFamily !== undefined) warnUnresolvedFamily(this.fontFamily, 'outline')
+        else warnUnresolvedFamily('(none)', 'outline')
+        // Not cached: registering the family later has to take effect, and the epoch bump that
+        // announces it only reaches nodes that re-shape.
+        return NOTHING
+      }
       // Measure exactly the characters in play before shaping - the shaper reads the font's
       // glyph and kerning maps directly, and treats anything missing from them as a space.
-      for (const run of this.runsData) this.fonts.prepare(run.style?.fontStyle ?? 'regular', run.text)
-      const shaped = layoutText(this.runsData, this.layoutOptions(), this.fonts)
+      for (const run of this.runsData) fonts.prepare(run.style?.fontStyle ?? 'regular', run.text)
+      const shaped = layoutText(this.runsData, this.layoutOptions(), fonts)
 
       // Intern (run material, color) pairs. The shaper's own materials carry no solid color -
       // in the MSDF lane that rides on the vertices - so a run's body, its highlight and its

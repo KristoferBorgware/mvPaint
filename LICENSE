@@ -23,8 +23,6 @@ SOFTWARE.
 ---
 
 This repository also redistributes the Inter typeface, under the SIL Open Font
-License 1.1, in three places: the source .ttf files in packages/scripts/fonts,
-the MSDF and polygon atlases the example app draws with in
-packages/example-app/src/fonts, and the MSDF fallback atlas the engine ships in
-packages/engine/src/text/fonts. See packages/engine/LICENSE-Inter.txt for the
-full text.
+License 1.1, in two places: the source .ttf files in packages/scripts/textgen/fonts,
+and the MSDF and polygon atlases the example app draws with in
+packages/example-app/public/fonts. The engine package itself carries no typeface.

@@ -3,14 +3,14 @@
 // everything needed to render a 2D scene through createSceneRenderer(), without any
 // example/demo content.
 //
-// This entry point carries the one asset the engine ships - the Inter MSDF atlas, so text draws
-// out of the box - so it needs a bundler. The device-free, asset-free subset of it - geometry,
-// metrics, the style ladder, the outline tessellator - is also published on its own as
+// This entry point reaches the render paths, so it assumes a bundler. The device-free subset -
+// geometry, metrics, the style ladder, the outline tessellator - is also published on its own as
 // '@mvpaint/engine/core', for the things that cannot have one. See core.ts.
 //
-// Outlines for VectorText are NOT here: a polygon atlas is an application's asset, supplied
-// through the VectorFonts interface (see text/vectorGlyphs.ts). packages/example-app serves
-// this repository's own, and @mvpaint/ttf is the runtime-parsing alternative.
+// NO TYPEFACE OF ANY KIND is here. The engine ships none: both text implementations draw from
+// assets an application supplies and registers under a name (see resources/FontRegistry.ts), so
+// a family nothing was registered under draws nothing. packages/example-app serves this
+// repository's atlases, and @mvpaint/ttf parses a font file at runtime.
 
 export * from './core'
 
@@ -50,6 +50,9 @@ export * from './shapes/Image'
 export * from './shapes/MSDFText'
 export * from './shapes/Text'
 export * from './shapes/VectorText'
+export * from './shapes/singleRun'
+export * from './shapes/UniformMSDFText'
+export * from './shapes/UniformVectorText'
 
 export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './render/color'
@@ -57,6 +60,7 @@ export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './re
 export * from './svg/loadSvg'
 
 export * from './image/ImageTexture'
+export * from './resources/cachingImageFactory'
 export * from './webgpu/ImageTexture'
 export * from './image/imageUv'
 export * from './image/svgSize'

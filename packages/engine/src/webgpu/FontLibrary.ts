@@ -25,6 +25,7 @@ import { createAtlasBindGroupLayout } from './layouts'
 import { FontBook, createAtlasSampler } from './FontBook'
 import { DEFAULT_FONT_FAMILY, type FontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
+import { warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
 export class FontLibrary implements FontFamilies {
@@ -34,12 +35,21 @@ export class FontLibrary implements FontFamilies {
   private readonly device: GPUDevice
   private readonly sampler: GPUSampler
   private readonly books = new Map<string, FontBook>()
+  /** What an unregistered name resolves to: no atlases, so no glyphs, so nothing drawn. */
+  private readonly unresolved: FontBook
 
-  private constructor(device: GPUDevice, atlasLayout: GPUBindGroupLayout, sampler: GPUSampler, fallback: FontBook) {
+  private constructor(
+    device: GPUDevice,
+    atlasLayout: GPUBindGroupLayout,
+    sampler: GPUSampler,
+    initial: FontBook,
+    unresolved: FontBook,
+  ) {
     this.device = device
     this.atlasLayout = atlasLayout
     this.sampler = sampler
-    this.books.set(DEFAULT_FONT_FAMILY, fallback)
+    this.unresolved = unresolved
+    this.books.set(DEFAULT_FONT_FAMILY, initial)
   }
 
   /**
@@ -50,13 +60,26 @@ export class FontLibrary implements FontFamilies {
   static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<FontLibrary> {
     const atlasLayout = createAtlasBindGroupLayout(device, '2d-array')
     const sampler = createAtlasSampler(device)
-    const fallback = await FontBook.loadWith(device, atlasLayout, sampler, sources)
-    return new FontLibrary(device, atlasLayout, sampler, fallback)
+    const initial = await FontBook.loadWith(device, atlasLayout, sampler, sources)
+    const unresolved = await FontBook.loadWith(device, atlasLayout, sampler)
+    return new FontLibrary(device, atlasLayout, sampler, initial, unresolved)
   }
 
-  /** The book a family name resolves to - the default family for an unknown or absent name. */
+  /**
+   * The book a family name resolves to. An absent name is the default family - the one a node
+   * gets when it does not choose. A name nothing was loaded under resolves to an EMPTY book, so
+   * the node draws nothing, and says so once in the console.
+   *
+   * There is no fallback face, because the engine ships no typeface: falling back would mean
+   * drawing in whatever the application happened to load first, under a name that asked for
+   * something else.
+   */
   bookFor(family: string | undefined): FontBook {
-    return (family !== undefined ? this.books.get(family) : undefined) ?? this.books.get(DEFAULT_FONT_FAMILY)!
+    if (family === undefined) return this.books.get(DEFAULT_FONT_FAMILY)!
+    const book = this.books.get(family)
+    if (book) return book
+    warnUnresolvedFamily(family, 'atlas')
+    return this.unresolved
   }
 
   resolveFamily(family: string | undefined): FontProvider {
@@ -103,5 +126,6 @@ export class FontLibrary implements FontFamilies {
   destroy(): void {
     for (const book of this.books.values()) book.destroy()
     this.books.clear()
+    this.unresolved.destroy()
   }
 }

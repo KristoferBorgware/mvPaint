@@ -207,6 +207,9 @@ render path implements, and it mentions no graphics API.
 | Member | Purpose |
 | --- | --- |
 | `scene` | The scene graph. Content is added after construction: `handle.scene.root.addChild(node)`. |
+| `images` | Build a texture — see [Shared resources](#shared-resources). |
+| `fonts` | The loaded families, for measuring text. |
+| `setFonts`, `getFonts` | Load or replace a family's MSDF atlases at any point. |
 | `camera`, `setCamera`, `setZoom`, `getZoom` | The view. |
 | `path` | `'webgpu'` or `'webgl2'` — which path was taken. |
 | `adapter` | Which GPU is drawing, and whether it is a software renderer. |
@@ -225,6 +228,39 @@ render path implements, and it mentions no graphics API.
 - Changing what a shape *is* — a radius, a point list, a stroke width — requires
   `shape.markGeometryDirty()`, because it invalidates the cached tessellation.
 - Adding or removing nodes needs no mark. The visible set is recomputed each frame.
+
+### Shared resources
+
+A picture, a rasterized SVG and a parsed set of glyph outlines are all built once and handed to
+everyone who asks for the same one. `destroy()` releases **one holder**; the resource itself goes
+when the last of them lets go.
+
+```ts
+const a = await handle.images.load('/logo.png')   // fetched, decoded, uploaded
+const b = await handle.images.load('/logo.png')   // the same texture, no work at all
+a.destroy()                                        // b is still drawing; nothing is freed
+b.destroy()                                        // now it is
+```
+
+`load` is keyed by URL and `fromSvg` by the document plus its resolved pixel size, so the same
+badge at 24px and at 128px are two textures and asking twice for either is one raster.
+`fromSource` and `fromPixels` take an optional trailing `key` to opt in — a bitmap is an object
+rather than a name, and nothing can tell two of them apart unless the caller says what makes them
+the same picture.
+
+Font data is cached globally rather than per renderer, since outlines and metrics own nothing on
+a device: `loadPolygonFonts(urls)` and `loadMsdfAtlases(urls)` deduplicate across remounts,
+across renderers and across two scenes wanting the same face.
+
+Hand a resource's lifetime to the scene that built it and it is released with that scene:
+
+```ts
+const checker = scene.own(handle.images.fromPixels(pixels, 256, 256, 'checker'))
+scene.dispose()   // destroys the tree, then releases everything own()ed
+```
+
+The builder is the holder, not the `Image` node — one texture is often drawn by ten of them.
+Destroying a renderer disposes its scene.
 
 ### Capture
 
@@ -363,8 +399,26 @@ Two implementations over one shaper:
   blurred shadows and per-glyph picking.
 
 The shared shaper handles wrapping, alignment including justified, kerning, letter spacing, line
-height, baseline shift, RTL and vertical flow, per-run colour or gradient,
+height, baseline shift, padding, RTL and vertical flow, per-run colour or gradient,
 underline/strikethrough, highlight, per-letter outline, and text laid along an arbitrary path.
+
+Content is a list of **runs** — segments of one string, styled independently — which is what lets
+one node mix weights, sizes and colours. Where a whole string is one style, **`UniformMSDFText`**
+and **`UniformVectorText`** put that style on the node instead:
+
+```ts
+const label = new UniformMSDFText({ text: 'Hello', fontSize: 18 })
+label.fill = 'crimson'          // the glyphs' colour, not an inert Shape field
+label.textDecoration = 'underline'
+label.padding = 8
+```
+
+Every one of those re-shapes the node. They are ordinary `Text` nodes underneath, so wrapping,
+curves, picking and the transformer are unchanged — and they carry the one deliberate exception
+to "nothing paints unless asked": their `fill` starts opaque black, because text that renders
+invisibly is a worse default than text that renders in black. Measuring goes through
+`getTextWidth(fonts)` and `measureSize(text, fonts)`, where `fonts` is `SceneResources.fonts`;
+the outline class needs no argument, since it already holds its own.
 
 Both read generated assets — a distance-field PNG for one, a polygon atlas of flattened outlines
 for the other — so the engine ships no font parser. Its only dependency is `earcut`.
@@ -373,15 +427,20 @@ for the other — so the engine ships no font parser. Its only dependency is `ea
 `packages/scripts`, keep them with your other assets, and hand them to the engine:
 
 ```ts
-createSceneRenderer(canvas, { fonts: MSDF_ATLASES })   // what MSDFText samples
-new VectorText({ fonts: await loadVectorFonts(), ... }) // what VectorText tessellates
+createSceneRenderer(canvas, { fonts: MSDF_ATLASES })              // what MSDFText samples
+await loadFontFamily('inter', { vector: POLYGON_ATLAS_URLS })     // what VectorText tessellates
+new VectorText({ text: 'Hello', fontFamily: 'inter' })
 ```
 
-The engine carries one asset of its own: an Inter MSDF atlas, used when `fonts` is omitted, so
-`Text` draws before a project has chosen a typeface. It is a **fallback**, not the way to pick a
-font, and there is no outline equivalent — `VectorText` is always given its outlines. Where the
-font is not known until runtime, `@mvpaint/ttf` parses a TTF in the browser and satisfies the
-same `VectorFonts` interface; applications that never import it never download a parser.
+**A font reaches the engine by being registered under a name**, and both kinds of text name it
+the same way — `fontFamily`. Which kind a node is stays a choice made when it is written; the
+family name only says *which typeface*. One parsed at runtime goes in the same place:
+`registerFontFamily('dropped-file', { vector: await parseTtf(file) })`, which is how
+`@mvpaint/ttf` fits without the engine carrying a parser.
+
+**The engine ships no typeface at all**, so there is nothing to fall back to: a node naming a
+family nothing was registered under draws nothing, and says so once in the console. See
+[RESOURCES.md](RESOURCES.md).
 
 Two `Text` nodes can be different typefaces: load a named family with
 `handle.setFonts(sources, 'roboto')` and select it per node with `fontFamily`. The full pipeline —

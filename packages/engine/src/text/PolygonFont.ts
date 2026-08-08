@@ -29,6 +29,7 @@
 // of the same numbers written as floats.
 
 import type { Vector2Like } from '../math/Vector2'
+import { SharedLifetime } from '../resources/SharedLifetime'
 import type { Contour } from '../render/stroke'
 import type { BmDecoration, FontMetrics, Glyph } from './msdfMetrics'
 import { resolveStyle, STYLE_ORDER, type FontStyle } from './msdfProvider'
@@ -170,6 +171,13 @@ export interface PolygonFontSource {
  * one.
  */
 export class PolygonFontBook implements VectorFonts {
+  /**
+   * Counted, so several nodes - or several scenes - can draw from one book and the last of them
+   * to let go is what drops it from the cache it came out of (see resources/fontSources.ts).
+   * A book built directly has one holder, which is whoever built it.
+   */
+  readonly lifetime = new SharedLifetime()
+
   private readonly fonts: (PolygonFont | undefined)[] // indexed by STYLE_ORDER
 
   constructor(sources: readonly PolygonFontSource[]) {
@@ -211,4 +219,12 @@ export class PolygonFontBook implements VectorFonts {
 
   /** Everything is measured already; here so an atlas book and a parsing one are the same shape. */
   prepare(_style: FontStyle, _text: string): void {}
+
+  /**
+   * One holder lets go. There are no GPU resources to free - outlines are data - so what this
+   * releases is the book's place in whatever cache handed it out.
+   */
+  destroy(): void {
+    this.lifetime.release()
+  }
 }

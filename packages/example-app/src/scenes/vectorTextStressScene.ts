@@ -17,24 +17,24 @@
 // batcher at the default zoom - the opposite of what a scene meant to stress-test all of them
 // should do.
 
-import { MSDFText, VectorText, type Scene, type VectorFonts } from '@mvpaint/engine'
-import { loadVectorFonts } from '../fonts'
+import { MSDFText, VectorText, type Scene } from '@mvpaint/engine'
+import { INTER, loadVectorFonts } from '../fonts'
 import { addPageFrame, loremStressLayout, BODY_MAX_WIDTH, PAGE_COUNT, PAGE_WIDTH, PARAGRAPH_LINE_HEIGHT } from './loremStress'
 import { DARK, SLATE } from './palette'
 import type { SceneContent } from './types'
 
 // Held here rather than passed through the scene contract, same reasoning as vectorTextScene:
 // parsed outlines own no GPU resources, so there's nothing for the renderer to hand out.
-let fonts: VectorFonts | null = null
+let ready = false
 
 /** Fetch and parse the glyph atlases. Called by the canvas before build(), and memoized downstream. */
 export async function prepareVectorTextStressScene(): Promise<void> {
-  fonts = await loadVectorFonts()
+  await loadVectorFonts()
+  ready = true
 }
 
 export function buildVectorTextStressScene(scene: Scene): SceneContent {
-  if (!fonts) throw new Error('Vector fonts are not loaded yet')
-  const book = fonts
+  if (!ready) throw new Error('Vector fonts are not loaded yet')
   const root = scene.root
   const layout = loremStressLayout()
 
@@ -62,7 +62,7 @@ export function buildVectorTextStressScene(scene: Scene): SceneContent {
     page.paragraphs.forEach((paragraph, pi) => {
       root.addChild(
         new VectorText({
-          fonts: book,
+          fontFamily: INTER,
           name: `vector-stress-page-${i}-para-${pi}`,
           x: body.x,
           y: body.y + paragraph.y,

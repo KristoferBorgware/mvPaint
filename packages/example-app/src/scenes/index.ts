@@ -16,6 +16,7 @@ import { buildStressScene } from './stressScene'
 import { buildSvgScene } from './svgScene'
 import { buildSvgLoadStressScene, prepareSvgLoadStressScene } from './svgLoadStressScene'
 import { buildTextScene } from './textScene'
+import { buildUniformTextScene, prepareUniformTextScene } from './uniformTextScene'
 import { buildTransparencyScene } from './transparencyScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildTextPathScene, prepareTextPathScene } from './textPathScene'
@@ -68,6 +69,14 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'text lane: four vertices per glyph sampling a shared MSDF atlas. Four Inter styles from one atlas array, per-run styling within a single node (size, colour, gradient, outline, highlight, decorations, baseline shift), wrapping, alignment and justification, RTL and vertical flow.',
     build: buildTextScene,
+  },
+  {
+    id: 'uniform-text',
+    title: 'Uniform text',
+    description:
+      "UniformMSDFText and UniformVectorText: one style for the whole string, said in node attributes rather than in a run. fill, stroke, strokeWidth, fontSize, fontStyle, textDecoration, letterSpacing and padding are properties of the node, and writing any of them re-shapes it - the animated label writes two per frame. The second column prints one against a plain MSDFText given the same fill, which ignores it, since a text lane paints from the run. Plates are drawn at the size each label measures through getTextWidth()/getTextHeight().",
+    prepare: prepareUniformTextScene,
+    build: buildUniformTextScene,
   },
   {
     id: 'vector-text',
