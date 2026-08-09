@@ -1,16 +1,13 @@
-// What the Transformer exposes and how its handles behave, measured against Konva's
-// Transformer - the reference this engine's manipulation frame is shaped after, so that an
-// application ported from one to the other finds the same attributes meaning the same things.
-// Run with:
-//   npx vitest run packages/engine/src/shapes/transformerParity.test.ts
+// What the Transformer exposes and what each attribute does to a gesture. Run with:
+//   npx vitest run packages/engine/src/shapes/transformerBehaviour.test.ts
 //
 // The frame and the gesture are one story and are tested together here, even though they live
 // in two modules: what `keepRatio` means is only observable by dragging a corner, and what
 // `enabledAnchors` means is only observable by asking what can be grabbed. The dispatcher is
 // driven through a stub canvas - no DOM, no GPU.
 //
-// Where this engine diverges from Konva on purpose, the divergence is asserted too, so that a
-// deliberate difference reads as a decision rather than as a gap: anchors are sized in screen
+// Where a default is a choice rather than the only sensible answer, the choice is asserted
+// too, so that it reads as a decision rather than as an accident: anchors are sized in screen
 // pixels, `detach` takes an optional node, and drag/transform events carry the whole set.
 
 import { expect, it } from 'vitest'
@@ -126,10 +123,10 @@ function partNamed(parent: Container, name: string): Shape {
 
 // --- keepRatio and shift ---
 //
-// Konva's rule is `keepRatio() || shiftKey`: shift ASKS for the lock, so with the lock already
-// on - the default, here and there - holding shift changes nothing at all. The tempting
-// alternative, letting shift inverting the setting, turns the one gesture every user knows
-// (hold shift to scale proportionally) into its opposite on a default-configured frame.
+// Shift ASKS for the lock: `keepRatio || shiftKey`. With the lock already on - the default -
+// holding it changes nothing at all. The tempting alternative, letting shift invert the
+// setting, turns the one gesture every user knows (hold shift to scale proportionally) into
+// its opposite on a default-configured frame.
 
 it('keepRatio: shift asks for the aspect lock rather than toggling it', () => {
   const free = harness({ keepRatio: false })
@@ -186,7 +183,7 @@ it('resizeEnabled: false leaves the border and the rotate handle', () => {
 //
 // The parts are placed in WORLD coordinates, so anything the frame's own matrix contributed
 // would be applied to them twice. localMatrix() is identity for that reason, which leaves
-// `rotation` free to mean what it means on a Konva transformer: the angle of the FRAME.
+// `rotation` free to mean the angle of the FRAME.
 
 it('rotation: the frame carries its own angle and never applies it twice', () => {
   const h = harness()
@@ -216,9 +213,7 @@ it('rotation: where the frame holds its own angle, the angle written is the angl
 //
 // One node is hugged unconditionally, which is the whole point of a frame around a single
 // shape. A SET has no one angle of its own, so useFirstNodeRotation decides between borrowing
-// the first member's and holding an upright angle the frame carries itself. This is a
-// deliberate divergence: Konva frames a set upright always, and has no equivalent of the
-// default here.
+// the first member's and holding an upright angle the frame carries itself.
 
 it('a lone node is always hugged, whatever the flag says', () => {
   const on = harness({ useFirstNodeRotation: true }, [{ x: 0, y: 0, rotation: 30 }])
@@ -255,7 +250,7 @@ it('a set framed upright still turns with a rotate drag, and stays turned', () =
 
 // --- rotationSnaps ---
 //
-// Degrees, on the frame, which is where a Konva application looks for them.
+// Degrees, and on the frame rather than on whatever is running the gesture.
 
 it('rotationSnaps: degrees on the frame, taken within the tolerance', () => {
   const h = harness({ rotationSnaps: [0, 90, 180, 270], rotationSnapTolerance: 7 })
@@ -386,9 +381,8 @@ it('getActiveAnchor / isTransforming / stopTransform', () => {
 
 // --- events ---
 //
-// Konva raises these on the transformer as well as on each node; this engine does both, and
-// carries the whole set on every one of them so a handler on any single node can see what
-// moved with it.
+// Raised on the transformer as well as on each node, and carrying the whole set on every one
+// of them, so a handler on any single node can see what else moved with it.
 
 it('transform events reach the frame and the nodes, carrying the set and the raw event', () => {
   resetListenerCensus()

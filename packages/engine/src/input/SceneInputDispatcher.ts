@@ -336,7 +336,7 @@ export class SceneInputDispatcher {
    * Both, because the two answer different questions. A listener on a node hears about that
    * node; a listener on the Transformer hears about whatever is currently framed, which is
    * where an application that tracks "the selection" rather than a particular shape puts its
-   * handler - and it is where a Konva application already has one.
+   * handler.
    *
    * `nodes` carries the whole set on every one of them, so a handler on any single node can
    * see what else moved with it, and `evt` is the pointer event that drove this move.

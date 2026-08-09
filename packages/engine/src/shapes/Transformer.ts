@@ -79,8 +79,7 @@ export interface TransformerOptions {
    * Anchor diameter in SCREEN pixels, held constant across zoom. Default 10.
    *
    * Screen pixels rather than the frame's own units, so a handle stays the same size to grab
-   * however far the view is zoomed. Konva measures this in local units, where the number means
-   * the same thing only at zoom 1.
+   * however far the view is zoomed.
    */
   anchorSize?: number
   /** How far past the top edge the rotate handle sits, in screen pixels. Default 24. */
@@ -119,8 +118,7 @@ export interface TransformerOptions {
    * The two differ in what a tilted member does to the frame. Taking the first node's angle
    * hugs a set that shares one, at the price of the frame changing shape when the set is
    * reordered. Upright, a set is framed along the world axes however its members are turned,
-   * and reordering it changes nothing - which is what a Konva transformer does with several
-   * nodes attached.
+   * and reordering it changes nothing.
    */
   useFirstNodeRotation?: boolean
   /** Angles (DEGREES) a rotate drag settles onto when within `rotationSnapTolerance`. */
@@ -279,8 +277,7 @@ export class Transformer extends Container {
    * rotate drag carries forward and a change of attached set puts back upright.
    *
    * Writing it turns the frame without touching what it wraps, so the two disagree until the
-   * next rotate drag re-fits them - the same as Konva, where the transformer's rotation is its
-   * own attribute rather than a proxy for the nodes'.
+   * next rotate drag re-fits them. The angle is the frame's own, not a proxy for the nodes'.
    */
   override get rotation(): number {
     return radToDeg(this.fitRotation())
@@ -382,8 +379,7 @@ export class Transformer extends Container {
   }
 
   /**
-   * The nodes this frame currently wraps. Assigning replaces the set, exactly as attach()
-   * does - the spelling a Konva application reaches for first.
+   * The nodes this frame currently wraps. Assigning replaces the set, exactly as attach() does.
    */
   get nodes(): readonly TransformableNode[] {
     return this.attached
@@ -442,7 +438,7 @@ export class Transformer extends Container {
 
   /**
    * Drops one node from the attached set, if it is in it. Called with nothing, empties the
-   * set - which is what detach() means to a Konva application, and what clear() means here.
+   * set - the same as clear().
    *
    * Named for its pair, attach(), and deliberately NOT `remove` - a Transformer is a Node,
    * and Node.remove() means "take me out of my parent". Two methods with one name doing
