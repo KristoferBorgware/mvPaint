@@ -166,8 +166,8 @@ one. Destroying a renderer disposes its scene.
 | Outlines | `text/PolygonFont.ts`, and `@mvpaint/ttf` for a font parsed at runtime |
 | Scene lifetimes | `scene/Scene.ts` |
 
-The diagrams are hand-authored SVG in `docs/`. They are drawn rather than generated so they
-render in the repository with no build step.
+The two diagrams above are hand-authored SVG in `docs/`. See [docs/README.md](docs/README.md)
+for how they and the generated ones are made.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the renderer around this, and [FONTS.md](FONTS.md) for
 the font pipeline end to end — generation, loading, shaping, both render paths.

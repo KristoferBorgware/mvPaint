@@ -1,0 +1,65 @@
+%% Rendered to ../architecture-overview.svg. See docs/README.md for the command.
+flowchart TB
+
+  APP["YOUR APPLICATION<br/>createSceneRenderer(canvas) · scene.root.addChild(node) · a camera · an input preset"]
+
+  subgraph LOADED["LOAD TIME — fetched and prepared before a frame loop exists"]
+    CACHE["GLOBAL CACHE — resources/<br/>ref-counted · device-free · keyed by address<br/>glyph outlines · MSDF metrics · atlas PNG bytes"]
+    DEVICE["PER RENDERER — one device<br/>image textures · MSDF array texture<br/>pipelines · bind group layouts"]
+  end
+
+  subgraph TREE["SCENE TREE — shapes/ — plain objects, no graphics type in them"]
+    NODE["Node<br/>transform · visible · opacity · zIndex · listeners"]
+    CONT["Container<br/>Group · Layer · Transformer"]
+    SHAPE["Shape<br/>Rect · Circle · Polyline · Path<br/>Image · CustomShape · Text"]
+  end
+
+  GATHER["THE GATHER — render/gather.ts<br/>names no graphics type, shared by both paths<br/>z-sort · a depth per rank · bucket into lanes · cull<br/>split opaque / translucent / overlay · merge the runs"]
+
+  subgraph LANES["THE FOUR LANES — a batcher, a vertex format, a pipeline and a shader each, written twice in webgpu/lanes and webgl/lanes"]
+    LMESH["mesh<br/>triangles"]
+    LTEXT["text<br/>glyph quads"]
+    LIMAGE["image<br/>textured quad"]
+    LSHADOW["shadow<br/>baked silhouette"]
+  end
+
+  PASS["ONE RENDER PASS, THREE PHASES<br/>1 opaque · depth written<br/>2 translucent · back to front · depth read-only<br/>3 overlay · depth off"]
+
+  OUT["MSAA resolve → canvas"]
+
+  INPUT["INPUT — input/ — opt-in<br/>pointer → pick → node events<br/>drag, transform and marquee move and restyle nodes in the tree"]
+
+  APP --> NODE
+  APP --> CACHE
+  NODE --> CONT
+  NODE --> SHAPE
+  CACHE -->|"decode · upload"| DEVICE
+  SHAPE --> GATHER
+  GATHER --> LMESH
+  GATHER --> LTEXT
+  GATHER --> LIMAGE
+  GATHER --> LSHADOW
+  DEVICE -->|"bind what is already there"| LTEXT
+  DEVICE --> LIMAGE
+  LMESH --> PASS
+  LTEXT --> PASS
+  LIMAGE --> PASS
+  LSHADOW --> PASS
+  PASS --> OUT
+  OUT -.->|"canvas events"| INPUT
+
+  classDef app fill:#ffffff,stroke:#c3cadb,stroke-width:1.5px,color:#1b1e26
+  classDef cache fill:#f2f8ef,stroke:#3d8a26,stroke-width:1.5px,color:#1b1e26
+  classDef device fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
+  classDef shared fill:#fff8ec,stroke:#b4761a,stroke-width:1.5px,color:#1b1e26
+  classDef tree fill:#ffffff,stroke:#8b93a7,stroke-width:1.5px,color:#1b1e26
+
+  class APP,INPUT app
+  class CACHE cache
+  class DEVICE,LMESH,LTEXT,LIMAGE,LSHADOW,PASS device
+  class GATHER,OUT shared
+  class NODE,CONT,SHAPE tree
+
+  style LOADED fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style TREE fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style LANES fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
