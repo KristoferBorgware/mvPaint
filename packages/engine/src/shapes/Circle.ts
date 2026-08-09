@@ -44,8 +44,27 @@ export interface CircleOptions extends ShapeOptions {
 export class Circle extends Shape {
   override readonly nodeName: string = 'Circle'
 
-  radius: number
-  segments?: number
+  /** Distance from the centre to the rim. Assigning it re-tessellates. */
+  private _radius = 0
+  get radius(): number {
+    return this._radius
+  }
+  set radius(value: number) {
+    if (value === this._radius) return
+    this._radius = value
+    this.markGeometryDirty()
+  }
+
+  /** Rim segments, or undefined to pick a count from the radius. Assigning it re-tessellates. */
+  private _segments?: number
+  get segments(): number | undefined {
+    return this._segments
+  }
+  set segments(value: number | undefined) {
+    if (value === this._segments) return
+    this._segments = value
+    this.markGeometryDirty()
+  }
 
   constructor(options: CircleOptions = {}) {
     super(options)

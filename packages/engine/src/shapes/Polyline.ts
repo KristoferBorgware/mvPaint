@@ -24,8 +24,33 @@ export interface PolylineOptions extends ShapeOptions {
 export class Polyline extends Shape {
   override readonly nodeName: string = 'Polyline'
 
-  points: Vector2Like[]
-  closed: boolean
+  /**
+   * The vertices the ribbon follows. Assigning a list re-tessellates.
+   *
+   * EDITING ONE IN PLACE DOES NOT. `line.points.push(p)` and `line.points[0].x = 4` are both
+   * invisible from here - there is no assignment to intercept - so either follow them with
+   * markGeometryDirty(), or assign a new list.
+   */
+  private _points: Vector2Like[] = []
+  get points(): Vector2Like[] {
+    return this._points
+  }
+  set points(value: Vector2Like[]) {
+    if (value === this._points) return
+    this._points = value
+    this.markGeometryDirty()
+  }
+
+  /** Whether the last point joins the first. Assigning it re-tessellates. */
+  private _closed = false
+  get closed(): boolean {
+    return this._closed
+  }
+  set closed(value: boolean) {
+    if (value === this._closed) return
+    this._closed = value
+    this.markGeometryDirty()
+  }
 
   constructor(options: PolylineOptions) {
     super(options)

@@ -942,13 +942,38 @@ geometry change and lands as an ordinary mesh bump.
 
 ### Geometry
 
-Call `markGeometryDirty()` after changing anything `buildGeometry()` reads: `Circle.radius`,
-`Rect.cornerRadius`, `Polyline.points`, `Path.contours` and `Path.filled`, `strokeWidth`,
-`strokeAlign`, `lineJoin`, `lineCap`, `miterLimit`, a `CustomShape` property its `describe()`
-depends on, or a change to the *length* of `materials()`.
+Everything `buildGeometry()` reads announces itself. Each is an accessor that calls
+`markGeometryDirty()` when the value actually changes, so assigning one reaches the screen the
+way assigning `x` always did:
 
-It drops the shape's tessellation and pick caches, bumps its `geometryVersion` (the shadow atlas
-keys its baked silhouette on that), and bumps the mesh epoch.
+| | |
+| --- | --- |
+| `Shape` | `strokeWidth`, `strokeAlign`, `lineJoin`, `lineCap`, `miterLimit`, `strokeScaleEnabled` |
+| `Rect` | `width`, `height`, `cornerRadius`, `cornerSegments` |
+| `Circle` | `radius`, `segments` — and `width`/`height`, which are the radius under another name |
+| `Polyline` | `points`, `closed` |
+| `Path` | `filled` |
+| `Image` | `width`, `height` |
+| `CustomShape` | `tolerance` |
+
+`stroke` is the one that does both. A colour swapped for another colour is a record rewrite and
+nothing more; gaining or losing a colour changes whether the stroker emits a ribbon at all, so
+`null` on either side of the assignment repacks as well.
+
+`markGeometryDirty()` drops the shape's tessellation and pick caches, bumps its
+`geometryVersion` (the shadow atlas keys its baked silhouette on that), and bumps the mesh
+epoch. Every setter above guards on the value differing first, so writing a node's own value
+back — which a property inspector bound to a slider does constantly — costs nothing.
+
+**Two things still need the call by hand**, because neither is an assignment a setter can see:
+
+- **Editing an array in place.** `line.points.push(p)` and `line.points[0].x = 4` are invisible;
+  assigning a new list is not. The same goes for `Path.contours`, which is `readonly` — its
+  contour grouping is computed once at construction, so a `Path`'s outline is fixed for its
+  lifetime.
+- **A `CustomShape` property its own `describe()` reads.** `Shape` cannot see an assignment to a
+  field it does not declare, so give it a setter that calls `markGeometryDirty()` the way
+  `tolerance` does. A change to the *length* of `materials()` is the same story.
 
 Toggling `visible` also repacks, by a different route: an invisible shape never enters the
 ordered list, so the visible set changes and the membership comparison catches it without any

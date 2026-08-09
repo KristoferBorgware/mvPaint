@@ -73,8 +73,22 @@ export interface CustomShapeOptions extends ShapeOptions {
 export abstract class CustomShape extends Shape {
   override readonly nodeName: string = 'CustomShape'
 
-  /** See CustomShapeOptions.tolerance. Changing it needs markGeometryDirty(). */
-  tolerance: number
+  /**
+   * See CustomShapeOptions.tolerance. Assigning it re-runs describe() and re-tessellates.
+   *
+   * A property your OWN describe() reads is still yours to announce: this class cannot see an
+   * assignment to a field it does not declare, so call markGeometryDirty() from its setter the
+   * way this one does.
+   */
+  private _tolerance = 0.25
+  get tolerance(): number {
+    return this._tolerance
+  }
+  set tolerance(value: number) {
+    if (value === this._tolerance) return
+    this._tolerance = value
+    this.markGeometryDirty()
+  }
 
   // The description, not the triangles: Shape caches those separately and asks for them on
   // its own schedule. This exists because materials() has to answer before, and independently

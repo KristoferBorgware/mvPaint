@@ -99,6 +99,27 @@ export class Image extends Shape {
     this.tint = options.tint ?? [1, 1, 1, 1]
   }
 
+  // The quad this node's SILHOUETTE is cut from - what bounds, picking and the shadow bake
+  // read. Assigning either re-tessellates that. The drawn pixels are the image lane's own
+  // quad, which is packed rather than tessellated, so a resize still needs
+  // handle.markImageGeometryDirty() for them to follow.
+  override get width(): number {
+    return super.width
+  }
+  override set width(value: number) {
+    if (value === super.width) return
+    super.width = value
+    this.markGeometryDirty()
+  }
+  override get height(): number {
+    return super.height
+  }
+  override set height(value: number) {
+    if (value === super.height) return
+    super.height = value
+    this.markGeometryDirty()
+  }
+
   protected override attrKeys(): readonly string[] {
     return [
       ...super.attrKeys(),

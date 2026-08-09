@@ -119,17 +119,53 @@ function roundedContour(width: number, height: number, r: Radii, segments?: numb
 export class Rect extends Shape {
   override readonly nodeName: string = 'Rect'
 
-  /**
-   * Corner rounding, 0 (the default) for square corners. A geometry property: call
-   * markGeometryDirty() after changing it, as with Circle.radius.
-   */
-  cornerRadius: CornerRadius
-  cornerSegments?: number
+  /** Corner rounding, 0 (the default) for square corners. Assigning it re-tessellates. */
+  private _cornerRadius: CornerRadius = 0
+  get cornerRadius(): CornerRadius {
+    return this._cornerRadius
+  }
+  set cornerRadius(value: CornerRadius) {
+    // An array is compared by identity, so assigning a fresh one always counts as a change.
+    // That is the right way round: the alternative is a per-corner comparison on every write
+    // to catch the case where a caller rebuilt an identical array.
+    if (value === this._cornerRadius) return
+    this._cornerRadius = value
+    this.markGeometryDirty()
+  }
+
+  /** How many segments each rounded corner is drawn with. Assigning it re-tessellates. */
+  private _cornerSegments?: number
+  get cornerSegments(): number | undefined {
+    return this._cornerSegments
+  }
+  set cornerSegments(value: number | undefined) {
+    if (value === this._cornerSegments) return
+    this._cornerSegments = value
+    this.markGeometryDirty()
+  }
 
   constructor(options: RectOptions = {}) {
     super(options)
     this.cornerRadius = options.cornerRadius ?? 0
     this.cornerSegments = options.cornerSegments
+  }
+
+  // A rect is drawn from its width and height, which every other node merely carries.
+  override get width(): number {
+    return super.width
+  }
+  override set width(value: number) {
+    if (value === super.width) return
+    super.width = value
+    this.markGeometryDirty()
+  }
+  override get height(): number {
+    return super.height
+  }
+  override set height(value: number) {
+    if (value === super.height) return
+    super.height = value
+    this.markGeometryDirty()
   }
 
   protected override attrKeys(): readonly string[] {

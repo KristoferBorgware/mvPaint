@@ -26,8 +26,18 @@ export class Path extends Shape {
 
   readonly contours: Contour[]
   private readonly groups: ContourGroup[]
-  /** When false, fill triangles are skipped (e.g. SVG fill="none"). */
-  filled: boolean
+  /**
+   * When false, fill triangles are skipped (e.g. SVG fill="none"). Assigning it re-tessellates.
+   */
+  private _filled = true
+  get filled(): boolean {
+    return this._filled
+  }
+  set filled(value: boolean) {
+    if (value === this._filled) return
+    this._filled = value
+    this.markGeometryDirty()
+  }
 
   constructor(options: PathOptions = {}) {
     super(options)

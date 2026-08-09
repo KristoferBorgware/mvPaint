@@ -19,6 +19,12 @@ import { Circle } from './Circle'
 import { meshGeometryEpoch, objectRecordEpoch, textShapingEpoch } from './contentEpoch'
 import { Rect, type RectOptions } from './Rect'
 import { Polyline } from './Polyline'
+import { Path } from './Path'
+import { Image } from './Image'
+import { CustomShape } from './CustomShape'
+import type { ShapeContext } from './ShapeContext'
+import type { ImageTexture } from '../image/ImageTexture'
+import { SharedLifetime } from '../resources/SharedLifetime'
 import type { StrokeAlign } from '../render/stroke'
 import type { Shape } from './Shape'
 import { Group, closestGroup, draggableGroup, hiddenByAncestor, outermostGroup, type TransformableNode } from './Group'
@@ -50,6 +56,19 @@ import {
  */
 function assert(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true)
+}
+
+/** The smallest CustomShape there is - enough to have a description worth invalidating. */
+class Blob extends CustomShape {
+  protected describe(ctx: ShapeContext): void {
+    ctx.rect(0, 0, 10, 10)
+    ctx.fill()
+  }
+}
+
+/** An Image needs a texture to be constructed; nothing here ever samples one. */
+function stubTexture(width: number, height: number): ImageTexture {
+  return { width, height, lifetime: new SharedLifetime(), destroy() {} }
 }
 const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
 
@@ -119,6 +138,88 @@ it('content epochs: how a lane finds out that a node re-shaped or re-tessellated
     text.markDirty()
     assert(textShapingEpoch() > last, 'and so does markDirty() after editing a layout option in place')
     assert(meshGeometryEpoch() === afterGeometry, 'text re-shaping never bumps the mesh epoch')
+})
+
+//
+// The other half of that contract: a caller should not have to know WHICH properties are baked
+// into the vertex buffer. Every input buildGeometry() reads is an accessor that announces
+// itself, so `rect.width = 200` and `circle.radius = 8` reach the screen the way `rect.x = 200`
+// always did. What must NOT follow is a repack for a colour, since recolouring is the thing the
+// object record exists to keep free.
+it('geometry setters announce themselves, and only they do', () => {
+    // Each case: assign, expect a bump; assign the same value again, expect silence.
+    const bumps = (label: string, shape: Shape, change: () => void, again: () => void) => {
+      const epoch = meshGeometryEpoch()
+      const version = shape.geometryVersion
+      change()
+      assert(meshGeometryEpoch() > epoch, `${label} bumps the mesh epoch`)
+      assert(shape.geometryVersion > version, `${label} invalidates the baked silhouette too`)
+      const settled = meshGeometryEpoch()
+      again()
+      assert(meshGeometryEpoch() === settled, `${label} written back unchanged bumps nothing`)
+    }
+
+    const rect = new Rect({ width: 10, height: 10 })
+    bumps('a rect width', rect, () => { rect.width = 200 }, () => { rect.width = 200 })
+    bumps('a rect height', rect, () => { rect.height = 50 }, () => { rect.height = 50 })
+    bumps('cornerRadius', rect, () => { rect.cornerRadius = 4 }, () => { rect.cornerRadius = 4 })
+    bumps('cornerSegments', rect, () => { rect.cornerSegments = 8 }, () => { rect.cornerSegments = 8 })
+    bumps('strokeWidth', rect, () => { rect.strokeWidth = 6 }, () => { rect.strokeWidth = 6 })
+    bumps('strokeAlign', rect, () => { rect.strokeAlign = 'inside' }, () => { rect.strokeAlign = 'inside' })
+    bumps('lineJoin', rect, () => { rect.lineJoin = 'round' }, () => { rect.lineJoin = 'round' })
+    bumps('lineCap', rect, () => { rect.lineCap = 'square' }, () => { rect.lineCap = 'square' })
+    bumps('miterLimit', rect, () => { rect.miterLimit = 2 }, () => { rect.miterLimit = 2 })
+    bumps(
+      'strokeScaleEnabled',
+      rect,
+      () => { rect.strokeScaleEnabled = false },
+      () => { rect.strokeScaleEnabled = false },
+    )
+
+    const circle = new Circle({ radius: 5 })
+    bumps('a radius', circle, () => { circle.radius = 9 }, () => { circle.radius = 9 })
+    bumps('segments', circle, () => { circle.segments = 12 }, () => { circle.segments = 12 })
+    // width/height are the radius wearing another name, so they arrive through the same setter.
+    bumps('a circle width', circle, () => { circle.width = 40 }, () => { circle.width = 40 })
+    assert(circle.radius === 20, 'and still mean the radius')
+
+    const line = new Polyline({ points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })
+    bumps('points', line, () => { line.points = [{ x: 2, y: 2 }] }, () => { line.points = line.points })
+    bumps('closed', line, () => { line.closed = true }, () => { line.closed = true })
+
+    const path = new Path({ d: 'M0 0 L10 0 L10 10 Z' })
+    bumps('filled', path, () => { path.filled = false }, () => { path.filled = false })
+
+    const blob = new Blob()
+    bumps('tolerance', blob, () => { blob.tolerance = 2 }, () => { blob.tolerance = 2 })
+
+    const image = new Image({ texture: stubTexture(64, 64) })
+    bumps('an image width', image, () => { image.width = 128 }, () => { image.width = 128 })
+
+    // The line the whole design rests on. A stroke COLOUR lives in the object record, so
+    // swapping one for another must stay free; gaining or losing one changes whether the
+    // stroker emits a ribbon at all, so that must not.
+    const painted = new Rect({ width: 10, height: 10, stroke: 'red' })
+    const quiet = meshGeometryEpoch()
+    const records = objectRecordEpoch()
+    painted.stroke = 'blue'
+    assert(meshGeometryEpoch() === quiet, 'one stroke colour for another never repacks')
+    assert(objectRecordEpoch() > records, 'it rewrites the record instead')
+
+    painted.stroke = null
+    assert(meshGeometryEpoch() > quiet, 'losing the colour entirely does repack, since the ribbon goes')
+    const stripped = meshGeometryEpoch()
+    painted.stroke = 'green'
+    assert(meshGeometryEpoch() > stripped, 'and gaining one back repacks again')
+
+    // And the original promise still holds at the other end.
+    const moved = meshGeometryEpoch()
+    painted.x = 5
+    painted.rotation = 30
+    painted.scaleX = 3
+    painted.opacity = 0.5
+    painted.fill = 'orange'
+    assert(meshGeometryEpoch() === moved, 'transforms, opacity and fill colour still repack nothing')
 })
 
 //

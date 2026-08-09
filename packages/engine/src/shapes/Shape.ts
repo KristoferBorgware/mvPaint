@@ -37,13 +37,21 @@
 // friendly layout of the one cached result, so repeated picks against an unchanged
 // shape (e.g. every mousemove while hovering) don't redo any array-building work either.
 //
-// Nothing here needs markGeometryDirty() after a transform change (x/y/rotation/scale/
-// offset/zIndex): those are applied per-frame via the object's world matrix, never baked
-// into the cached local-space geometry. Fill/stroke color changes also don't need it -
-// solid colors, like gradient parameters, are read from the per-object GPU buffer every
-// frame, never baked into geometry. It IS needed after changing anything that actually
-// affects buildGeometry()'s output - Circle.radius, Rect.cornerRadius, Polyline.points,
-// stroke/strokeWidth/lineJoin/lineCap/miterLimit on any stroked shape, or Path.filled.
+// WHAT INVALIDATES WHAT. A transform change (x/y/rotation/scale/offset/zIndex) invalidates
+// nothing: it is applied per frame from the object's world matrix and never baked into the
+// cached local-space geometry. A fill or stroke COLOUR is the same - solid colours, like
+// gradient parameters, are read from the per-object buffer every frame.
+//
+// Everything buildGeometry() reads announces itself. Every geometry input on this class and
+// its subclasses is an accessor that calls markGeometryDirty() when the value actually
+// changes: strokeWidth, strokeAlign, lineJoin, lineCap, miterLimit, strokeScaleEnabled here,
+// and Circle.radius, Rect.cornerRadius, Polyline.points, Path.filled and CustomShape.tolerance
+// on the shapes that have them. `stroke` is the one that does both - a colour swap is a record
+// rewrite, while gaining or losing a colour changes whether a ribbon exists at all.
+//
+// Two things still need the call by hand, because neither is an assignment this class can see:
+// mutating an array in place (points.push(), or editing a contour) rather than assigning a new
+// one, and a CustomShape property that its own describe() reads.
 //
 // strokeScaleEnabled = false is the one exception to the first sentence, and the only place
 // in the engine where a transform reaches geometry: a stroke held at a fixed width has to be
@@ -395,9 +403,15 @@ export abstract class Shape extends Node {
     return this.strokeValue
   }
   set stroke(value: ColorInput | null) {
-    this.strokeValue = value === null ? null : parseColor(value)
+    const next = value === null ? null : parseColor(value)
+    // One colour for another is a record rewrite and nothing else. Gaining or losing a colour
+    // is a geometry change: hasStroke() is what decides whether the stroker emits a ribbon at
+    // all, so the triangles differ either side of null.
+    const drewBefore = this.strokeValue !== null
+    this.strokeValue = next
     this.strokeWritten = value
     bumpObjectRecordEpoch()
+    if (drewBefore !== (next !== null)) this.markGeometryDirty()
   }
   /** What stroke was last assigned, in the form it was written. See fillInput. */
   get strokeInput(): ColorInput | null {
@@ -406,17 +420,17 @@ export abstract class Shape extends Node {
   /**
    * How wide the outline is drawn, in world units. 0 draws none whatever `stroke` says.
    *
-   * An accessor rather than a plain field so that a subclass whose geometry is derived from it
-   * can hear the assignment - UniformMSDFText and UniformVectorText rebuild their run from it
-   * (see shapes/singleRun.ts). This one stores and nothing more: a stroke width is baked into
-   * the tessellation, so changing it still needs markGeometryDirty() like the rest of geometry.
+   * The stroker bakes this into real triangles, so assigning it re-tessellates the shape.
+   * Guarded on the value differing, so writing the same width back costs nothing.
    */
   private _strokeWidth = 0
   get strokeWidth(): number {
     return this._strokeWidth
   }
   set strokeWidth(value: number) {
+    if (value === this._strokeWidth) return
     this._strokeWidth = value
+    this.markGeometryDirty()
   }
   /**
    * Which way the stroke expands from the outline it follows.
@@ -439,12 +453,49 @@ export abstract class Shape extends Node {
    * about the shape rather than about each ring: an inside stroke eats into the material on
    * the hole's rim as well as on the outer edge (see strokeContours).
    *
-   * Like strokeWidth, it is baked into geometry: assigning it needs markGeometryDirty().
+   * Like strokeWidth, it is baked into geometry, so assigning it re-tessellates the shape.
    */
-  strokeAlign: StrokeAlign = 'center'
-  lineJoin: LineJoin = 'miter'
-  lineCap: LineCap = 'butt'
-  miterLimit = 10
+  private _strokeAlign: StrokeAlign = 'center'
+  get strokeAlign(): StrokeAlign {
+    return this._strokeAlign
+  }
+  set strokeAlign(value: StrokeAlign) {
+    if (value === this._strokeAlign) return
+    this._strokeAlign = value
+    this.markGeometryDirty()
+  }
+
+  // The remaining four stroke shapes. Each is read by the stroker while it builds the ribbon,
+  // so each re-tessellates on assignment, guarded on the value differing.
+  private _lineJoin: LineJoin = 'miter'
+  get lineJoin(): LineJoin {
+    return this._lineJoin
+  }
+  set lineJoin(value: LineJoin) {
+    if (value === this._lineJoin) return
+    this._lineJoin = value
+    this.markGeometryDirty()
+  }
+
+  private _lineCap: LineCap = 'butt'
+  get lineCap(): LineCap {
+    return this._lineCap
+  }
+  set lineCap(value: LineCap) {
+    if (value === this._lineCap) return
+    this._lineCap = value
+    this.markGeometryDirty()
+  }
+
+  private _miterLimit = 10
+  get miterLimit(): number {
+    return this._miterLimit
+  }
+  set miterLimit(value: number) {
+    if (value === this._miterLimit) return
+    this._miterLimit = value
+    this.markGeometryDirty()
+  }
   /**
    * Whether the shape's scale applies to its stroke as well. Default true.
    *
@@ -468,8 +519,20 @@ export abstract class Shape extends Node {
    * across a scene.
    *
    * Rotation and translation change nothing, since neither can alter a ribbon's width.
+   *
+   * Switching it re-tessellates once, here. Keeping a fixed-width stroke correct AFTERWARDS is
+   * the per-frame sweep's job (refreshStrokeGauge), because a world scale is not something a
+   * setter can see coming.
    */
-  strokeScaleEnabled = true
+  private _strokeScaleEnabled = true
+  get strokeScaleEnabled(): boolean {
+    return this._strokeScaleEnabled
+  }
+  set strokeScaleEnabled(value: boolean) {
+    if (value === this._strokeScaleEnabled) return
+    this._strokeScaleEnabled = value
+    this.markGeometryDirty()
+  }
 
   // A Shape is its own (single) material - see materials(). Held as a fixed one-element
   // array so the common case costs no per-frame allocation in the batcher's hot loop.

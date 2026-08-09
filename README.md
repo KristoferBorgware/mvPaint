@@ -225,9 +225,12 @@ render path implements, and it mentions no graphics API.
 
 - Changing a transform, colour or gradient is free. These live in a per-object GPU buffer
   refreshed every frame.
-- Changing what a shape *is* — a radius, a point list, a stroke width — requires
-  `shape.markGeometryDirty()`, because it invalidates the cached tessellation.
+- Changing what a shape *is* — a radius, a point list, a stroke width — re-tessellates it, and
+  says so on its own. Assign and it appears.
 - Adding or removing nodes needs no mark. The visible set is recomputed each frame.
+- `shape.markGeometryDirty()` is left for the two cases no setter can see: an array edited in
+  place (`points.push(...)` rather than assigning a new list), and a property of your own
+  `CustomShape` that its `describe()` reads.
 
 ### Shared resources
 
