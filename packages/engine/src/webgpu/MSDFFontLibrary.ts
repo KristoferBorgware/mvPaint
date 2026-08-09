@@ -15,11 +15,10 @@
 // pipeline is built from that layout and a bind group is only usable with the pipeline whose
 // layout it was made against.
 //
-// Resolution never fails. An unknown family - a typo, or an atlas still in flight - falls back
-// to the default, so an MSDFText built before its family finished loading draws in the meantime and
-// switches over on the next repack. That is deliberate: text vanishing or throwing because a
-// network request has not landed yet is a worse failure than text in the wrong face for a
-// moment.
+// Resolution never throws. An unknown family - a typo, or an atlas still in flight - resolves to
+// a book holding no atlases, so the node draws nothing and warnUnresolvedFamily names it once in
+// the console. There is no face to substitute: the engine ships no typeface, so the alternative
+// to nothing is not the wrong face, it is an exception thrown mid-gather.
 
 import { createAtlasBindGroupLayout } from './layouts'
 import { MSDFFontBook, createMSDFAtlasSampler } from './MSDFFontBook'

@@ -234,13 +234,21 @@ because the text pipeline is built from that layout.
 Outlines own no GPU resource, so there is nothing to upload and no device involved:
 
 ```ts
-const book = new PolygonFontBook(sources)   // sources: { style, json }[]
-new VectorText({ fonts: book, text: 'Hello' })
+await loadFontFamily('inter', { vector: POLYGON_ATLAS_URLS })
+new VectorText({ fontFamily: 'inter', text: 'Hello' })
 ```
 
 `PolygonFontBook` implements `VectorFonts`, which is also what `TtfFontBook` from
 `@mvpaint/ttf` implements — so a node cannot tell a baked atlas from a font parsed in the
-browser. Fetching is entirely the application's business and can happen at any time.
+browser. A book built any other way joins the same registry under a name of its own:
+
+```ts
+const book = await TtfFontBook.load([{ style: 'regular', data: await file.arrayBuffer() }])
+registerFontFamily('dropped-file', { vector: book })
+```
+
+Fetching is entirely the application's business and can happen at any time; the registry is what
+a node reads, so a family registered late is picked up on the next shape.
 
 ---
 
@@ -340,21 +348,20 @@ shape may claim several material records — one per distinct paint.
 ### Per node
 
 ```ts
-new MSDFText({ text: 'Heading', fontFamily: 'roboto' })   // MSDF: a name
+new MSDFText({ text: 'Heading', fontFamily: 'roboto' })   // atlas glyphs
+new VectorText({ text: 'Heading', fontFamily: 'roboto' }) // outline glyphs
 node.fontFamily = 'inter'
-
-new VectorText({ fonts: robotoOutlines, text: '…' })  // vector: the object
-node.fonts = interOutlines
 ```
 
-Family is a **node-level** property. Mixing families between runs inside one node is not
-supported. The two paths express the same thing differently for a reason: MSDF atlases are GPU
-resources shared by every `Text`, so the renderer holds them and a node names one; outlines own
-no GPU resource, so the node holds them directly.
+Family is a **node-level** property, and one name for both kinds. Mixing families between runs
+inside one node is not supported. Where the two differ is only in where the name is looked up:
+MSDF atlases are GPU resources shared by every `Text`, so the renderer's `MSDFFontLibrary` holds
+them, while outlines own no GPU resource and sit in the global registry any node can read
+synchronously.
 
-A `fontFamily` naming a family that is not loaded resolves to the default rather than failing,
-so a node constructed while its atlas is still in flight renders immediately and switches over
-when the atlas lands.
+A `fontFamily` naming a family nothing was registered under draws **nothing**, and the engine
+writes one `console.warn` naming it — once per name, not once per frame. There is no fallback
+face, because the engine ships no typeface to fall back to.
 
 ### Per renderer
 

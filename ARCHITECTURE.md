@@ -12,6 +12,27 @@ File paths below are relative to `packages/engine/src/`. Every module named here
 header comment covering the same ground in more detail; when this document and a module header
 disagree, the header is closer to the code.
 
+## The shape of it
+
+![An application builds a scene tree of plain objects and loads its heavy resources into a global cache before any frame runs. Every frame, the gather ranks and culls that tree into four lanes, which pack it into buffers and draw it in one render pass of three phases.](docs/architecture-overview.svg)
+
+Four things that picture is trying to say, each of which the rest of this document spends a
+section on:
+
+- **The scene tree names no graphics type.** A `Circle` is a plain object with a transform. It
+  has no idea a device exists, which is why the same tree draws through either render path.
+- **The gather is where a frame is decided, and it is GPU-free too.** Visibility, depth, lane,
+  and draw order all come out of `render/gather.ts`, so the WebGPU path and the WebGL2 fallback
+  are handed the same answer rather than each computing one.
+- **A lane is the unit of repetition.** Mesh, text, image and shadow each have a batcher, a
+  vertex format, a pipeline and a shader — and each is written twice, once per render path. What
+  is *not* per lane is the pass: all four share one depth buffer and one render pass, which is
+  what lets a glyph and a rectangle stack correctly.
+- **Nothing heavy happens during a frame.** Fetching, decoding and uploading are load-time work
+  behind a ref-counted cache; drawing binds what is already there.
+
+The source is `docs/mermaid/architecture-overview.mmd` — see [docs/README.md](docs/README.md).
+
 ## Contents
 
 - [The pipeline](#the-pipeline)
@@ -1040,8 +1061,8 @@ Bumping the text-shaping epoch alone does not help: it repacks from exactly thos
 
 A `MSDFFontBook` is four styles of **one** typeface in one array texture — a style's `STYLE_ORDER`
 index *is* its layer — so a second typeface cannot join it. `webgpu/MSDFFontLibrary.ts` therefore
-holds a book per family, keyed by name, and a `Text` names one. An unknown name resolves to the
-default family rather than failing, which is what lets a node be built before its atlas lands.
+holds a book per family, keyed by name, and a `Text` names one. An unknown name resolves to a
+book with no atlases in it, so the node draws nothing and the engine warns once naming it.
 
 The cost is **one draw per family change** along the packed node order — not per family, and not
 per node. `TextBatcher` records the book each node was shaped against and splits its own draw
@@ -1059,10 +1080,9 @@ A lane repack is not a re-shape: `TextBatcher.rebuild` calls `shaped()` per node
 memoized layout back. That is why the per-node route is cheap, and why reaching for the font
 epoch on a node-level change would be badly over-broad.
 
-The engine holds the *readers* — `MSDFFontBook` and `GlMSDFFontBook` for the first, `PolygonFont` and
-`PolygonFontBook` for the second — and, of the data, only the Inter MSDF fallback. That exists so
-`Text` draws on the first frame of a project that has not chosen a typeface, not as the way to
-choose one; `packages/example-app/src/fonts/` shows the shape an application's own module takes.
+The engine holds the *readers* — `MSDFFontBook` and `GlMSDFFontBook` for the first, `PolygonFont`
+and `PolygonFontBook` for the second — and none of the data. Every typeface is the application's
+to serve and to name; `packages/example-app/src/fonts/` shows the shape that module takes.
 
 An MSDF set may be **partial**. A style's index in `STYLE_ORDER` is its texture array layer, so a
 set given as bold alone occupies layer 1 and leaves the rest zeroed; the ladder in
