@@ -67,7 +67,7 @@ const STYLE_JSONS: Record<FontStyle, MsdfFontJson> = {
 }
 // The set under test, in STYLE_ORDER - what an application passes as `fonts`, and what every
 // layer-size assertion below is measured against. The layer size follows whichever set it is
-// given, so the test computes it with atlasLayerSize, exactly as a FontBook does.
+// given, so the test computes it with atlasLayerSize, exactly as an MSDFFontBook does.
 const STYLES: StyleJson[] = STYLE_ORDER.map((style) => ({ style, json: STYLE_JSONS[style] }))
 const ATLAS_LAYER_SIZE = atlasLayerSize(STYLES)
 
@@ -96,7 +96,7 @@ const regularOnly: FontProvider = {
 const run = (text: string, style: TextRun['style'] = {}): TextRun => ({ text, style })
 const finite = (n: number) => Number.isFinite(n)
 
-// FontBook/device involved (see FontAtlas.ts) - built off the SAME JSON as `fonts` above, so
+// MSDFFontBook/device involved (see FontAtlas.ts) - built off the SAME JSON as `fonts` above, so
 // the two must resolve identically. ---
 it('msdfFontProvider: the GPU-free FontProvider a scene can measure text with, with no', () => {
     const provider = msdfFontProvider(STYLES)
@@ -104,7 +104,7 @@ it('msdfFontProvider: the GPU-free FontProvider a scene can measure text with, w
     const bold = provider.resolve('bold')
     assert(bold.atlasIndex === STYLE_ORDER.indexOf('bold'), "resolving 'bold' returns bold's atlas index")
     assert(!bold.fauxBold && !bold.fauxItalic, 'an exact style match needs no synthesis (all four were supplied)')
-    assert(bold.metrics.glyphs.size === METRICS.bold.glyphs.size, "msdfFontProvider's metrics match FontBook's own normalization")
+    assert(bold.metrics.glyphs.size === METRICS.bold.glyphs.size, "msdfFontProvider's metrics match MSDFFontBook's own normalization")
 
     // A partial set is the common case for an application that ships one face: the ladder
     // synthesizes every other style off the one that is there.
@@ -176,7 +176,7 @@ it('an MSDFText node draws in its own family, and changing it re-shapes only tha
 })
 
 //
-// Loading an atlas at runtime (handle.setFonts) changes the metrics under every MSDFText at once,
+// Loading an atlas at runtime (handle.setMSDFFonts) changes the metrics under every MSDFText at once,
 // and MSDFText.shaped() memoizes its layout while ignoring the provider it was handed. Without the
 // font epoch the lane would repack from those stale caches: the right glyphs at the old
 // advances and the old wrap points, which is the kind of wrong that looks almost right.
@@ -189,7 +189,7 @@ it('replacing the fonts re-shapes text that had already been laid out', () => {
     const before = node.shaped(wide)
     assert(node.shaped(wide) === before, 'the layout is memoized - shaping twice returns the same object')
 
-    // What FontBook.setFonts does, minus the GPU half.
+    // What MSDFFontBook.setMSDFFonts does, minus the GPU half.
     bumpFontEpoch()
 
     const after = node.shaped(narrow)

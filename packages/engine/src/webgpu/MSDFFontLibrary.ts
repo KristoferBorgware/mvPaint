@@ -1,6 +1,6 @@
-// The font families a renderer can draw with - one FontBook each, keyed by name.
+// The MSDF font families a renderer can draw with - one MSDFFontBook each, keyed by name.
 //
-// A FontBook is four styles of ONE typeface in one array texture, which is what lets a
+// An MSDFFontBook is four styles of ONE typeface in one array texture, which is what lets a
 // paragraph mixing regular, bold and italic draw in a single call. A second typeface cannot
 // join it: array layers are indexed by STYLE_ORDER, and the text lane binds one texture per
 // draw. So a family is a book, and a scene with two families has two books.
@@ -22,28 +22,28 @@
 // moment.
 
 import { createAtlasBindGroupLayout } from './layouts'
-import { FontBook, createAtlasSampler } from './FontBook'
-import { DEFAULT_FONT_FAMILY, type FontFamilies, type FontProvider } from '../text/layout'
+import { MSDFFontBook, createMSDFAtlasSampler } from './MSDFFontBook'
+import { DEFAULT_FONT_FAMILY, type MSDFFontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 import { warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
-export class FontLibrary implements FontFamilies {
+export class MSDFFontLibrary implements MSDFFontFamilies {
   /** group(2) layout, shared by every family and by the text pipeline built from it. */
   readonly atlasLayout: GPUBindGroupLayout
 
   private readonly device: GPUDevice
   private readonly sampler: GPUSampler
-  private readonly books = new Map<string, FontBook>()
+  private readonly books = new Map<string, MSDFFontBook>()
   /** What an unregistered name resolves to: no atlases, so no glyphs, so nothing drawn. */
-  private readonly unresolved: FontBook
+  private readonly unresolved: MSDFFontBook
 
   private constructor(
     device: GPUDevice,
     atlasLayout: GPUBindGroupLayout,
     sampler: GPUSampler,
-    initial: FontBook,
-    unresolved: FontBook,
+    initial: MSDFFontBook,
+    unresolved: MSDFFontBook,
   ) {
     this.device = device
     this.atlasLayout = atlasLayout
@@ -55,14 +55,14 @@ export class FontLibrary implements FontFamilies {
   /**
    * Build a library holding one family - the default, from `sources`, or an empty book if none
    * were given. Either way the family exists, so nothing downstream has to test for its absence.
-   * Further families arrive through setFonts() at any point afterwards.
+   * Further families arrive through setMSDFFonts() at any point afterwards.
    */
-  static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<FontLibrary> {
+  static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<MSDFFontLibrary> {
     const atlasLayout = createAtlasBindGroupLayout(device, '2d-array')
-    const sampler = createAtlasSampler(device)
-    const initial = await FontBook.loadWith(device, atlasLayout, sampler, sources)
-    const unresolved = await FontBook.loadWith(device, atlasLayout, sampler)
-    return new FontLibrary(device, atlasLayout, sampler, initial, unresolved)
+    const sampler = createMSDFAtlasSampler(device)
+    const initial = await MSDFFontBook.loadWith(device, atlasLayout, sampler, sources)
+    const unresolved = await MSDFFontBook.loadWith(device, atlasLayout, sampler)
+    return new MSDFFontLibrary(device, atlasLayout, sampler, initial, unresolved)
   }
 
   /**
@@ -74,7 +74,7 @@ export class FontLibrary implements FontFamilies {
    * drawing in whatever the application happened to load first, under a name that asked for
    * something else.
    */
-  bookFor(family: string | undefined): FontBook {
+  bookFor(family: string | undefined): MSDFFontBook {
     if (family === undefined) return this.books.get(DEFAULT_FONT_FAMILY)!
     const book = this.books.get(family)
     if (book) return book
@@ -94,20 +94,20 @@ export class FontLibrary implements FontFamilies {
   /**
    * Load or replace one family's atlases.
    *
-   * Replacing the family a node already draws with re-shapes it (FontBook.setFonts bumps the
+   * Replacing the family a node already draws with re-shapes it (MSDFFontBook.setMSDFFonts bumps the
    * font epoch); ADDING a family does not disturb anything already on screen - except that
    * nodes naming it were falling back to the default and now resolve to the real thing, which
    * the same epoch bump takes care of.
    */
-  async setFonts(sources: readonly MsdfAtlasSource[], family: string = DEFAULT_FONT_FAMILY): Promise<void> {
+  async setMSDFFonts(sources: readonly MsdfAtlasSource[], family: string = DEFAULT_FONT_FAMILY): Promise<void> {
     const existing = this.books.get(family)
     if (existing) {
-      await existing.setFonts(sources)
+      await existing.setMSDFFonts(sources)
       return
     }
     // A new family: build it before publishing it, so a failed fetch leaves the library exactly
     // as it was rather than holding a half-loaded book that nothing can draw.
-    const book = await FontBook.loadWith(this.device, this.atlasLayout, this.sampler, sources)
+    const book = await MSDFFontBook.loadWith(this.device, this.atlasLayout, this.sampler, sources)
     this.books.set(family, book)
     // Nodes naming this family have been resolving to the default and cached a layout measured
     // against it; they have to re-shape now that the real thing exists. The epoch is global, so

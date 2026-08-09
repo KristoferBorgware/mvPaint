@@ -214,19 +214,19 @@ atlas needs no special handling.
 const handle = await createSceneRenderer(canvas, { fonts: interAtlases })
 ```
 
-Omitting `fonts` loads no atlases at all, and `MSDFText` draws nothing until `setFonts()`
+Omitting `fonts` loads no atlases at all, and `MSDFText` draws nothing until `setMSDFFonts()`
 supplies some. A set may be **partial**: a style's index in
 `STYLE_ORDER` *is* its texture array layer, so unsupplied styles leave their layers zeroed and
 the style ladder resolves through whatever is present.
 
-`FontBook.load` fetches each PNG, decodes it with `createImageBitmap({ colorSpaceConversion:
+`MSDFFontBook.load` fetches each PNG, decodes it with `createImageBitmap({ colorSpaceConversion:
 'none' })` — MSDF channels are distances, not sRGB color, and any conversion corrupts them — and
 uploads it to its layer of a single `texture_2d_array`. Array layers share one size, so each
 image is copied into the top-left of a layer sized for the largest in the set, and
 `normalizeMetrics` measures every UV against the *layer* rather than the image.
 
-Families are held by `FontLibrary` (`GlFontLibrary` on the WebGL2 path), keyed by name, one
-`FontBook` each. The bind group layout and sampler are created once and shared by every book,
+Families are held by `MSDFFontLibrary` (`GlMSDFFontLibrary` on the WebGL2 path), keyed by name, one
+`MSDFFontBook` each. The bind group layout and sampler are created once and shared by every book,
 because the text pipeline is built from that layout.
 
 ### Vector
@@ -359,13 +359,13 @@ when the atlas lands.
 ### Per renderer
 
 ```ts
-await handle.setFonts(sources)              // replace the default family
-await handle.setFonts(sources, 'roboto')    // load or replace a named family
-handle.getFonts('roboto')                   // what that family currently holds
+await handle.setMSDFFonts(sources)              // replace the default family
+await handle.setMSDFFonts(sources, 'roboto')    // load or replace a named family
+handle.getMSDFFonts('roboto')                   // what that family currently holds
 ```
 
-`setFonts` replaces within a family rather than merging, so an application never ends up half its
-own typeface and half the fallback; spread `getFonts()` to add a style. The atlas is rebuilt
+`setMSDFFonts` replaces within a family rather than merging, so an application never ends up half its
+own typeface and half the fallback; spread `getMSDFFonts()` to add a style. The atlas is rebuilt
 whole — a new set may want a different layer size, and a style dropped from the set has to stop
 resolving — and the swap is atomic: a failed fetch rejects and leaves the previous atlases
 drawing.
@@ -465,7 +465,7 @@ the same `VectorFonts` interface, at the cost of a parser in the bundle.
 | MSDF metrics, style ladder | `packages/engine/src/text/msdfMetrics.ts`, `msdfProvider.ts` |
 | Outline atlas reader | `packages/engine/src/text/PolygonFont.ts` |
 | Outline interface, tessellation | `packages/engine/src/text/vectorGlyphs.ts` |
-| GPU atlases and families | `packages/engine/src/webgpu/FontBook.ts`, `FontLibrary.ts` (+ `Gl*` equivalents) |
+| GPU atlases and families | `packages/engine/src/webgpu/MSDFFontBook.ts`, `MSDFFontLibrary.ts` (+ `Gl*` equivalents) |
 | Packing and draw ranges | `packages/engine/src/webgpu/lanes/TextBatcher.ts` |
 | Record layouts | `packages/engine/src/render/textFormat.ts`, `meshFormat.ts` |
 | Runtime parsing | `packages/ttf/` |

@@ -1,6 +1,6 @@
-// The WebGL2 path's font families - one GlFontBook each, keyed by name.
+// The WebGL2 path's MSDF font families - one GlMSDFFontBook each, keyed by name.
 //
-// Same contract as webgpu/FontLibrary.ts, and deliberately the same shape, so which families a
+// Same contract as webgpu/MSDFFontLibrary.ts, and deliberately the same shape, so which families a
 // scene has and how a missing one resolves does not depend on which render path it got. See
 // that file for why a family is a book and what a family change costs.
 //
@@ -8,27 +8,27 @@
 // built against a pipeline's layout, so there is no shared layout object to thread through and
 // a book owns everything it needs.
 
-import { GlFontBook } from './GlFontBook'
-import { DEFAULT_FONT_FAMILY, type FontFamilies, type FontProvider } from '../text/layout'
+import { GlMSDFFontBook } from './GlMSDFFontBook'
+import { DEFAULT_FONT_FAMILY, type MSDFFontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 import { warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
-export class GlFontLibrary implements FontFamilies {
+export class GlMSDFFontLibrary implements MSDFFontFamilies {
   private readonly gl: WebGL2RenderingContext
-  private readonly books = new Map<string, GlFontBook>()
+  private readonly books = new Map<string, GlMSDFFontBook>()
   /** What an unregistered name resolves to: no atlases, so no glyphs, so nothing drawn. */
-  private readonly unresolved: GlFontBook
+  private readonly unresolved: GlMSDFFontBook
 
-  private constructor(gl: WebGL2RenderingContext, initial: GlFontBook, unresolved: GlFontBook) {
+  private constructor(gl: WebGL2RenderingContext, initial: GlMSDFFontBook, unresolved: GlMSDFFontBook) {
     this.gl = gl
     this.unresolved = unresolved
     this.books.set(DEFAULT_FONT_FAMILY, initial)
   }
 
   /** Build a library holding one family - the default, from `sources`, or empty if none. */
-  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontLibrary> {
-    return new GlFontLibrary(gl, await GlFontBook.load(gl, sources), await GlFontBook.load(gl))
+  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlMSDFFontLibrary> {
+    return new GlMSDFFontLibrary(gl, await GlMSDFFontBook.load(gl, sources), await GlMSDFFontBook.load(gl))
   }
 
   /**
@@ -40,7 +40,7 @@ export class GlFontLibrary implements FontFamilies {
    * drawing in whatever the application happened to load first, under a name that asked for
    * something else.
    */
-  bookFor(family: string | undefined): GlFontBook {
+  bookFor(family: string | undefined): GlMSDFFontBook {
     if (family === undefined) return this.books.get(DEFAULT_FONT_FAMILY)!
     const book = this.books.get(family)
     if (book) return book
@@ -57,14 +57,14 @@ export class GlFontLibrary implements FontFamilies {
     return [...this.books.keys()]
   }
 
-  /** Load or replace one family's atlases - see webgpu/FontLibrary.ts for the semantics. */
-  async setFonts(sources: readonly MsdfAtlasSource[], family: string = DEFAULT_FONT_FAMILY): Promise<void> {
+  /** Load or replace one family's atlases - see webgpu/MSDFFontLibrary.ts for the semantics. */
+  async setMSDFFonts(sources: readonly MsdfAtlasSource[], family: string = DEFAULT_FONT_FAMILY): Promise<void> {
     const existing = this.books.get(family)
     if (existing) {
-      await existing.setFonts(sources)
+      await existing.setMSDFFonts(sources)
       return
     }
-    const book = await GlFontBook.load(this.gl, sources)
+    const book = await GlMSDFFontBook.load(this.gl, sources)
     this.books.set(family, book)
     // Nodes naming this family were drawing nothing and cached a layout that said so.
     bumpFontEpoch()

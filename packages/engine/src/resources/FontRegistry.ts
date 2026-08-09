@@ -8,7 +8,7 @@
 // WHY OUTLINES LIVE HERE AND ATLASES DO NOT. A PolygonFontBook is arrays of numbers and belongs
 // to no device, so it can sit in module state and be resolved synchronously by any node that asks
 // - which is what VectorText needs, since it shapes without a renderer in reach. An MSDF book
-// holds a GPUTexture, so it lives in the renderer's FontLibrary and is resolved through it. Both
+// holds a GPUTexture, so it lives in the renderer's MSDFFontLibrary and is resolved through it. Both
 // are reached by the same name, which is the part that matters to a caller.
 //
 // A family may hold one kind or both. Loading 'inter' with only outlines is an ordinary thing to

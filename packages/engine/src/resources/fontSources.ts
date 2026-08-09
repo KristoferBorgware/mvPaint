@@ -52,6 +52,27 @@ function sharedJson<T>(url: string, what: string): Promise<SharedValue<T>> {
 }
 
 /**
+ * An atlas image's BYTES, fetched at most once per address.
+ *
+ * Bytes rather than a decoded bitmap, and bytes rather than a texture: decoding and uploading
+ * need a device, so they belong to whichever render path is drawing (see MSDFFontBook), while the
+ * fetch belongs to nobody. Holding the compressed PNG is a fraction of what its decoded form
+ * would be, and it means a font book rebuilt against the same address - a remount, a family
+ * replaced with the set it already had - costs no round trip.
+ *
+ * Never released: a typeface is loaded before the first frame of text and drawn from until the
+ * page goes. See loadMsdfAtlases, which says the same of the metrics.
+ */
+export async function sharedAtlasBytes(url: string): Promise<Blob> {
+  const held = await globalResourceCache().acquireAsync(`font-image:${url}`, async () => {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Failed to load a font atlas (${response.status} from ${url})`)
+    return new SharedValue(await response.blob())
+  })
+  return held.value
+}
+
+/**
  * The outlines a `VectorText` node draws from, fetched once per set of addresses.
  *
  * Asking twice for the same styles gives the same book, and two callers asking before the fetch
@@ -80,7 +101,7 @@ export function loadPolygonFonts(sources: readonly PolygonFontUrl[]): Promise<Po
 
 /** An MSDF set in hand, and the means to let go of the documents it was built from. */
 export interface LoadedMsdfAtlases {
-  /** What `createSceneRenderer({ fonts })` and `handle.setFonts()` take. */
+  /** What `createSceneRenderer({ fonts })` and `handle.setMSDFFonts()` take. */
   sources: readonly MsdfAtlasSource[]
   /**
    * Lets go of the metrics documents.

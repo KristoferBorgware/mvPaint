@@ -48,7 +48,7 @@ out/polygons/  -> your app's font folder;  build a PolygonFontBook for VectorTex
 [its index.ts](../example-app/src/fonts/index.ts) is a working example of both halves.
 
 The engine ships **no font at all**. An application that passes no `fonts` gets a renderer that
-draws no text until it calls `setFonts()`. The example app's copy is the only Inter in this
+draws no text until it calls `setMSDFFonts()`. The example app's copy is the only Inter in this
 repository, and it is an application's asset like any other — served from `public/`, fetched at
 runtime, swappable without a rebuild.
 

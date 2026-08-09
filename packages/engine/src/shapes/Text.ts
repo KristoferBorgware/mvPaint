@@ -7,7 +7,7 @@
 // constructor and nothing else.
 //
 // The base deliberately does NOT own the shaped result: what "shaped" means differs (one
-// needs a FontBook of atlases, the other a book of parsed outlines), so each subclass keeps
+// needs an MSDFFontBook of atlases, the other a book of parsed outlines), so each subclass keeps
 // its own cache and says how to drop it via invalidateShaping(). Everything that can
 // invalidate shaping - replacing the runs, replacing the text, or editing a layout option
 // in place and calling markDirty() - funnels through that one hook.

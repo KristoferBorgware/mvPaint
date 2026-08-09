@@ -66,7 +66,7 @@ MSDF atlas is shared by every `MSDFText`, so it is swapped on the renderer:
 
 ```ts
 const handle = await createSceneRenderer(canvas)   // no atlases yet, so no text draws
-await handle.setFonts(await fetchAtlasesFromCdn()) // ...then yours arrive and text shapes
+await handle.setMSDFFonts(await fetchAtlasesFromCdn()) // ...then yours arrive and text shapes
 ```
 
 The engine fetches each PNG from the `url` you give it, so that field is already a CDN URL. The
@@ -78,7 +78,7 @@ line — fetch them yourself and pass the parsed JSON.
 Name a family when you load it, and name it on the node:
 
 ```ts
-await handle.setFonts(robotoAtlases, 'roboto')
+await handle.setMSDFFonts(robotoAtlases, 'roboto')
 scene.root.addChild(new MSDFText({ text: 'Heading', fontFamily: 'roboto' }))
 scene.root.addChild(new MSDFText({ text: 'Body' }))            // the default family
 new VectorText({ fonts: robotoOutlines, text: 'Outlined' }) // outlines are handed over directly
@@ -95,7 +95,7 @@ mixing all four styles is still a single draw.
 
 This package ships **no typeface at all**. Omit `fonts` and the renderer starts with no atlases:
 nothing is fetched, no texture is uploaded, and `MSDFText` draws nothing until you call
-`setFonts()`. A scene of rectangles issues no font request at all. A set you supply may be
+`setMSDFFonts()`. A scene of rectangles issues no font request at all. A set you supply may be
 partial: give it bold alone and the style ladder synthesizes the rest. Outlines work the same
 way — `VectorText` is always given its own.
 

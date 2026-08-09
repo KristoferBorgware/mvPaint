@@ -1,13 +1,14 @@
-// The MSDF atlases as one WebGL2 array texture - the fallback path's FontBook.
+// The MSDF atlases as one WebGL2 array texture - the fallback path's MSDFFontBook.
 //
-// Same arrangement as the WebGPU one (webgpu/FontBook.ts) and for the same reason: all four
+// Same arrangement as the WebGPU one (webgpu/MSDFFontBook.ts) and for the same reason: all four
 // styles live as layers of a single TEXTURE_2D_ARRAY, a run picks its layer from its object
 // record, and a paragraph mixing regular, bold and italic therefore draws in ONE call instead
 // of one per style. That win is worth as much here as there - more, if anything, since a
 // program switch on this path costs more than a pipeline switch does on the other.
 //
-// It takes the application's atlases exactly as the WebGPU book does, treats an absent set the
-// same way (no atlases, no fetches, a 1x1 placeholder texture), and places each style at its
+// It takes the application's atlases exactly as the WebGPU book does - bytes from the global
+// resource cache, decoded and uploaded here, all of it before a frame runs - treats an absent
+// set the same way (no atlases, a 1x1 placeholder texture), and places each style at its
 // STYLE_ORDER layer - so which fonts a scene draws with does not depend on which render path
 // it got.
 //
@@ -15,6 +16,7 @@
 // no device and is the same object the WebGPU path resolves through.
 
 import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
+import { sharedAtlasBytes } from '../resources/fontSources'
 import {
   atlasLayerSize,
   resolveStyle,
@@ -25,7 +27,7 @@ import {
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 import type { FontProvider, ResolvedStyle } from '../text/layout'
 
-export class GlFontBook implements FontProvider {
+export class GlMSDFFontBook implements FontProvider {
   /** Layers of the array texture - one per style the renderer can select, loaded or not. */
   readonly layerCount = STYLE_ORDER.length
 
@@ -55,22 +57,22 @@ export class GlFontBook implements FontProvider {
    * Fetch each style's PNG and upload it to its STYLE_ORDER layer.
    *
    * A partial set is allowed, and so is none at all: `sources` omitted or empty gives a book
-   * with no atlases, which fetches nothing and draws no text until setFonts() supplies some.
-   * See webgpu/FontBook.ts - the contract is identical on both paths.
+   * with no atlases, which fetches nothing and draws no text until setMSDFFonts() supplies some.
+   * See webgpu/MSDFFontBook.ts - the contract is identical on both paths.
    */
-  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlFontBook> {
+  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlMSDFFontBook> {
     const atlases = sources ?? []
     const built = await buildGlAtlas(gl, atlases)
-    return new GlFontBook(gl, built.texture, built.metrics, atlases)
+    return new GlMSDFFontBook(gl, built.texture, built.metrics, atlases)
   }
 
   /**
    * Replace the atlases at any point after the renderer exists - the same contract, and the
-   * same replace-don't-merge semantics, as the WebGPU book's setFonts. See webgpu/FontBook.ts.
+   * same replace-don't-merge semantics, as the WebGPU book's setMSDFFonts. See webgpu/MSDFFontBook.ts.
    *
    * The swap is atomic: a failed fetch throws and leaves the old texture bound and drawing.
    */
-  async setFonts(sources: readonly MsdfAtlasSource[]): Promise<void> {
+  async setMSDFFonts(sources: readonly MsdfAtlasSource[]): Promise<void> {
     const built = await buildGlAtlas(this.gl, sources)
     if (this.texture) this.gl.deleteTexture(this.texture)
     this.texture = built.texture
@@ -110,7 +112,7 @@ export class GlFontBook implements FontProvider {
 /**
  * One atlas set -> an array texture and the metrics indexed by array layer.
  *
- * Shared by load() and setFonts(), and nothing is assigned to the book here - the caller swaps
+ * Shared by load() and setMSDFFonts(), and nothing is assigned to the book here - the caller swaps
  * the result in once every fetch has succeeded, which is what makes a failed replacement leave
  * the old atlas in place.
  */
@@ -125,7 +127,7 @@ async function buildGlAtlas(
   const layerSize = atlasLayerSize(atlases)
 
   const texture = gl.createTexture()
-  if (!texture) throw new Error('GlFontBook: could not create the atlas texture')
+  if (!texture) throw new Error('GlMSDFFontBook: could not create the atlas texture')
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture)
   // STYLE_ORDER.length layers whatever was supplied - a style's layer is its STYLE_ORDER
   // index, which is what a shaped quad names, so a partial set leaves gaps rather than
@@ -145,12 +147,12 @@ async function buildGlAtlas(
     await Promise.all(
       atlases.map(async (source) => {
         const layer = STYLE_ORDER.indexOf(source.style)
-        if (layer < 0) throw new Error(`GlFontBook: '${source.style}' is not one of ${STYLE_ORDER.join(', ')}.`)
-        const response = await fetch(source.url)
-        if (!response.ok) throw new Error(`GlFontBook: ${source.url} responded ${response.status}`)
+        if (layer < 0) throw new Error(`GlMSDFFontBook: '${source.style}' is not one of ${STYLE_ORDER.join(', ')}.`)
+        // The bytes come from the global cache - see webgpu/MSDFFontBook.ts for why the fetch is
+        // shared and the decode is not.
         // colorSpaceConversion 'none': MSDF channels are distances, not sRGB colour, so any
         // conversion the browser might helpfully apply would corrupt them.
-        const bitmap = await createImageBitmap(await response.blob(), { colorSpaceConversion: 'none' })
+        const bitmap = await createImageBitmap(await sharedAtlasBytes(source.url), { colorSpaceConversion: 'none' })
         try {
           gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture)
           // flipY off: with it off the image's first row lands at v = 0, which is where the

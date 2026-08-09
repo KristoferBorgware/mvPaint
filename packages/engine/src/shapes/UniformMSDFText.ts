@@ -44,7 +44,7 @@ export class UniformMSDFText extends withSingleRun(MSDFText) {
    * The width of the shaped block, including any padding.
    *
    * `fonts` is what an MSDF node cannot supply for itself: its glyphs live in atlases the
-   * renderer owns, and measuring reads their metrics. `handle.fonts` is the one to pass.
+   * renderer owns, and measuring reads their metrics. `handle.msdfFonts` is the one to pass.
    */
   getTextWidth(fonts: FontProvider): number {
     return this.shaped(fonts).width

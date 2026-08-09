@@ -50,7 +50,7 @@ export type GroupOptions = NodeOptions
  * A node's own bounds in its own local space, or null for something with nothing to
  * measure. Shapes answer this from their tessellated triangles; an MSDFText has to be shaped
  * against a font atlas first, which is why the resolver is a parameter rather than a
- * method call - the group cannot reach a FontBook, and the caller that cares already has
+ * method call - the group cannot reach an MSDFFontBook, and the caller that cares already has
  * one (see scene/picking.ts's localBoundsOf).
  */
 export type LocalBoundsResolver = (node: Node) => AABB | null

@@ -37,7 +37,7 @@ import { textShapingEpoch } from '../shapes/contentEpoch'
 import { MSDFText } from '../shapes/MSDFText'
 import type { Image } from '../shapes/Image'
 import type { Gl2Context } from './Gl2Context'
-import type { GlFontLibrary } from './GlFontLibrary'
+import type { GlMSDFFontLibrary } from './GlMSDFFontLibrary'
 import { GlProgram, GlStateCache } from './GlProgram'
 import { meshFragmentGlsl, meshVertexGlsl } from './shaders/mesh.glsl'
 import { textFragmentGlsl, textVertexGlsl } from './shaders/text.glsl'
@@ -80,7 +80,7 @@ export class GlSceneRenderer {
 
   // Shaping, measuring and culling need font METRICS; drawing also needs the atlas. One object
   // supplies both, and it is a FontProvider, so picking and culling never touch the texture.
-  private readonly fonts: GlFontLibrary
+  private readonly fonts: GlMSDFFontLibrary
 
   private readonly gather = new SceneGather()
   private cullMargin = 0
@@ -96,7 +96,7 @@ export class GlSceneRenderer {
   private visibleTexts: readonly MSDFText[] = []
   private visibleImages: readonly Image[] = []
 
-  constructor(context: Gl2Context, fonts: GlFontLibrary, camera?: Camera2D | null) {
+  constructor(context: Gl2Context, fonts: GlMSDFFontLibrary, camera?: Camera2D | null) {
     this.gl = context.gl
     this.canvas = context.canvas
     this.fonts = fonts

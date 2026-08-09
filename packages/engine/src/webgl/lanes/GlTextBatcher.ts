@@ -40,8 +40,8 @@ import {
 } from '../../render/textFormat'
 import { GlObjectTexture } from '../GlObjectTexture'
 import type { GlProgram } from '../GlProgram'
-import type { GlFontBook } from '../GlFontBook'
-import type { GlFontLibrary } from '../GlFontLibrary'
+import type { GlMSDFFontBook } from '../GlMSDFFontBook'
+import type { GlMSDFFontLibrary } from '../GlMSDFFontLibrary'
 
 interface ObjectRecord {
   node: MSDFText
@@ -61,7 +61,7 @@ export class GlTextBatcher {
   private nodeIndexEnds: number[] = []
   // The book each node was shaped against, aligned with nodeIndexEnds. Draw ranges break where
   // this changes, because a range binds one atlas texture.
-  private nodeBooks: GlFontBook[] = []
+  private nodeBooks: GlMSDFFontBook[] = []
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl
@@ -74,7 +74,7 @@ export class GlTextBatcher {
    * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
    * into the same buffers and differ only in which texture their draw binds.
    */
-  rebuild(texts: readonly MSDFText[], fonts: GlFontLibrary): void {
+  rebuild(texts: readonly MSDFText[], fonts: GlMSDFFontLibrary): void {
     const gl = this.gl
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = []
@@ -210,7 +210,7 @@ export class GlTextBatcher {
   /**
    * Draw only nodes `[fromNode, toNode)` of the last rebuild - which is how the renderer
    * interleaves the lanes back to front. One draw, whatever styles the span mixes: every style
-   * is a layer of the one bound array texture (see GlFontBook.ts).
+   * is a layer of the one bound array texture (see GlMSDFFontBook.ts).
    */
   drawRange(program: GlProgram, fromNode: number, toNode: number): void {
     if (!this.vao || this.indexCount === 0) return

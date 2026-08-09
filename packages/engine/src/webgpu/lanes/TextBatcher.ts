@@ -6,13 +6,13 @@
 //
 // Quads are emitted in painter order and drawn as ONE range, whatever styles they mix. Every
 // Inter style shares a single texture_2d_array with a layer each, and a run's layer travels in
-// its object record (see webgpu/FontBook.ts), so there is no per-atlas segmentation left to do:
+// its object record (see webgpu/MSDFFontBook.ts), so there is no per-atlas segmentation left to do:
 // this lane binds group(2) exactly once and issues exactly one drawIndexed per span of nodes.
 
 import type { Shape } from '../../shapes/Shape'
 import type { MSDFText } from '../../shapes/MSDFText'
-import type { FontBook } from '../FontBook'
-import type { FontLibrary } from '../FontLibrary'
+import type { MSDFFontBook } from '../MSDFFontBook'
+import type { MSDFFontLibrary } from '../MSDFFontLibrary'
 import type { TextMaterial } from '../../text/layout'
 import { quadCorner } from '../../text/textQuad'
 import { FILL_TYPE_CODE, MAX_GRADIENT_STOPS } from '../../render/meshFormat'
@@ -62,7 +62,7 @@ export class TextBatcher {
   private nodeIndexEnds: number[] = []
   // The book each node was shaped against, aligned with nodeIndexEnds. Draw ranges break where
   // this changes, because a range is one bind group and a book is one texture.
-  private nodeBooks: FontBook[] = []
+  private nodeBooks: MSDFFontBook[] = []
 
   constructor(device: GPUDevice, objectLayout: GPUBindGroupLayout) {
     this.device = device
@@ -75,7 +75,7 @@ export class TextBatcher {
    * Each node is shaped against ITS OWN family's book, so two nodes in different typefaces pack
    * into the same buffers and differ only in which texture their draw binds.
    */
-  rebuild(texts: readonly MSDFText[], fonts: FontLibrary): void {
+  rebuild(texts: readonly MSDFText[], fonts: MSDFFontLibrary): void {
     const posUvColor: number[] = [] // 8 per vertex: x,y,u,v,r,g,b,a
     const packedIds: number[] = [] // 1 per vertex: object index, top bit = isGlyph
     const indices: number[] = []
@@ -235,7 +235,7 @@ export class TextBatcher {
    * the renderer interleaves the lanes back to front.
    *
    * One draw per FAMILY CHANGE within the span, not per node and not per style: every style of
-   * a family is a layer of that family's one texture (see webgpu/FontBook.ts), so a span in a
+   * a family is a layer of that family's one texture (see webgpu/MSDFFontBook.ts), so a span in a
    * single family is a single draw however many styles it mixes - the usual case, and unchanged
    * from when a scene could only have one family. A span alternating families pays a bind and a
    * draw at each switch.

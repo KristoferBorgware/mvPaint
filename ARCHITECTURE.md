@@ -805,7 +805,7 @@ distinct textures cannot be merged into one draw.
 
 The text lane therefore samples a single texture. All four Inter styles occupy one
 `texture_2d_array`, one layer per style, behind one bind group, and a run's `atlasLayer` field
-selects between them (`webgpu/FontBook.ts`). A paragraph mixing regular, bold, italic and
+selects between them (`webgpu/MSDFFontBook.ts`). A paragraph mixing regular, bold, italic and
 bold-italic issues one draw call.
 
 Array layers share a single size. The generator packs each style to its own tight bounds, so
@@ -1019,7 +1019,7 @@ From there:
 
 | | Supplied as | Selected per node by | If not supplied |
 | --- | --- | --- | --- |
-| MSDF | `createSceneRenderer({ fonts })` or `handle.setFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing and warns once |
+| MSDF | `createSceneRenderer({ fonts })` or `handle.setMSDFFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing and warns once |
 | Outlines | `loadFontFamily(name, { vector })` or `registerFontFamily(name, { vector })` | `Text.fontFamily`, the same name | nothing — the engine ships no outline data, so `VectorText` draws nothing and warns once |
 
 Neither has to exist before the canvas does, which is what an atlas fetched from a CDN needs.
@@ -1028,7 +1028,7 @@ The **scope** column is why they get there differently. Outlines own no GPU reso
 buffers like any other shape's triangles — so a node built after the fetch is the whole of it.
 An MSDF atlas is one array texture behind one bind group shared by every `Text` (that is what
 draws a paragraph of mixed styles in a single call), so it is replaced on the renderer rather
-than handed to a node, and `handle.setFonts()` is that.
+than handed to a node, and `handle.setMSDFFonts()` is that.
 
 Replacing it changes the metrics under every `Text` at once, which is what the **font epoch** in
 `shapes/contentEpoch.ts` exists for. `Text.shaped()` memoizes its layout and ignores the
@@ -1038,8 +1038,8 @@ Bumping the text-shaping epoch alone does not help: it repacks from exactly thos
 
 ### Families
 
-A `FontBook` is four styles of **one** typeface in one array texture — a style's `STYLE_ORDER`
-index *is* its layer — so a second typeface cannot join it. `webgpu/FontLibrary.ts` therefore
+A `MSDFFontBook` is four styles of **one** typeface in one array texture — a style's `STYLE_ORDER`
+index *is* its layer — so a second typeface cannot join it. `webgpu/MSDFFontLibrary.ts` therefore
 holds a book per family, keyed by name, and a `Text` names one. An unknown name resolves to the
 default family rather than failing, which is what lets a node be built before its atlas lands.
 
@@ -1059,7 +1059,7 @@ A lane repack is not a re-shape: `TextBatcher.rebuild` calls `shaped()` per node
 memoized layout back. That is why the per-node route is cheap, and why reaching for the font
 epoch on a node-level change would be badly over-broad.
 
-The engine holds the *readers* — `FontBook` and `GlFontBook` for the first, `PolygonFont` and
+The engine holds the *readers* — `MSDFFontBook` and `GlMSDFFontBook` for the first, `PolygonFont` and
 `PolygonFontBook` for the second — and, of the data, only the Inter MSDF fallback. That exists so
 `Text` draws on the first frame of a project that has not chosen a typeface, not as the way to
 choose one; `packages/example-app/src/fonts/` shows the shape an application's own module takes.
@@ -1453,7 +1453,7 @@ unchanged; only step 4 runs again, and only for that one slot.
 | One style for a whole string | `shapes/singleRun.ts`, `shapes/UniformMSDFText.ts`, `shapes/UniformVectorText.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
 | Generating those assets | `packages/scripts/textgen/msdf/`, `packages/scripts/textgen/polygon/`, `textgen/fontSources.ts` |
-| An application supplying them | `webgpu/FontBook.ts`, `webgl/GlFontBook.ts`, `packages/example-app/src/fonts/` |
+| An application supplying them | `webgpu/MSDFFontBook.ts`, `webgl/GlMSDFFontBook.ts`, `packages/example-app/src/fonts/` |
 | Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |
 | Packing and uploads | `webgpu/lanes/MeshBatcher.ts`, `TextBatcher.ts`, `ImageBatcher.ts`, `ShadowBatcher.ts` |

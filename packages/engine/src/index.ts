@@ -65,8 +65,8 @@ export * from './webgpu/ImageTexture'
 export * from './image/imageUv'
 export * from './image/svgSize'
 
-export * from './webgpu/FontBook'
-export * from './webgpu/FontLibrary'
+export * from './webgpu/MSDFFontBook'
+export * from './webgpu/MSDFFontLibrary'
 export * from './text/textQuad'
 export * from './text/textPath'
 

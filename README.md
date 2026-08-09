@@ -209,7 +209,7 @@ render path implements, and it mentions no graphics API.
 | `scene` | The scene graph. Content is added after construction: `handle.scene.root.addChild(node)`. |
 | `images` | Build a texture — see [Shared resources](#shared-resources). |
 | `fonts` | The loaded families, for measuring text. |
-| `setFonts`, `getFonts` | Load or replace a family's MSDF atlases at any point. |
+| `setMSDFFonts`, `getMSDFFonts` | Load or replace a family's MSDF atlases at any point. |
 | `camera`, `setCamera`, `setZoom`, `getZoom` | The view. |
 | `path` | `'webgpu'` or `'webgl2'` — which path was taken. |
 | `adapter` | Which GPU is drawing, and whether it is a software renderer. |
@@ -417,7 +417,7 @@ Every one of those re-shapes the node. They are ordinary `Text` nodes underneath
 curves, picking and the transformer are unchanged — and they carry the one deliberate exception
 to "nothing paints unless asked": their `fill` starts opaque black, because text that renders
 invisibly is a worse default than text that renders in black. Measuring goes through
-`getTextWidth(fonts)` and `measureSize(text, fonts)`, where `fonts` is `SceneResources.fonts`;
+`getTextWidth(fonts)` and `measureSize(text, fonts)`, where `fonts` is `SceneResources.msdfFonts`;
 the outline class needs no argument, since it already holds its own.
 
 Both read generated assets — a distance-field PNG for one, a polygon atlas of flattened outlines
@@ -443,7 +443,7 @@ family nothing was registered under draws nothing, and says so once in the conso
 [RESOURCES.md](RESOURCES.md).
 
 Two `Text` nodes can be different typefaces: load a named family with
-`handle.setFonts(sources, 'roboto')` and select it per node with `fontFamily`. The full pipeline —
+`handle.setMSDFFonts(sources, 'roboto')` and select it per node with `fontFamily`. The full pipeline —
 generation, loading, shaping, both render paths, and runtime font switching — is documented in
 [FONTS.md](FONTS.md).
 

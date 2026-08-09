@@ -42,7 +42,7 @@ struct ObjectData {
 @group(1) @binding(0) var<storage, read> objects : array<ObjectData>;
 // All four Inter styles in one texture, one layer each - so a paragraph that mixes them is
 // still a single draw. Which layer a glyph reads is a per-run value in its object record; see
-// webgpu/FontBook.ts.
+// webgpu/MSDFFontBook.ts.
 @group(2) @binding(0) var atlasTex : texture_2d_array<f32>;
 @group(2) @binding(1) var atlasSampler : sampler;
 

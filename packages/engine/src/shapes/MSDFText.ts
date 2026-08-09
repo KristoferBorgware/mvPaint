@@ -32,7 +32,7 @@ export class MSDFText extends Text {
    * Shape the runs into quads + materials, cached until the content, the layout or the FONTS
    * change.
    *
-   * The parameter is a FontProvider rather than the GPU-owning FontBook because shaping
+   * The parameter is a FontProvider rather than the GPU-owning MSDFFontBook because shaping
    * reads metrics and an atlas INDEX and nothing else - no texture, no device. Keeping it
    * at that width is what lets text be measured, culled and hit-tested with no renderer at
    * all (see text/msdfProvider.ts, which is how the self-tests shape under node).

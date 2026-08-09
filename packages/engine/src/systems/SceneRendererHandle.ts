@@ -24,7 +24,7 @@ import type { ColorInput } from '../render/color'
 import type { InputOptions } from '../input/inputOptions'
 import type { SceneInput } from '../input/sceneInput'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
-import type { FontFamilies } from '../text/layout'
+import type { MSDFFontFamilies } from '../text/layout'
 import type { GpuPowerPreference, RendererAdapter } from './adapter'
 
 /** Which render path drew this frame. `'auto'` is only an input; a renderer is always one. */
@@ -50,11 +50,11 @@ export interface SceneResources {
    * label.getTextWidth(fonts.resolveFamily(label.fontFamily))
    * ```
    *
-   * Read-only. Loading and replacing atlases go through `handle.setFonts()`, which also
+   * Read-only. Loading and replacing atlases go through `handle.setMSDFFonts()`, which also
    * re-shapes what is already on screen. `VectorText` needs none of this - its outlines are on
    * the node.
    */
-  readonly fonts: FontFamilies
+  readonly msdfFonts: MSDFFontFamilies
 }
 
 export interface SceneRendererHandle extends SceneResources {
@@ -86,14 +86,14 @@ export interface SceneRendererHandle extends SceneResources {
    *
    * ```ts
    * const handle = await createSceneRenderer(canvas)          // draws with the fallback
-   * await handle.setFonts(await fetchAtlasesFromCdn())        // ...then with yours
+   * await handle.setMSDFFonts(await fetchAtlasesFromCdn())        // ...then with yours
    * ```
    *
    * Pass a `family` name to load a SECOND typeface rather than replace the default, which is
-   * what lets two `MSDFText` nodes draw in different faces: `setFonts(roboto, 'roboto')`, then
+   * what lets two `MSDFText` nodes draw in different faces: `setMSDFFonts(roboto, 'roboto')`, then
    * `new MSDFText({ fontFamily: 'roboto' })`. Within one family it replaces rather than merges, so
    * an application never silently ends up half its own typeface and half the fallback; to add a
-   * style, spread what is already loaded: `setFonts([...handle.getFonts(), extra])`.
+   * style, spread what is already loaded: `setMSDFFonts([...handle.getMSDFFonts(), extra])`.
    *
    * Every cached text layout is dropped and re-shaped against the new metrics, and the text
    * lane repacks; nodes, transforms and the camera are untouched. Awaiting it means the atlases
@@ -103,12 +103,12 @@ export interface SceneRendererHandle extends SceneResources {
    * `VectorText` needs nothing like this - its outlines are supplied per node, so loading them
    * late has always just been a matter of when you construct the node.
    */
-  setFonts: (sources: readonly MsdfAtlasSource[], family?: string) => Promise<void>
+  setMSDFFonts: (sources: readonly MsdfAtlasSource[], family?: string) => Promise<void>
   /**
    * The atlases a family currently holds - the default family unless named, and an empty list
    * for a family that is not loaded.
    */
-  getFonts: (family?: string) => readonly MsdfAtlasSource[]
+  getMSDFFonts: (family?: string) => readonly MsdfAtlasSource[]
   /** The view the scene is drawn through - the one supplied, or the default. */
   camera: Camera2D
   /** Draw through a different camera; null goes back to the default (0,0 top-left, zoom 1). */
@@ -265,7 +265,7 @@ export interface CreateSceneRendererOptions {
    * application's other assets.
    *
    * The engine ships NO typeface. Omit this and the renderer starts with no atlases: nothing
-   * is fetched, no texture is uploaded, and `MSDFText` draws nothing until `setFonts()` supplies a
+   * is fetched, no texture is uploaded, and `MSDFText` draws nothing until `setMSDFFonts()` supplies a
    * set. For a working set to copy, see
    * packages/example-app: its Inter atlases are served from `public/`, the shape an
    * application's own asset folder takes.

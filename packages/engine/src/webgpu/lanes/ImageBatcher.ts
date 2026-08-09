@@ -131,6 +131,12 @@ export class ImageBatcher {
       this.nodeIndexEnds.push(indices.length)
     }
 
+    // Make every bind group this rebuild will need, here, where there is no pass open. Reaching
+    // for one during draw() would create a sampler and a bind group the first frame a given
+    // (texture, wrapping, filter) combination appears - work in the middle of encoding a pass,
+    // for something the lane already knows it is about to bind. After this, draw() is a lookup.
+    for (const range of this.ranges) range.texture.bindGroupFor(range.sampling)
+
     const vtx = new ArrayBuffer(vertexCount * IMAGE_VERTEX_STRIDE)
     const f32 = new Float32Array(vtx)
     const u32 = new Uint32Array(vtx)

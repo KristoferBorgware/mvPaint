@@ -165,7 +165,7 @@ export interface PolygonFontSource {
 }
 
 /**
- * The four styles as outlines - the vector counterpart of FontBook, and a FontProvider, so the
+ * The four styles as outlines - the vector counterpart of MSDFFontBook, and a FontProvider, so the
  * SAME shaper lays out both text kinds. It owns no GPU resources at all, which is why the two
  * paths can coexist: nothing here has to be created before a device exists or destroyed with
  * one.
@@ -196,7 +196,7 @@ export class PolygonFontBook implements VectorFonts {
 
   /**
    * Resolve a requested style to a loaded font, flagging whatever has to be synthesized - the
-   * same fallback ladder FontBook and the MSDF provider walk, so faux bold/italic behave
+   * same fallback ladder MSDFFontBook and the MSDF provider walk, so faux bold/italic behave
    * identically on every path.
    */
   resolve(style: FontStyle): ResolvedStyle {

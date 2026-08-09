@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 320" width="860" height="320" role="img" aria-label="Two callers ask for the same picture. The holder count rises to two, falls as each lets go, and the texture is freed only when it reaches zero.">
+  <rect x="0" y="0" width="860" height="320" rx="8" fill="#fbfcfe" stroke="#dde3ee"/>
+
+  <text x="28" y="38" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="12" letter-spacing="1.6" fill="#5b6478">ONE PICTURE, TWO HOLDERS</text>
+
+  <!-- lifelines -->
+  <text x="28" y="86" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">node A</text>
+  <text x="28" y="132" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">node B</text>
+
+  <line x1="150" y1="82" x2="470" y2="82" stroke="#2f9aa0" stroke-width="3"/>
+  <circle cx="150" cy="82" r="6" fill="#2f9aa0"/>
+  <circle cx="470" cy="82" r="6" fill="#fbfcfe" stroke="#2f9aa0" stroke-width="3"/>
+
+  <line x1="270" y1="128" x2="650" y2="128" stroke="#2f9aa0" stroke-width="3"/>
+  <circle cx="270" cy="128" r="6" fill="#2f9aa0"/>
+  <circle cx="650" cy="128" r="6" fill="#fbfcfe" stroke="#2f9aa0" stroke-width="3"/>
+
+  <text x="150" y="66" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#5b6478">images.load(url)</text>
+  <text x="470" y="66" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#5b6478">destroy()</text>
+  <text x="270" y="112" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#5b6478">images.load(url) — same URL, no work at all</text>
+  <text x="650" y="112" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#5b6478">destroy()</text>
+
+  <!-- guides down to the count -->
+  <g stroke="#c9d2e2" stroke-dasharray="3 4">
+    <line x1="150" y1="88" x2="150" y2="196"/>
+    <line x1="270" y1="134" x2="270" y2="196"/>
+    <line x1="470" y1="88" x2="470" y2="196"/>
+    <line x1="650" y1="134" x2="650" y2="196"/>
+  </g>
+
+  <!-- holder count, as a step -->
+  <text x="28" y="248" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">holders</text>
+
+  <polyline points="150,232 270,232 270,214 470,214 470,232 650,232 650,252 760,252"
+            fill="none" stroke="#1b1e26" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <text x="200" y="226" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">1</text>
+  <text x="370" y="208" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">2</text>
+  <text x="560" y="226" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#1b1e26">1</text>
+  <text x="700" y="246" text-anchor="middle" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#cc1f47">0</text>
+
+  <circle cx="650" cy="252" r="5" fill="#cc1f47"/>
+  <text x="668" y="278" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#cc1f47">freed here,</text>
+  <text x="668" y="293" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#cc1f47">and not before</text>
+
+  <text x="150" y="293" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="11.5" fill="#5b6478">one fetch, one decode, one upload — the second caller gets the same texture</text>
+</svg>

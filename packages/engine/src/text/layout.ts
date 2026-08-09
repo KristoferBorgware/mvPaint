@@ -14,7 +14,7 @@ import { parseColor, parseStops } from '../render/color'
 import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, RGBA} from '../render/meshFormat'
 import { NO_ROTATION, type TextQuad } from './textQuad'
 import { bendOntoPath, type TextPathOptions } from './textPath'
-// From the metrics module, not from webgpu/FontBook which re-exports it: the shaper is pure
+// From the metrics module, not from webgpu/MSDFFontBook which re-exports it: the shaper is pure
 // and must stay importable without dragging a render path in behind it.
 import type { FontStyle } from './msdfProvider'
 import { glyphFor, kerningFor, type FontMetrics, type Glyph } from './msdfMetrics'
@@ -132,7 +132,7 @@ export interface FontProvider {
   resolve(style: FontStyle): ResolvedStyle
 }
 
-/** The family name a text node gets when it asks for none. Not a fallback - see FontFamilies. */
+/** The family name a text node gets when it asks for none. Not a fallback - see MSDFFontFamilies. */
 export const DEFAULT_FONT_FAMILY = 'default'
 
 /**
@@ -141,7 +141,7 @@ export const DEFAULT_FONT_FAMILY = 'default'
  *
  * Device-free like FontProvider itself, and for the same reason: shaping reads metrics and an
  * atlas index, so text can be measured, wrapped, culled and hit-tested with no renderer at all.
- * The GPU-owning implementation (webgpu/FontLibrary.ts) adds the textures.
+ * The GPU-owning implementation (webgpu/MSDFFontLibrary.ts) adds the textures.
  *
  * A family is named rather than handed over as an object so that a text node stays plain data -
  * serializable, settable through setAttr, and constructible before any atlas has finished
@@ -153,7 +153,7 @@ export const DEFAULT_FONT_FAMILY = 'default'
  * Falling back would mean drawing in whatever the application happened to load first, under a
  * name that asked for something else.
  */
-export interface FontFamilies {
+export interface MSDFFontFamilies {
   /**
    * The provider for a family. An absent name is the default family - the one a node gets when
    * it does not choose - and an unregistered name is an empty provider.
@@ -178,7 +178,7 @@ export interface TextMaterial {
    * Which layer of the shared atlas array this run's glyphs sample - the resolved style, after
    * any fallback. A run has exactly one font, so this belongs to the material alongside the
    * distanceRange it is read from, and the whole lane draws in one call regardless of how many
-   * styles a paragraph mixes (see webgpu/FontBook.ts).
+   * styles a paragraph mixes (see webgpu/MSDFFontBook.ts).
    */
   atlasIndex: number
 }

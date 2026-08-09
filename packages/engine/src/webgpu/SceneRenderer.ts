@@ -70,7 +70,7 @@ import { createTextPipeline } from './pipelines/TextPipeline'
 import { createImagePipeline } from './pipelines/ImagePipeline'
 import { ImageBatcher } from './lanes/ImageBatcher'
 import { Image } from '../shapes/Image'
-import { FontLibrary } from './FontLibrary'
+import { MSDFFontLibrary } from './MSDFFontLibrary'
 
 /** MSAA 4x. Exported because the frame loop's targets must agree with the pipelines. */
 export const SAMPLE_COUNT = 4
@@ -100,7 +100,7 @@ export class SceneRenderer {
   private readonly textBatcher: TextBatcher
   private readonly imagePipeline: GPURenderPipeline
   private readonly imageBatcher: ImageBatcher
-  private readonly fonts: FontLibrary
+  private readonly fonts: MSDFFontLibrary
 
   private readonly shadowAtlas: ShadowAtlas
   private readonly shadowBatcher: ShadowBatcher
@@ -150,7 +150,7 @@ export class SceneRenderer {
     device: GPUDevice,
     format: GPUTextureFormat,
     canvas: HTMLCanvasElement,
-    fonts: FontLibrary,
+    fonts: MSDFFontLibrary,
     camera?: Camera2D | null,
   ) {
     this.canvas = canvas

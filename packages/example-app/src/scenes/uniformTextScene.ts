@@ -39,9 +39,9 @@ function heading(x: number, y: number, text: string): MSDFText {
 
 export function buildUniformTextScene(scene: Scene, resources: SceneResources): SceneContent {
   const root = scene.root
-  // What an MSDF node measures against - see SceneResources.fonts. Every node here is the
+  // What an MSDF node measures against - see SceneResources.msdfFonts. Every node here is the
   // default family, so one provider serves them all.
-  const provider: FontProvider = resources.fonts.resolveFamily(undefined)
+  const provider: FontProvider = resources.msdfFonts.resolveFamily(undefined)
 
   // --- one attribute per label ---------------------------------------------------------------
   root.addChild(heading(-560, -320, 'Every attribute on the node'))

@@ -7,7 +7,7 @@
 // THE ENGINE SHIPS NO FONT. Every function here works on whatever set it is handed and names
 // no typeface: an atlas is an application's asset, in the same way glyph outlines are (see
 // PolygonFont.ts). A renderer created without the `fonts` option has no atlases and draws no
-// text until setFonts() supplies some, so a consumer's bundle carries only the typeface that
+// text until setMSDFFonts() supplies some, so a consumer's bundle carries only the typeface that
 // consumer chose. This repository's Inter set lives with the example app, under
 // packages/example-app/public/fonts/, and reaches the engine through `fonts` like any other.
 
@@ -64,7 +64,7 @@ export function atlasLayerSize(styles: readonly StyleJson[]): AtlasLayerSize {
 }
 
 /**
- * The style-fallback ladder shared by FontBook.resolve and msdfFontProvider: try the exact
+ * The style-fallback ladder shared by MSDFFontBook.resolve and msdfFontProvider: try the exact
  * style, then the nearest one that keeps whichever of bold/italic was asked for, then plain
  * regular - flagging whatever had to be synthesized along the way. `have` looks up a style's
  * value by its STYLE_ORDER index (a loaded FontAtlas's metrics, or a bare FontMetrics), and is
@@ -111,8 +111,8 @@ export function resolveStyle<T>(
 
 /**
  * A FontProvider over MSDF metrics alone - no device, no fetch, no texture, just the same JSON
- * a FontBook would eventually feed into its atlases. For running the shaper (layoutText)
- * synchronously wherever a real FontBook isn't available yet - e.g. a scene measuring how tall
+ * an MSDFFontBook would eventually feed into its atlases. For running the shaper (layoutText)
+ * synchronously wherever a real MSDFFontBook isn't available yet - e.g. a scene measuring how tall
  * a paragraph of MSDFText will wrap, to place the next node below it, without waiting on WebGPU
  * initialization to do so.
  *

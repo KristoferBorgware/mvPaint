@@ -22,7 +22,7 @@ import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
 import { MSDFText } from '../shapes/MSDFText'
-import type { FontFamilies } from '../text/layout'
+import type { MSDFFontFamilies } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
@@ -76,7 +76,7 @@ export function textLocalBounds(shaped: { quads: readonly QuadBounds[] }): AABB 
 }
 
 /** True if the world point falls inside the text's shaped bounding box. */
-export function hitTestText(text: MSDFText, fonts: FontFamilies, worldX: number, worldY: number): boolean {
+export function hitTestText(text: MSDFText, fonts: MSDFFontFamilies, worldX: number, worldY: number): boolean {
   const bounds = textLocalBounds(text.shaped(fonts.resolveFamily(text.fontFamily)))
   if (!bounds.valid()) return false
   return bounds.contains(worldToLocal(text, worldX, worldY))
@@ -146,7 +146,7 @@ export function depthForRank(rank: number, count: number): number {
  * scene has no MSDFText nodes worth testing (e.g. before the atlases have loaded) - text
  * candidates are then skipped rather than matched.
  */
-export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: FontFamilies): PickableNode | null {
+export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: MSDFFontFamilies): PickableNode | null {
   const ordered = collectSortedShapes(scene, (shape) => shape.pickable)
   for (let i = ordered.length - 1; i >= 0; i--) {
     const node = ordered[i]
@@ -165,7 +165,7 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: F
  * this same function so text inside a group is bounded by its glyphs like text anywhere
  * else.
  */
-export function localBoundsOf(node: TransformableNode, fonts: FontFamilies): AABB {
+export function localBoundsOf(node: TransformableNode, fonts: MSDFFontFamilies): AABB {
   if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fonts))
   return node instanceof MSDFText ? textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily))) : shapeLocalBounds(node)
 }
@@ -173,7 +173,7 @@ export function localBoundsOf(node: TransformableNode, fonts: FontFamilies): AAB
 // The resolver a group measures its contents with. It never sees a nested Group - the
 // group walks into those itself, composing their matrices as it goes - so this only has to
 // answer for leaves, and return null for anything that is not one.
-function nodeLocalBounds(node: Node, fonts: FontFamilies): AABB | null {
+function nodeLocalBounds(node: Node, fonts: MSDFFontFamilies): AABB | null {
   if (node instanceof MSDFText) return textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily)))
   return node instanceof Shape ? shapeLocalBounds(node) : null
 }

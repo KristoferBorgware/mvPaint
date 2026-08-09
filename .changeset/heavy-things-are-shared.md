@@ -57,5 +57,5 @@ The scene builder is the holder, because an `Image` node is not — one texture 
 ### Breaking
 
 - `ImageTexture` carries a `lifetime`. A custom implementation of the interface has to supply one (`new SharedLifetime()`) and route `destroy()` through it: `if (!this.lifetime.release()) return`.
-- `SceneResources` carries `fonts: FontFamilies` — the provider an `MSDFText` is measured against, which scene-building code previously had no way to reach. Anything constructing a `SceneResources` by hand supplies it; `handle.fonts` is where it comes from.
+- `SceneResources` carries `fonts: MSDFFontFamilies` — the provider an `MSDFText` is measured against, which scene-building code previously had no way to reach. Anything constructing a `SceneResources` by hand supplies it; `handle.fonts` is where it comes from.
 - `Shape.strokeWidth` is an accessor rather than a plain field, so a subclass can hear the assignment. It stores and nothing more; changing it still needs `markGeometryDirty()`.

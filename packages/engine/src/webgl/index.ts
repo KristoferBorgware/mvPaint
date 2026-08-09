@@ -44,7 +44,7 @@ import type { Camera2D } from '../camera/Camera2D'
 import type { TransformableNode } from '../shapes/Group'
 import { createGl2Context } from './Gl2Context'
 import { describeAdapter } from '../systems/adapter'
-import { GlFontLibrary } from './GlFontLibrary'
+import { GlMSDFFontLibrary } from './GlMSDFFontLibrary'
 import { glImageFactory } from './GlImageTexture'
 import { cachingImageFactory } from '../resources/cachingImageFactory'
 import { ResourceCache } from '../resources/ResourceCache'
@@ -95,7 +95,7 @@ export async function createWebGl2SceneRenderer(
   // Load the MSDF atlases before building the renderer, so the text lane has its texture ready
   // for the first frame rather than showing a page of nothing on the way to showing text.
   // Same `fonts` option the WebGPU path takes, so a scene draws with the same faces either way.
-  const fonts = await GlFontLibrary.load(gl, options.fonts)
+  const fonts = await GlMSDFFontLibrary.load(gl, options.fonts)
 
   let scene: GlSceneRenderer
   try {
@@ -217,13 +217,13 @@ export async function createWebGl2SceneRenderer(
     },
     images,
     scene: scene.scene,
-    async setFonts(sources, family) {
-      await fonts.setFonts(sources, family)
+    async setMSDFFonts(sources, family) {
+      await fonts.setMSDFFonts(sources, family)
     },
-    getFonts(family) {
+    getMSDFFonts(family) {
       return fonts.sourcesOf(family)
     },
-    fonts,
+    msdfFonts: fonts,
     // A getter, not a captured reference: setCamera can replace it, and a handle holding the
     // camera from construction would keep handing back the old one.
     get camera() {

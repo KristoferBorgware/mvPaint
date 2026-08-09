@@ -10,7 +10,7 @@ import { Vector3 } from '../math/Vector3'
 import type { Scene } from './Scene'
 import { Shape } from '../shapes/Shape'
 import { MSDFText } from '../shapes/MSDFText'
-import type { FontFamilies } from '../text/layout'
+import type { MSDFFontFamilies } from '../text/layout'
 import { collectZOrder, textLocalBounds } from './picking'
 
 export interface MarqueeOptions {
@@ -21,11 +21,11 @@ export interface MarqueeOptions {
    */
   mode?: 'intersect' | 'contain'
   /** Needed to measure MSDFText nodes; without it they are skipped rather than mis-measured. */
-  fonts?: FontFamilies
+  fonts?: MSDFFontFamilies
 }
 
 /** A shape's bounds in world space, or null when it has nothing to measure. */
-export function worldBounds(shape: Shape, fonts?: FontFamilies): AABB | null {
+export function worldBounds(shape: Shape, fonts?: MSDFFontFamilies): AABB | null {
   const local =
     shape instanceof MSDFText
       ? fonts

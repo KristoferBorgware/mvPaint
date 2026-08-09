@@ -49,7 +49,7 @@ export function textShapingEpoch(): number {
 //
 // The third question, and the one the two counters above cannot answer. They say a node's own
 // content changed. This says the FONTS changed underneath every node at once - which happens
-// when an application loads an atlas at runtime (handle.setFonts) rather than handing one to
+// when an application loads an atlas at runtime (handle.setMSDFFonts) rather than handing one to
 // createSceneRenderer.
 //
 // A separate counter is needed because MSDFText.shaped() memoizes, and its cache is keyed on
@@ -65,7 +65,7 @@ export function textShapingEpoch(): number {
 
 let fontEpochCounter = 0
 
-/** Called when a FontBook's atlases are replaced: every cached layout was measured wrong. */
+/** Called when an MSDFFontBook's atlases are replaced: every cached layout was measured wrong. */
 export function bumpFontEpoch(): void {
   fontEpochCounter++
 }

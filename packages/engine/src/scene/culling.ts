@@ -11,7 +11,7 @@
 import type { AABB } from '../math/AABB'
 import type { Shape } from '../shapes/Shape'
 import type { MSDFText } from '../shapes/MSDFText'
-import type { FontFamilies } from '../text/layout'
+import type { MSDFFontFamilies } from '../text/layout'
 import { textLocalBounds } from './picking'
 
 /** True if `shape`'s world-space bounds overlap `viewBounds` (shapes with no geometry at all are never culled). */
@@ -21,7 +21,7 @@ export function isShapeOnScreen(shape: Shape, viewBounds: AABB): boolean {
 }
 
 /** True if `text`'s shaped bounds overlap `viewBounds` (text with no shaped content at all is never culled). */
-export function isTextOnScreen(text: MSDFText, fonts: FontFamilies, viewBounds: AABB): boolean {
+export function isTextOnScreen(text: MSDFText, fonts: MSDFFontFamilies, viewBounds: AABB): boolean {
   const worldBounds = textLocalBounds(text.shaped(fonts.resolveFamily(text.fontFamily))).transformed(text.worldMatrix())
   return !worldBounds.valid() || worldBounds.intersects(viewBounds)
 }
