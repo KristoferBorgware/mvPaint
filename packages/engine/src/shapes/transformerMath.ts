@@ -62,6 +62,9 @@ export const ANCHOR_DIRECTION: Record<ResizeAnchor, Vector2Like> = {
  * its own axes. A single node adopts that node's world rotation, so the box hugs
  * a rotated shape; a multi-node box is axis-aligned (rotation 0), since there is no
  * one orientation that fits several differently-rotated nodes.
+ *
+ * Half-extents are SIGNED. A resize dragged past its fixed point yields a negative one,
+ * which is what mirrors the box rather than collapsing it - see resizedBox.
  */
 export interface OrientedBox {
   cx: number
@@ -70,6 +73,38 @@ export interface OrientedBox {
   halfH: number
   rotation: number
 }
+
+/**
+ * The same rectangle as a corner and a size - the form a boundBoxFunc reads and returns.
+ *
+ * `x`/`y` are the box's top-left corner in world space, turned with the rest of it, and
+ * `rotation` is in RADIANS (the unit every angle inside this module carries). `width` and
+ * `height` are signed, so a flipped box reports a negative one; a constraint that means to
+ * catch a box that has become too small tests `Math.abs(box.width)` rather than `box.width`.
+ */
+export interface BoundBox {
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+}
+
+/** A chance to constrain a resize or rotation: return `newBox`, or something else to use instead. */
+export type BoundBoxFunc = (oldBox: BoundBox, newBox: BoundBox) => BoundBox
+
+/**
+ * A chance to constrain where a handle drag is READ from, in world space - which is where
+ * snapping to a grid or to other shapes belongs.
+ *
+ * `oldPos` is where the drag began rather than where it was on the previous move, because
+ * every gesture here resolves against its own start and never accumulates.
+ */
+export type AnchorDragBoundFunc = (
+  oldPos: Vector2Like,
+  newPos: Vector2Like,
+  event?: unknown,
+) => Vector2Like
 
 /** Scale factors below this collapse the matrix, so a resize is clamped to it. */
 const MIN_SCALE = 1e-4
@@ -153,29 +188,27 @@ export function worldCorners(node: Node, bounds: AABB): Vector2Like[] {
 }
 
 /**
- * The box around one or more nodes, oriented to the FIRST node's world
- * rotation - so a lone node gets a box that hugs it exactly, and a multi-node
- * group rotates and resizes rigidly around whichever member came
- * first, rather than snapping back to axis-aligned.
+ * The box around one or more nodes, measured along axes turned by `rotation`.
  *
- * That "snapping back" is not just a cosmetic difference: `update()` (see Transformer) is
- * called every frame with a box freshly rebuilt here, including mid-gesture. An
- * axis-aligned multi-node box would recompute as axis-aligned on every frame of a ROTATE
- * drag too, so however much the nodes actually turned, the box shown on screen
- * would appear frozen - it never looked like it was rotating with them at all,
- * even though the nodes underneath genuinely were.
+ * `rotation` is the frame the box is fitted in, and the caller owns it: a Transformer passes
+ * Transformer.fitRotation(), which hugs a lone node's own angle and, for a set, either borrows
+ * the first member's or holds one of its own (see useFirstNodeRotation). Left out, it defaults
+ * to the first node's world rotation, which is what a caller fitting a box around one node wants.
+ *
+ * The frame has to be the CALLER's because this runs every frame, mid-gesture included. A box
+ * that recomputed its own orientation from the nodes each time would recompute a multi-node
+ * set as axis-aligned on every frame of a rotate drag, so however far the nodes turned, the
+ * frame on screen would sit still.
  *
  * `boundsOf` supplies each node's LOCAL bounds (Shape.localBounds() for a mesh shape, the
- * shaped text bounds for an MSDFText), returning null for anything with nothing to measure -
- * `nodes[0]` still orients the box even if it happens to be one of those, since
- * orientation only needs its rotation, not its bounds.
+ * shaped text bounds for an MSDFText), returning null for anything with nothing to measure.
  */
 export function boxForNodes(
   nodes: readonly TransformableNode[],
   boundsOf: (node: TransformableNode) => AABB | null,
+  rotation: number = nodes.length > 0 ? worldRotationOf(nodes[0]) : 0,
 ): OrientedBox | null {
   if (nodes.length === 0) return null
-  const rotation = worldRotationOf(nodes[0])
 
   const measurable = nodes.filter((node) => {
     const b = boundsOf(node)
@@ -195,6 +228,11 @@ export interface ResizeOptions {
   keepRatio?: boolean
   /** Scale about the box center instead of the opposite anchor - what alt does. */
   centered?: boolean
+  /**
+   * Let a drag past the fixed point mirror the box. Default true. Set false and the factors
+   * are held just above zero there instead, so the box shrinks to nothing and stops.
+   */
+  flipEnabled?: boolean
 }
 
 export interface ResizeDelta {
@@ -227,6 +265,7 @@ export function resizeFactors(
   const isCorner = dir.x !== 0 && dir.y !== 0
   const keepRatio = (options.keepRatio ?? false) && isCorner
   const centered = options.centered ?? false
+  const flipEnabled = options.flipEnabled ?? true
 
   // Half the box when scaling about the center, the whole box when scaling about the
   // opposite anchor - the span the pointer's distance is measured against either way.
@@ -258,17 +297,113 @@ export function resizeFactors(
   }
 
   return {
-    scaleX: clampAwayFromZero(scaleX),
-    scaleY: clampAwayFromZero(scaleY),
+    scaleX: clampAwayFromZero(scaleX, flipEnabled),
+    scaleY: clampAwayFromZero(scaleY, flipEnabled),
     fixed,
     rotation: box.rotation,
   }
 }
 
-function clampAwayFromZero(value: number): number {
+/**
+ * Holds a factor clear of zero, where the matrix collapses and stops being invertible.
+ *
+ * With flipping off the floor is positive, so a drag that crosses the fixed point stalls at a
+ * hairline instead of mirroring. With it on the sign is kept and only the magnitude is floored.
+ */
+function clampAwayFromZero(value: number, flipEnabled: boolean): number {
   if (!Number.isFinite(value)) return 1
+  if (!flipEnabled) return Math.max(value, MIN_SCALE)
   if (Math.abs(value) < MIN_SCALE) return value < 0 ? -MIN_SCALE : MIN_SCALE
   return value
+}
+
+/**
+ * The box a resize lands on: the starting box scaled about the delta's fixed point, in the
+ * box's own frame. Half-extents keep the factors' signs, so a mirrored box reports negative
+ * ones and a boundBoxFunc can see the flip.
+ */
+export function resizedBox(box: OrientedBox, delta: ResizeDelta): OrientedBox {
+  const local = rotate2({ x: box.cx - delta.fixed.x, y: box.cy - delta.fixed.y }, -delta.rotation)
+  const scaled = rotate2({ x: local.x * delta.scaleX, y: local.y * delta.scaleY }, delta.rotation)
+  return {
+    cx: delta.fixed.x + scaled.x,
+    cy: delta.fixed.y + scaled.y,
+    halfW: box.halfW * delta.scaleX,
+    halfH: box.halfH * delta.scaleY,
+    rotation: box.rotation,
+  }
+}
+
+/** The box as a corner and a signed size, which is the shape a boundBoxFunc reads. */
+export function boxToBoundBox(box: OrientedBox): BoundBox {
+  const corner = rotate2({ x: -box.halfW, y: -box.halfH }, box.rotation)
+  return {
+    x: box.cx + corner.x,
+    y: box.cy + corner.y,
+    width: box.halfW * 2,
+    height: box.halfH * 2,
+    rotation: box.rotation,
+  }
+}
+
+/** The inverse of boxToBoundBox - what a boundBoxFunc's answer means as a box. */
+export function boundBoxToBox(bound: BoundBox): OrientedBox {
+  const center = rotate2({ x: bound.width / 2, y: bound.height / 2 }, bound.rotation)
+  return {
+    cx: bound.x + center.x,
+    cy: bound.y + center.y,
+    halfW: bound.width / 2,
+    halfH: bound.height / 2,
+    rotation: bound.rotation,
+  }
+}
+
+/**
+ * The world-space delta that carries `from` onto `to` - the one matrix every handle gesture
+ * reduces to, whether it resized, rotated, mirrored or all three.
+ *
+ * Working from the two BOXES rather than from a gesture's own factors is what lets a
+ * boundBoxFunc sit between them: whatever box it hands back, however little that resembles
+ * what the pointer asked for, is expressible here. Degenerate source extents scale by 1
+ * rather than by infinity, so a box with no width in some axis translates and turns instead
+ * of exploding.
+ */
+export function deltaBetweenBoxes(from: OrientedBox, to: OrientedBox): Matrix4x4 {
+  const scaleX = Math.abs(from.halfW) > MIN_SCALE ? to.halfW / from.halfW : 1
+  const scaleY = Math.abs(from.halfH) > MIN_SCALE ? to.halfH / from.halfH : 1
+  return Matrix4x4.translation(new Vector3(to.cx, to.cy, 0))
+    .mul(Matrix4x4.rotationZ(to.rotation))
+    .mul(Matrix4x4.scaling(new Vector3(scaleX, scaleY, 1)))
+    .mul(Matrix4x4.rotationZ(-from.rotation))
+    .mul(Matrix4x4.translation(new Vector3(-from.cx, -from.cy, 0)))
+}
+
+/**
+ * The eight resize cursors, indexed by which way the handle faces in eighths of a turn from
+ * +x. A turned box turns its cursors with it, so the arrows keep pointing along the edge the
+ * handle actually moves.
+ */
+const RESIZE_CURSORS: readonly string[] = [
+  'ew-resize',
+  'nwse-resize',
+  'ns-resize',
+  'nesw-resize',
+  'ew-resize',
+  'nwse-resize',
+  'ns-resize',
+  'nesw-resize',
+]
+
+/**
+ * The cursor for a handle on a box turned by `rotation` radians. `held` picks between the open
+ * and closed hand the rotate handle shows before and during its drag.
+ */
+export function anchorCursor(anchor: TransformerAnchor, rotation: number, held = false): string {
+  if (anchor === 'rotate') return held ? 'grabbing' : 'grab'
+  const dir = ANCHOR_DIRECTION[anchor]
+  const facing = Math.atan2(dir.y, dir.x) + rotation
+  const eighth = Math.round(facing / (Math.PI / 4))
+  return RESIZE_CURSORS[((eighth % 8) + 8) % 8]
 }
 
 /** The anchor diagonally/directly across the box, which a resize holds still. */
