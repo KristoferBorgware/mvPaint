@@ -12,9 +12,11 @@ It was an XOR, so on a default-configured frame the one gesture every user knows
 
 ### A frame around several nodes is upright, and carries its own angle
 
-`useSingleNodeRotation` (default `true`) frames a lone node at that node's angle and a set of them upright. The frame's angle is its own from then on: a rotate drag turns it and it stays turned.
+`useSingleNodeRotation` (default `true`) frames a lone node at that node's angle; `useFirstNodeRotation` (default `false`) decides what a frame around SEVERAL does. Left off, the frame holds an upright angle of its own — Konva's behaviour — and a rotate drag turns it and it stays turned. Set it and the frame takes the first member's angle, hugging a set that shares one at the price of changing shape when the set is reordered.
 
-A multi-node box took the FIRST member's world rotation, so a tilted first member tilted the whole frame and reordering the set changed the box.
+A multi-node box took the FIRST member's world rotation unconditionally. `useFirstNodeRotation: true` is that behaviour.
+
+The two flags are separate because Konva's covers only the one-node case: `useSingleNodeRotation: false` means a lone node is framed upright too, not that a set is framed along its first member.
 
 `Transformer.rotation` is that angle, in degrees, and `Transformer.fitRotation()` is it in radians — the frame the per-frame refit measures along, and `boxForNodes`' new third argument. `boxForNodes(nodes, boundsOf)` without it still measures along the first node's rotation.
 
@@ -39,11 +41,14 @@ A drag reaches the frame when what is being dragged is what the frame wraps.
 | `flipEnabled` (default `true`) | `false` holds a resize just clear of zero instead of letting a drag past the fixed point mirror the nodes. |
 | `centeredScaling` (default `false`) | Scales about the box centre, which alt asks for on its own for one gesture. |
 | `resizeEnabled` (default `true`) | `false` leaves the border and the rotate handle. |
+| `useFirstNodeRotation` (default `false`) | Frames a set of nodes along the first member's angle rather than upright. |
 | `getActiveAnchor()`, `isTransforming()`, `stopTransform()` | Which handle a gesture holds, whether one is running, and ending it where it stands. |
 | `nodes` as a setter | `transformer.nodes = [a, b]` replaces the set, the same as `attach()`. |
 | `detach()` with no argument | Empties the set. `detach(node)` still drops one. |
 
 `anchorSize`, `rotateAnchorOffset`, `padding`, `borderWidth`, `anchorBorderWidth`, `enabledAnchors`, `rotateEnabled` and `keepRatio` are writable, and `enabledAnchors` is live: what is drawn and what can be grabbed change together.
+
+Handles show their cursor on **hover**, not only once pressed, and it turns with the box — a corner of a box at 90° offers `nesw-resize`. The rotate handle offers an open hand before the drag and a closed one during it.
 
 ### Kept different from Konva on purpose
 

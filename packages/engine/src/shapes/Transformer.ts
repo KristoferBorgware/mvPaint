@@ -109,10 +109,24 @@ export interface TransformerOptions {
   centeredScaling?: boolean
   /**
    * Orient the frame to the attached node's own angle when exactly ONE is attached. Default
-   * true. With several attached, or with this off, the frame carries its own angle instead -
-   * upright to begin with, and turned by whatever rotate drags it receives. See `rotation`.
+   * true. Off, the frame carries its own angle even then - upright to begin with, and turned
+   * by whatever rotate drags it receives. See `rotation`.
+   *
+   * This governs the one-node case only. What a frame around SEVERAL does is
+   * `useFirstNodeRotation`.
    */
   useSingleNodeRotation?: boolean
+  /**
+   * Orient a frame around SEVERAL nodes to the FIRST one's angle, so the set resizes and turns
+   * rigidly about whichever member came first. Default false: the frame holds an upright angle
+   * of its own instead, which is what a Konva transformer does with several nodes attached.
+   *
+   * The two differ in what a tilted member does to the frame. Upright, a set is framed along
+   * the world axes however its members are turned, and reordering it changes nothing. Taking
+   * the first node's angle hugs a set that shares one, at the price of the frame changing shape
+   * when the set is reordered.
+   */
+  useFirstNodeRotation?: boolean
   /** Angles (DEGREES) a rotate drag settles onto when within `rotationSnapTolerance`. */
   rotationSnaps?: readonly number[]
   /** How close (DEGREES) a rotation must come to a snap to take it. Default 7. */
@@ -169,6 +183,7 @@ export class Transformer extends Container {
   flipEnabled: boolean
   centeredScaling: boolean
   useSingleNodeRotation: boolean
+  useFirstNodeRotation: boolean
   /** Degrees - converted where the rotate gesture reads them. See math/angle.ts. */
   rotationSnaps?: readonly number[]
   /** Degrees. */
@@ -213,6 +228,7 @@ export class Transformer extends Container {
     this.flipEnabled = options.flipEnabled ?? true
     this.centeredScaling = options.centeredScaling ?? false
     this.useSingleNodeRotation = options.useSingleNodeRotation ?? true
+    this.useFirstNodeRotation = options.useFirstNodeRotation ?? false
     this.rotationSnaps = options.rotationSnaps
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 7
     this.boundBoxFunc = options.boundBoxFunc
@@ -264,9 +280,9 @@ export class Transformer extends Container {
   /**
    * The frame's angle in DEGREES, the same unit every other node's rotation carries.
    *
-   * With one node attached and useSingleNodeRotation on, this reports that node's world angle,
-   * since the frame is hugging it. Otherwise it is the frame's own, which a rotate drag
-   * carries forward and a change of attached set puts back upright.
+   * Where a frame is hugging a node's angle - one node with useSingleNodeRotation, several with
+   * useFirstNodeRotation - this reports that node's world angle. Otherwise it is the frame's
+   * own, which a rotate drag carries forward and a change of attached set puts back upright.
    *
    * Writing it turns the frame without touching what it wraps, so the two disagree until the
    * next rotate drag re-fits them - the same as Konva, where the transformer's rotation is its
@@ -284,8 +300,10 @@ export class Transformer extends Container {
    * nodes along. See boxForNodes, which takes it as its third argument.
    */
   fitRotation(): number {
-    if (this.useSingleNodeRotation && this.attached.length === 1) return worldRotationOf(this.attached[0])
-    return this.frameRotation
+    if (this.attached.length === 0) return this.frameRotation
+    const fromFirstNode =
+      this.attached.length === 1 ? this.useSingleNodeRotation : this.useFirstNodeRotation
+    return fromFirstNode ? worldRotationOf(this.attached[0]) : this.frameRotation
   }
 
   /**
@@ -316,6 +334,7 @@ export class Transformer extends Container {
       'flipEnabled',
       'centeredScaling',
       'useSingleNodeRotation',
+      'useFirstNodeRotation',
       'rotationSnaps',
       'rotationSnapTolerance',
     ]

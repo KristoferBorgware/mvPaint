@@ -223,6 +223,19 @@ it('useSingleNodeRotation: one node is hugged, several are framed upright', () =
   assert(near(off.transformer.fitRotation(), 0), 'switched off, even a lone node is framed upright')
 })
 
+// The one-node flag is Konva's and covers only the one-node case; a set of them is upright
+// there, always. This is the separate switch for a frame that hugs the first member instead.
+it('useFirstNodeRotation: a set can be framed along its first member instead', () => {
+  const h = harness({ useFirstNodeRotation: true }, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
+  assert(near(h.transformer.fitRotation(), degToRad(30)), 'the frame takes the first member\'s angle')
+
+  h.transformer.attach([h.rects[1], h.rects[0]])
+  assert(near(h.transformer.fitRotation(), 0), 'so reordering the set changes the frame - the price of hugging it')
+
+  const upright = harness({}, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
+  assert(near(upright.transformer.fitRotation(), 0), 'left off, a set is framed along the world axes')
+})
+
 it('useSingleNodeRotation: a frame around several nodes turns with them and stays turned', () => {
   const h = harness({}, [{ x: -100, y: 0 }, { x: 100, y: 0 }])
   // The rotate handle sits above the top edge of a box spanning both rects.
@@ -422,6 +435,24 @@ it('drag events reach the frame when what is dragged is what it frames', () => {
 })
 
 // --- cursors ---
+
+it('a handle says what it will do on hover, before anything is pressed', () => {
+  const h = harness()
+  h.send('pointermove', 50, 50)
+  assert(h.canvas.style.cursor === 'nwse-resize', 'hovering a corner shows that corner\'s cursor')
+
+  h.send('pointermove', 50, 0)
+  assert(h.canvas.style.cursor === 'ew-resize', 'and moving to an edge handle shows that one')
+
+  h.send('pointermove', 0, -74)
+  assert(h.canvas.style.cursor === 'grab', 'the rotate handle offers an open hand')
+  h.send('pointerdown', 0, -74)
+  assert(h.canvas.style.cursor === 'grabbing', 'which closes while it is turning')
+  h.send('pointerup', 0, -74)
+
+  h.send('pointermove', 0, 0)
+  assert(h.canvas.style.cursor === '', 'and away from every handle the pointer gets its own cursor back')
+})
 
 it('the resize cursor turns with the box', () => {
   const upright = harness()

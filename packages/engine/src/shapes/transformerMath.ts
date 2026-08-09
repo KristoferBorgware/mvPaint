@@ -394,9 +394,12 @@ const RESIZE_CURSORS: readonly string[] = [
   'nesw-resize',
 ]
 
-/** The cursor for a handle on a box turned by `rotation` radians. */
-export function anchorCursor(anchor: TransformerAnchor, rotation: number): string {
-  if (anchor === 'rotate') return 'grabbing'
+/**
+ * The cursor for a handle on a box turned by `rotation` radians. `held` picks between the open
+ * and closed hand the rotate handle shows before and during its drag.
+ */
+export function anchorCursor(anchor: TransformerAnchor, rotation: number, held = false): string {
+  if (anchor === 'rotate') return held ? 'grabbing' : 'grab'
   const dir = ANCHOR_DIRECTION[anchor]
   const facing = Math.atan2(dir.y, dir.x) + rotation
   const eighth = Math.round(facing / (Math.PI / 4))

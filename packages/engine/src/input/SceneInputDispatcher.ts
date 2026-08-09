@@ -210,6 +210,8 @@ export class SceneInputDispatcher {
 
   private drag: NodeDragSession | null = null
   private transform: TransformSession | null = null
+  /** The cursor a hovered handle last put on the canvas, so it can be taken off again. */
+  private handleCursor: string | null = null
 
   /** The rubber-band rectangle. Started by the application, fed from here - see beginMarquee. */
   readonly marquee: MarqueeTool
@@ -287,6 +289,39 @@ export class SceneInputDispatcher {
 
   private setCursor(cursor: string): void {
     if (this.canvas) this.canvas.style.cursor = cursor
+  }
+
+  /**
+   * The cursor a handle under the pointer asks for, before anything is pressed - so a frame
+   * says what each of its handles will do rather than only what one is doing.
+   *
+   * Unlike the hover TARGET, this is cheap enough to answer on every move: anchorAt() measures
+   * against at most nine handle positions and never touches the scene, where naming the node
+   * under the pointer means walking every shape front to back (see hoverIsIdle). So it runs
+   * whether or not anything is listening for hover events, and with an empty frame it returns
+   * on the first line.
+   *
+   * Skipped while a gesture owns the pointer, which sets its own cursor and keeps it for the
+   * duration.
+   */
+  private updateHandleCursor(screen: ScreenPoint): void {
+    const transformer = this.transformer
+    if (!transformer || !this.grabContent) return
+    if (this.transform || this.drag || this.marquee.active || this.gestureKind !== 'none') return
+
+    const world = this.worldAt(screen.x, screen.y)
+    const found = world ? transformer.anchorAt(world.x, world.y) : null
+    const next = found ? anchorCursor(found, transformer.currentBox?.rotation ?? 0) : null
+    if (next === this.handleCursor) return
+    this.handleCursor = next
+    this.setCursor(next ?? this.previousCursor)
+  }
+
+  /** Puts the pointer's own cursor back, for when a gesture or a departure takes over. */
+  private clearHandleCursor(): void {
+    if (this.handleCursor === null) return
+    this.handleCursor = null
+    this.setCursor(this.previousCursor)
   }
 
   // --- scene events ---
@@ -452,7 +487,8 @@ export class SceneInputDispatcher {
     }
     transformer.setActiveAnchor(anchor)
     // Turned with the box, so the arrows point along the edge the handle actually moves.
-    this.setCursor(anchorCursor(anchor, box.rotation))
+    this.setCursor(anchorCursor(anchor, box.rotation, true))
+    this.handleCursor = null
     this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node), evt)
   }
 
@@ -586,6 +622,7 @@ export class SceneInputDispatcher {
       // for everything that does not. See Node.dragDistance.
       if (moved <= (drag.grabbed.dragDistance ?? this.tapThreshold)) return
       drag.active = true
+      this.handleCursor = null
       this.setCursor('grabbing')
       this.fireOnNodes('dragstart', drag.nodes, evt)
     }
@@ -737,6 +774,9 @@ export class SceneInputDispatcher {
     // button held and so has no tracked pointer at all. Costs nothing when nothing is
     // listening for a hover event - the dispatcher never hit-tests in that case.
     this.move(e, p)
+
+    // Before the tracked-pointer check: a hover has no button held and so no tracked pointer.
+    this.updateHandleCursor(p)
 
     const pointer = this.pointers.get(e.pointerId)
     if (!pointer) return
@@ -898,6 +938,7 @@ export class SceneInputDispatcher {
 
   /** The pointer left the canvas, so whatever it was over, it no longer is. */
   leave(input: PointerInput, screen: ScreenPoint): void {
+    this.clearHandleCursor()
     const device = deviceFor(input.pointerType)
     this.updateHover(input.pointerId, device, this.root, this.initFor(input, screen))
   }

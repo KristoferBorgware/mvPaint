@@ -1280,11 +1280,16 @@ The parts are placed in **world** coordinates, so the frame's own `localMatrix()
 anything it contributed would be applied to them a second time. That leaves `rotation` free to
 mean the angle of the frame itself, which is what it means on a Konva transformer: with one node
 attached it reports that node's angle, and with several it holds an angle of its own, upright to
-begin with and carried forward by rotate drags. `fitRotation()` is the frame the per-frame refit
-measures the nodes along, and it is `boxForNodes`' third argument.
+begin with and carried forward by rotate drags. `useSingleNodeRotation` governs the one-node
+case and `useFirstNodeRotation` the several-node one, where setting it frames the set along its
+first member instead. `fitRotation()` is the frame the per-frame refit measures the nodes along,
+and it is `boxForNodes`' third argument.
 
 `enabledAnchors`, `resizeEnabled` and `rotateEnabled` are read at the moment each is needed, so
-what is drawn and what `anchorAt()` will grab always come from the same list. Every handle the
+what is drawn and what `anchorAt()` will grab always come from the same list. That same list is
+what a pointer move consults for the hover cursor: `anchorAt()` measures against at most nine
+handle positions and never walks the scene, so unlike naming the node under the pointer it is
+cheap enough to answer on every move. Every handle the
 frame can ever show is built once in the constructor and switched on by being given a size back,
 because adding a shape later would change the mesh batcher's set and re-tessellate the batch.
 
