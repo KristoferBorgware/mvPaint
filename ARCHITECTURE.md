@@ -1278,12 +1278,11 @@ held at a constant screen size by dividing their world size by the camera zoom.
 
 The parts are placed in **world** coordinates, so the frame's own `localMatrix()` is identity —
 anything it contributed would be applied to them a second time. That leaves `rotation` free to
-mean the angle of the frame itself, which is what it means on a Konva transformer: with one node
-attached it reports that node's angle, and with several it holds an angle of its own, upright to
-begin with and carried forward by rotate drags. `useSingleNodeRotation` governs the one-node
-case and `useFirstNodeRotation` the several-node one, where setting it frames the set along its
-first member instead. `fitRotation()` is the frame the per-frame refit measures the nodes along,
-and it is `boxForNodes`' third argument.
+mean the angle of the frame itself. A frame around one node always reports that node's angle;
+around several, `useFirstNodeRotation` (default true) decides between borrowing the first
+member's and holding an upright angle of its own, carried forward by rotate drags — the second
+being what a Konva transformer does. `fitRotation()` is the frame the per-frame refit measures
+the nodes along, and it is `boxForNodes`' third argument.
 
 `enabledAnchors`, `resizeEnabled` and `rotateEnabled` are read at the moment each is needed, so
 what is drawn and what `anchorAt()` will grab always come from the same list. That same list is

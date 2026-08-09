@@ -202,45 +202,49 @@ it('rotation: the frame carries its own angle and never applies it twice', () =>
   assert(near(partNamed(h.transformer, '__transformer-top').y, -50), 'rather than swinging about the scene origin')
 })
 
-it('rotation: with several nodes framed, the angle written is the angle fitted', () => {
-  const h = harness({}, [{ x: -100, y: 0 }, { x: 100, y: 0 }])
+// Only where the frame holds an angle of its own - a set borrowing its first member's takes
+// that node's, and what is written to the frame is not consulted.
+it('rotation: where the frame holds its own angle, the angle written is the angle fitted', () => {
+  const h = harness({ useFirstNodeRotation: false }, [{ x: -100, y: 0 }, { x: 100, y: 0 }])
   h.transformer.rotation = 45
   const box = h.fit()
   assert(near(box!.rotation, degToRad(45)), 'the box is measured along the frame\'s own axes')
   assert(near(h.transformer.rotation, 45), 'and reads back in degrees, like every other angle')
 })
 
-// --- useSingleNodeRotation ---
+// --- where the frame's axes come from ---
+//
+// One node is hugged unconditionally, which is the whole point of a frame around a single
+// shape. A SET has no one angle of its own, so useFirstNodeRotation decides between borrowing
+// the first member's and holding an upright angle the frame carries itself. This is a
+// deliberate divergence: Konva frames a set upright always, and has no equivalent of the
+// default here.
 
-it('useSingleNodeRotation: one node is hugged, several are framed upright', () => {
-  const single = harness({}, [{ x: 0, y: 0, rotation: 30 }])
-  assert(near(single.transformer.fitRotation(), degToRad(30)), 'a lone node lends the frame its angle')
+it('a lone node is always hugged, whatever the flag says', () => {
+  const on = harness({ useFirstNodeRotation: true }, [{ x: 0, y: 0, rotation: 30 }])
+  assert(near(on.transformer.fitRotation(), degToRad(30)), 'a lone node lends the frame its angle')
 
-  const multi = harness({}, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
-  assert(near(multi.transformer.fitRotation(), 0), 'a set is framed upright, however the first member is turned')
-
-  const off = harness({ useSingleNodeRotation: false }, [{ x: 0, y: 0, rotation: 30 }])
-  assert(near(off.transformer.fitRotation(), 0), 'switched off, even a lone node is framed upright')
+  const off = harness({ useFirstNodeRotation: false }, [{ x: 0, y: 0, rotation: 30 }])
+  assert(near(off.transformer.fitRotation(), degToRad(30)), 'and still does with the flag off - it speaks only for a set')
 })
 
-// The one-node flag is Konva's and covers only the one-node case; a set of them is upright
-// there, always. This is the separate switch for a frame that hugs the first member instead.
-it('useFirstNodeRotation: a set can be framed along its first member instead', () => {
-  const h = harness({ useFirstNodeRotation: true }, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
+it('useFirstNodeRotation: a set borrows its first member\'s angle by default', () => {
+  const h = harness({}, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
   assert(near(h.transformer.fitRotation(), degToRad(30)), 'the frame takes the first member\'s angle')
 
   h.transformer.attach([h.rects[1], h.rects[0]])
   assert(near(h.transformer.fitRotation(), 0), 'so reordering the set changes the frame - the price of hugging it')
 
-  const upright = harness({}, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
-  assert(near(upright.transformer.fitRotation(), 0), 'left off, a set is framed along the world axes')
+  const upright = harness({ useFirstNodeRotation: false }, [{ x: -100, y: 0, rotation: 30 }, { x: 100, y: 0 }])
+  assert(near(upright.transformer.fitRotation(), 0), 'switched off, a set is framed along the world axes')
+  upright.transformer.attach([upright.rects[1], upright.rects[0]])
+  assert(near(upright.transformer.fitRotation(), 0), 'and reordering it changes nothing')
 })
 
-it('useSingleNodeRotation: a frame around several nodes turns with them and stays turned', () => {
-  const h = harness({}, [{ x: -100, y: 0 }, { x: 100, y: 0 }])
+it('a set framed upright still turns with a rotate drag, and stays turned', () => {
+  const h = harness({ useFirstNodeRotation: false }, [{ x: -100, y: 0 }, { x: 100, y: 0 }])
   // The rotate handle sits above the top edge of a box spanning both rects.
-  const start = { x: 0, y: -50 - 24 }
-  h.send('pointerdown', start.x, start.y)
+  h.send('pointerdown', 0, -50 - 24)
   h.send('pointermove', 74, 0) // a quarter turn about the box centre
   h.send('pointerup', 74, 0)
   assert(near(h.transformer.rotation, 90, 0.5), 'the frame took the angle the drag turned it through')

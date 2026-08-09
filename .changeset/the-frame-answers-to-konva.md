@@ -10,13 +10,11 @@
 
 It was an XOR, so on a default-configured frame the one gesture every user knows released the lock instead of applying it. An application relying on shift to unlock a corner should set `keepRatio: false` and let shift ask for the lock.
 
-### A frame around several nodes is upright, and carries its own angle
+### A frame around several nodes can be framed upright
 
-`useSingleNodeRotation` (default `true`) frames a lone node at that node's angle; `useFirstNodeRotation` (default `false`) decides what a frame around SEVERAL does. Left off, the frame holds an upright angle of its own — Konva's behaviour — and a rotate drag turns it and it stays turned. Set it and the frame takes the first member's angle, hugging a set that shares one at the price of changing shape when the set is reordered.
+A frame around ONE node takes that node's angle, always. `useFirstNodeRotation` (default `true`) decides what a frame around SEVERAL does: borrow the first member's angle, as before, or — set `false` — hold an upright angle of its own that rotate drags carry forward and that reordering the set does not disturb.
 
-A multi-node box took the FIRST member's world rotation unconditionally. `useFirstNodeRotation: true` is that behaviour.
-
-The two flags are separate because Konva's covers only the one-node case: `useSingleNodeRotation: false` means a lone node is framed upright too, not that a set is framed along its first member.
+**This diverges from Konva deliberately.** Konva frames a set upright always, and its `useSingleNodeRotation` governs only whether a lone node's angle is taken at all. There is no `useSingleNodeRotation` here: a lone node is hugged unconditionally, which is the whole point of a frame around a single shape.
 
 `Transformer.rotation` is that angle, in degrees, and `Transformer.fitRotation()` is it in radians — the frame the per-frame refit measures along, and `boxForNodes`' new third argument. `boxForNodes(nodes, boundsOf)` without it still measures along the first node's rotation.
 
@@ -41,7 +39,7 @@ A drag reaches the frame when what is being dragged is what the frame wraps.
 | `flipEnabled` (default `true`) | `false` holds a resize just clear of zero instead of letting a drag past the fixed point mirror the nodes. |
 | `centeredScaling` (default `false`) | Scales about the box centre, which alt asks for on its own for one gesture. |
 | `resizeEnabled` (default `true`) | `false` leaves the border and the rotate handle. |
-| `useFirstNodeRotation` (default `false`) | Frames a set of nodes along the first member's angle rather than upright. |
+| `useFirstNodeRotation` (default `true`) | `false` frames a set of nodes upright rather than along the first member's angle. |
 | `getActiveAnchor()`, `isTransforming()`, `stopTransform()` | Which handle a gesture holds, whether one is running, and ending it where it stands. |
 | `nodes` as a setter | `transformer.nodes = [a, b]` replaces the set, the same as `attach()`. |
 | `detach()` with no argument | Empties the set. `detach(node)` still drops one. |

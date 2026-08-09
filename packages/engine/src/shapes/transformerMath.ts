@@ -191,9 +191,9 @@ export function worldCorners(node: Node, bounds: AABB): Vector2Like[] {
  * The box around one or more nodes, measured along axes turned by `rotation`.
  *
  * `rotation` is the frame the box is fitted in, and the caller owns it: a Transformer passes
- * Transformer.fitRotation(), which hugs a lone node's own angle and holds a persistent angle
- * for a set (see useSingleNodeRotation). Left out, it defaults to the first node's world
- * rotation, which is what a caller fitting a box around one node wants.
+ * Transformer.fitRotation(), which hugs a lone node's own angle and, for a set, either borrows
+ * the first member's or holds one of its own (see useFirstNodeRotation). Left out, it defaults
+ * to the first node's world rotation, which is what a caller fitting a box around one node wants.
  *
  * The frame has to be the CALLER's because this runs every frame, mid-gesture included. A box
  * that recomputed its own orientation from the nodes each time would recompute a multi-node

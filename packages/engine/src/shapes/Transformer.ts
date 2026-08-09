@@ -108,23 +108,19 @@ export interface TransformerOptions {
   /** Scale about the box center rather than the opposite anchor. Default false; alt does it too. */
   centeredScaling?: boolean
   /**
-   * Orient the frame to the attached node's own angle when exactly ONE is attached. Default
-   * true. Off, the frame carries its own angle even then - upright to begin with, and turned
-   * by whatever rotate drags it receives. See `rotation`.
-   *
-   * This governs the one-node case only. What a frame around SEVERAL does is
-   * `useFirstNodeRotation`.
-   */
-  useSingleNodeRotation?: boolean
-  /**
    * Orient a frame around SEVERAL nodes to the FIRST one's angle, so the set resizes and turns
-   * rigidly about whichever member came first. Default false: the frame holds an upright angle
-   * of its own instead, which is what a Konva transformer does with several nodes attached.
+   * rigidly about whichever member came first. Default true.
    *
-   * The two differ in what a tilted member does to the frame. Upright, a set is framed along
-   * the world axes however its members are turned, and reordering it changes nothing. Taking
-   * the first node's angle hugs a set that shares one, at the price of the frame changing shape
-   * when the set is reordered.
+   * A frame around ONE node always takes that node's angle, whatever this says - a lone shape
+   * gets a box that hugs it. This decides only what happens with several, where there is no one
+   * angle to take: the first member lends its own, or, set false, the frame holds an upright
+   * angle of its own that rotate drags carry forward (see `rotation`).
+   *
+   * The two differ in what a tilted member does to the frame. Taking the first node's angle
+   * hugs a set that shares one, at the price of the frame changing shape when the set is
+   * reordered. Upright, a set is framed along the world axes however its members are turned,
+   * and reordering it changes nothing - which is what a Konva transformer does with several
+   * nodes attached.
    */
   useFirstNodeRotation?: boolean
   /** Angles (DEGREES) a rotate drag settles onto when within `rotationSnapTolerance`. */
@@ -182,7 +178,6 @@ export class Transformer extends Container {
   keepRatio: boolean
   flipEnabled: boolean
   centeredScaling: boolean
-  useSingleNodeRotation: boolean
   useFirstNodeRotation: boolean
   /** Degrees - converted where the rotate gesture reads them. See math/angle.ts. */
   rotationSnaps?: readonly number[]
@@ -227,8 +222,7 @@ export class Transformer extends Container {
     this.keepRatio = options.keepRatio ?? true
     this.flipEnabled = options.flipEnabled ?? true
     this.centeredScaling = options.centeredScaling ?? false
-    this.useSingleNodeRotation = options.useSingleNodeRotation ?? true
-    this.useFirstNodeRotation = options.useFirstNodeRotation ?? false
+    this.useFirstNodeRotation = options.useFirstNodeRotation ?? true
     this.rotationSnaps = options.rotationSnaps
     this.rotationSnapTolerance = options.rotationSnapTolerance ?? 7
     this.boundBoxFunc = options.boundBoxFunc
@@ -280,9 +274,9 @@ export class Transformer extends Container {
   /**
    * The frame's angle in DEGREES, the same unit every other node's rotation carries.
    *
-   * Where a frame is hugging a node's angle - one node with useSingleNodeRotation, several with
-   * useFirstNodeRotation - this reports that node's world angle. Otherwise it is the frame's
-   * own, which a rotate drag carries forward and a change of attached set puts back upright.
+   * Where a frame is hugging a node's angle - one node always, several when useFirstNodeRotation
+   * is on - this reports that node's world angle. Otherwise it is the frame's own, which a
+   * rotate drag carries forward and a change of attached set puts back upright.
    *
    * Writing it turns the frame without touching what it wraps, so the two disagree until the
    * next rotate drag re-fits them - the same as Konva, where the transformer's rotation is its
@@ -301,9 +295,9 @@ export class Transformer extends Container {
    */
   fitRotation(): number {
     if (this.attached.length === 0) return this.frameRotation
-    const fromFirstNode =
-      this.attached.length === 1 ? this.useSingleNodeRotation : this.useFirstNodeRotation
-    return fromFirstNode ? worldRotationOf(this.attached[0]) : this.frameRotation
+    // One node is always hugged; the flag speaks only for a set, which has no one angle of its own.
+    if (this.attached.length === 1 || this.useFirstNodeRotation) return worldRotationOf(this.attached[0])
+    return this.frameRotation
   }
 
   /**
@@ -333,7 +327,6 @@ export class Transformer extends Container {
       'keepRatio',
       'flipEnabled',
       'centeredScaling',
-      'useSingleNodeRotation',
       'useFirstNodeRotation',
       'rotationSnaps',
       'rotationSnapTolerance',
