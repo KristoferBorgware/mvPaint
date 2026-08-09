@@ -1276,8 +1276,30 @@ edge quads and each anchor is two stacked circles rather than stroked shapes, an
 lets the frame track a set being dragged, scaled or spun without a single repack. Anchors are
 held at a constant screen size by dividing their world size by the camera zoom.
 
+The parts are placed in **world** coordinates, so the frame's own `localMatrix()` is identity —
+anything it contributed would be applied to them a second time. That leaves `rotation` free to
+mean the angle of the frame itself, which is what it means on a Konva transformer: with one node
+attached it reports that node's angle, and with several it holds an angle of its own, upright to
+begin with and carried forward by rotate drags. `fitRotation()` is the frame the per-frame refit
+measures the nodes along, and it is `boxForNodes`' third argument.
+
+`enabledAnchors`, `resizeEnabled` and `rotateEnabled` are read at the moment each is needed, so
+what is drawn and what `anchorAt()` will grab always come from the same list. Every handle the
+frame can ever show is built once in the constructor and switched on by being given a size back,
+because adding a shape later would change the mesh batcher's set and re-tessellate the batch.
+
 The gestures themselves live in `shapes/transformerMath.ts`; the `Transformer` is the scene
-bookkeeping around them.
+bookkeeping around them, and it owns the **policy** they run under — `keepRatio`, `flipEnabled`,
+`centeredScaling`, the rotation snaps, `boundBoxFunc` and `anchorDragBoundFunc`.
+`SceneInputDispatcher` runs the gesture and reads that policy off the frame rather than holding
+its own, so an application configures one object.
+
+Every handle gesture reduces to two boxes — the one the press started on and the one the pointer
+asks for — and `deltaBetweenBoxes` turns the pair into the single world delta each node receives.
+That is the seam `boundBoxFunc` sits in: whatever box it hands back, however little it resembles
+what the pointer asked for, is expressible as a delta. `transformstart` / `transform` /
+`transformend` and the three drag events go out on each node **and** on the frame, carrying the
+whole set and the pointer event that drove them.
 
 ### Canvas resolution
 

@@ -186,8 +186,11 @@ export function attachSceneInput(
     objectInput && (objectInput.select || objectInput.transform)
       ? new Transformer({
           ...objectInput.transformer,
-          enabledAnchors: objectInput.transform ? objectInput.transformer.enabledAnchors : [],
+          resizeEnabled: objectInput.transform ? (objectInput.transformer.resizeEnabled ?? true) : false,
           rotateEnabled: objectInput.transform ? (objectInput.transformer.rotateEnabled ?? true) : false,
+          // Snaps belong to the frame. The top-level option sets them there, so an application
+          // that configures the transformer directly overrides it.
+          rotationSnaps: objectInput.transformer.rotationSnaps ?? objectInput.rotationSnaps,
         })
       : null
   if (transformer) root.addChild(transformer)
@@ -484,7 +487,12 @@ export function attachSceneInput(
   const stopFrames = transformer
     ? host.addFrameListener(() => {
         const selection = transformer.nodes
-        const box = selection.length > 0 ? boxForNodes(selection, (node) => host.localBoundsOf(node)) : null
+        // Fitted in the frame's own angle, which hugs a lone node and is carried forward by
+        // rotate drags for a set of them. See Transformer.fitRotation.
+        const box =
+          selection.length > 0
+            ? boxForNodes(selection, (node) => host.localBoundsOf(node), transformer.fitRotation())
+            : null
         transformer.update(box, host.getZoom())
       })
     : null

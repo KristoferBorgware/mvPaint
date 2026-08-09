@@ -42,13 +42,16 @@ import type { Shape } from '../shapes/Shape'
 import { draggableGroup, type TransformableNode } from '../shapes/Group'
 import type { Transformer } from '../shapes/Transformer'
 import { Vector2, type Vector2Like } from '../math/Vector2'
-import { degToRad } from '../math/angle'
+import { degToRad, radToDeg } from '../math/angle'
 import {
+  anchorCursor,
   applyWorldTransform,
+  boundBoxToBox,
+  boxToBoundBox,
+  deltaBetweenBoxes,
   resizeFactors,
-  rotateAbout,
+  resizedBox,
   rotationDelta,
-  scaleAbout,
   type OrientedBox,
   type ResizeAnchor,
   type TransformerAnchor,
@@ -86,9 +89,14 @@ export interface SceneInputDispatcherOptions {
   dblClickWindow?: number
   /** Set false so a one-pointer drag is never a node drag, whatever it presses on. Default true. */
   dragNodes?: boolean
-  /** Angles (degrees) a rotate drag settles onto when within `rotationSnapTolerance`. */
+  /**
+   * Angles (degrees) a rotate drag settles onto when within `rotationSnapTolerance`.
+   *
+   * Read only when no `transformer` is given: a frame carries its own snaps, and it is the one
+   * an application configures. Pass them to the Transformer instead when there is one.
+   */
   rotationSnaps?: readonly number[]
-  /** How close (degrees) a rotation must come to a snap to take it. Default 7. */
+  /** How close (degrees) a rotation must come to a snap to take it. Default 7. See `rotationSnaps`. */
   rotationSnapTolerance?: number
   /** Clock for the double-click window. Defaults to performance.now. */
   now?: () => number
@@ -133,6 +141,13 @@ interface TransformSession {
   snapshots: NodeSnapshot[]
 }
 
+/** The box as a boundBoxFunc sees it, with the frame's constraint applied if it has one. */
+function constrained(transformer: Transformer | undefined, from: OrientedBox, to: OrientedBox): OrientedBox {
+  const bound = transformer?.boundBoxFunc
+  if (!bound) return to
+  return boundBoxToBox(bound(boxToBoundBox(from), boxToBoundBox(to)))
+}
+
 /** What a press remembered, so its release can decide whether a click happened. */
 interface PressState {
   target: Node
@@ -159,11 +174,17 @@ export class SceneInputDispatcher {
   private readonly tapThreshold: number
   private readonly dblClickWindow: number
   private readonly dragNodes: boolean
-  // Radians, converted from the degrees the options carry: the transformer's angle math is
-  // radians throughout, and converting a list of snaps per pointer move would redo the same
-  // eight multiplications for a set that never changes. See math/angle.ts.
+  /** Degrees, and only consulted when there is no transformer to ask. See the option. */
   private readonly rotationSnaps?: readonly number[]
-  private readonly rotationSnapTolerance: number
+  private readonly rotationSnapTolerance?: number
+  /**
+   * The last snap list converted to radians, kept against the array it came from.
+   *
+   * The frame's list is live, so it cannot be converted once at construction - but it also
+   * almost never changes, and a rotate drag asks for it on every pointer move. Keying the
+   * memo on the array's identity means a list that stays put converts exactly once.
+   */
+  private snapCache: { degrees: readonly number[]; radians: readonly number[] } | null = null
   private readonly now: () => number
   private readonly previousTouchAction: string
   private readonly previousCursor: string
@@ -213,9 +234,11 @@ export class SceneInputDispatcher {
     this.tapThreshold = options.tapThreshold ?? DEFAULT_TAP_THRESHOLD
     this.dblClickWindow = options.dblClickWindow ?? DEFAULT_DBL_CLICK_WINDOW
     this.dragNodes = options.dragNodes ?? true
-    this.rotationSnaps = options.rotationSnaps?.map(degToRad)
-    this.rotationSnapTolerance = degToRad(options.rotationSnapTolerance ?? 7)
+    this.rotationSnaps = options.rotationSnaps
+    this.rotationSnapTolerance = options.rotationSnapTolerance
     this.now = options.now ?? (() => performance.now())
+    // So the frame's own stopTransform() can reach the gesture this runs on its behalf.
+    this.transformer?.bindGestureHost(this)
 
     const resolve = options.nodesInBox ?? (() => [])
     this.marquee = new MarqueeTool(options.root, resolve)
@@ -249,6 +272,7 @@ export class SceneInputDispatcher {
       canvas.style.touchAction = this.previousTouchAction
       canvas.style.cursor = this.previousCursor
     }
+    this.transformer?.bindGestureHost(null)
     this.pointers.clear()
     this.reset()
     this.marquee.cancel()
@@ -270,10 +294,37 @@ export class SceneInputDispatcher {
   // Everything here checks the census first, so a scene listening for none of it pays
   // nothing - which matters for the per-move ones, dragmove and transform.
 
-  /** Raises a drag or transform event on every node taking part, carrying the whole set. */
-  private fireOnNodes(type: string, nodes: readonly TransformableNode[]): void {
+  /**
+   * Raises a drag or transform event on every node taking part, and on the frame when the set
+   * is the one it wraps.
+   *
+   * Both, because the two answer different questions. A listener on a node hears about that
+   * node; a listener on the Transformer hears about whatever is currently framed, which is
+   * where an application that tracks "the selection" rather than a particular shape puts its
+   * handler - and it is where a Konva application already has one.
+   *
+   * `nodes` carries the whole set on every one of them, so a handler on any single node can
+   * see what else moved with it, and `evt` is the pointer event that drove this move.
+   */
+  private fireOnNodes(type: string, nodes: readonly TransformableNode[], evt?: unknown): void {
     if (nodes.length === 0 || !hasListener(type)) return
-    for (const node of nodes) node.fire(type, { nodes }, true)
+    const init = { nodes, evt }
+    for (const node of nodes) node.fire(type, init, true)
+    if (this.transformer?.has(nodes[0])) this.transformer.fire(type, init, true)
+  }
+
+  /** The frame's snap angles in radians, or the dispatcher's own when there is no frame. */
+  private snapsInRadians(): readonly number[] | undefined {
+    const degrees = this.transformer ? this.transformer.rotationSnaps : this.rotationSnaps
+    if (!degrees || degrees.length === 0) return undefined
+    if (this.snapCache?.degrees !== degrees) {
+      this.snapCache = { degrees, radians: degrees.map(degToRad) }
+    }
+    return this.snapCache.radians
+  }
+
+  private snapToleranceInRadians(): number {
+    return degToRad(this.transformer?.rotationSnapTolerance ?? this.rotationSnapTolerance ?? 7)
   }
 
   /**
@@ -389,7 +440,7 @@ export class SceneInputDispatcher {
     return anchor ? { anchor, world } : null
   }
 
-  private beginTransform(anchor: TransformerAnchor, world: Vector2): void {
+  private beginTransform(anchor: TransformerAnchor, world: Vector2, evt?: unknown): void {
     const transformer = this.transformer
     const box = transformer?.currentBox
     if (!transformer || !box) return
@@ -399,11 +450,21 @@ export class SceneInputDispatcher {
       startWorld: world,
       snapshots: transformer.nodes.map((node) => ({ node, transform: node.captureTransform() })),
     }
-    this.setCursor(anchor === 'rotate' ? 'grabbing' : 'nwse-resize')
-    this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node))
+    transformer.setActiveAnchor(anchor)
+    // Turned with the box, so the arrows point along the edge the handle actually moves.
+    this.setCursor(anchorCursor(anchor, box.rotation))
+    this.fireOnNodes('transformstart', this.transform.snapshots.map((s) => s.node), evt)
   }
 
-  private updateTransform(world: Vector2, shiftKey: boolean, altKey: boolean): void {
+  /**
+   * Ends a handle gesture where it stands, keeping what it has done. What Transformer's own
+   * stopTransform() reaches through to, and the same finish releasing the handle would give.
+   */
+  stopTransform(): void {
+    this.endTransform()
+  }
+
+  private updateTransform(world: Vector2, shiftKey: boolean, altKey: boolean, evt?: unknown): void {
     const session = this.transform
     if (!session) return
 
@@ -417,43 +478,62 @@ export class SceneInputDispatcher {
       snap.node.restoreTransform(snap.transform)
     }
 
-    let delta
+    // Where the drag is READ from, which an anchorDragBoundFunc gets to move - a grid snap, a
+    // guide, a clamp to some region. It sees world coordinates and answers in them.
+    const bound = this.transformer?.anchorDragBoundFunc
+    const at = bound ? bound(session.startWorld, world, evt) : world
+
+    // Every gesture reduces to a box: the one the press started on, and the one the pointer
+    // asks for. A boundBoxFunc sits between the two and may hand back a third, so the delta is
+    // built from the boxes rather than from the gesture's own factors - whatever it returns is
+    // expressible that way.
+    let target: OrientedBox
     if (session.anchor === 'rotate') {
       const angle = rotationDelta(
         session.box,
         session.startWorld,
-        world,
-        this.rotationSnaps,
-        this.rotationSnapTolerance,
+        at,
+        this.snapsInRadians(),
+        this.snapToleranceInRadians(),
       )
-      delta = rotateAbout({ x: session.box.cx, y: session.box.cy }, angle)
+      target = { ...session.box, rotation: session.box.rotation + angle }
     } else {
-      // Corners keep their aspect ratio by default (the classic uniform-corner scale);
-      // shift inverts whichever way the transformer is configured, so it toggles either
-      // into or out of uniform scaling depending on the setting.
+      // Corners keep their aspect ratio by default - the classic uniform-corner scale. Shift
+      // asks for the lock, so with it already configured on, shift changes nothing.
       const corner = isCornerAnchor(session.anchor)
-      const configured = this.transformer?.keepRatio ?? true
-      const keepRatio = corner && (shiftKey ? !configured : configured)
-      const factors = resizeFactors(session.box, session.anchor as ResizeAnchor, world, {
-        keepRatio,
-        centered: altKey,
-      })
-      delta = scaleAbout(factors.fixed, factors.rotation, factors.scaleX, factors.scaleY)
+      const transformer = this.transformer
+      const keepRatio = corner && ((transformer?.keepRatio ?? true) || shiftKey)
+      target = resizedBox(
+        session.box,
+        resizeFactors(session.box, session.anchor as ResizeAnchor, at, {
+          keepRatio,
+          centered: (transformer?.centeredScaling ?? false) || altKey,
+          flipEnabled: transformer?.flipEnabled ?? true,
+        }),
+      )
     }
 
+    const finalBox = constrained(this.transformer, session.box, target)
+    const delta = deltaBetweenBoxes(session.box, finalBox)
     for (const snap of session.snapshots) {
       applyWorldTransform(snap.node, delta)
     }
+    // The frame is re-fitted per frame by its owner, but a multi-node frame has no angle to
+    // re-derive from the nodes - it carries its own. Handing the box's angle back is what lets
+    // it turn with them. See Transformer.fitRotation.
+    if (this.transformer) this.transformer.rotation = radToDeg(finalBox.rotation)
+
     const nodes = session.snapshots.map((s) => s.node)
-    this.fireOnNodes('transform', nodes)
+    this.fireOnNodes('transform', nodes, evt)
   }
 
-  private endTransform(): void {
+  private endTransform(evt?: unknown): void {
     if (!this.transform) return
     const nodes = this.transform.snapshots.map((s) => s.node)
     this.transform = null
+    this.transformer?.setActiveAnchor(null)
     this.setCursor(this.previousCursor)
-    this.fireOnNodes('transformend', nodes)
+    this.fireOnNodes('transformend', nodes, evt)
   }
 
   // --- node dragging ---
@@ -496,7 +576,7 @@ export class SceneInputDispatcher {
     return true
   }
 
-  private updateDrag(pointer: TrackedPointer): void {
+  private updateDrag(pointer: TrackedPointer, evt?: unknown): void {
     const drag = this.drag
     if (!drag) return
 
@@ -507,7 +587,7 @@ export class SceneInputDispatcher {
       if (moved <= (drag.grabbed.dragDistance ?? this.tapThreshold)) return
       drag.active = true
       this.setCursor('grabbing')
-      this.fireOnNodes('dragstart', drag.nodes)
+      this.fireOnNodes('dragstart', drag.nodes, evt)
     }
 
     const world = this.worldAt(pointer.x, pointer.y)
@@ -520,11 +600,11 @@ export class SceneInputDispatcher {
     })
     // No markGeometryDirty(): x/y are transform-only, applied per frame from the object's
     // world matrix, so a drag never rebuilds geometry however far the nodes travel.
-    this.fireOnNodes('dragmove', drag.nodes)
+    this.fireOnNodes('dragmove', drag.nodes, evt)
   }
 
   /** Ends the drag, optionally snapping the nodes back to where the drag started. */
-  private endDrag(revert: boolean): void {
+  private endDrag(revert: boolean, evt?: unknown): void {
     const drag = this.drag
     if (!drag) return
     this.drag = null
@@ -536,7 +616,7 @@ export class SceneInputDispatcher {
         node.y = drag.startPositions[i].y
       })
     }
-    this.fireOnNodes('dragend', drag.nodes)
+    this.fireOnNodes('dragend', drag.nodes, evt)
   }
 
   // --- marquee ---
@@ -581,7 +661,7 @@ export class SceneInputDispatcher {
       this.transformPointers.add(e.pointerId)
       this.canvas?.setPointerCapture(e.pointerId)
       this.pointers.set(e.pointerId, { x: point.x, y: point.y, downX: point.x, downY: point.y, type: e.pointerType })
-      this.beginTransform(anchor.anchor, anchor.world)
+      this.beginTransform(anchor.anchor, anchor.world, e)
       this.restartGesture()
       e.preventDefault()
       return
@@ -615,8 +695,8 @@ export class SceneInputDispatcher {
       this.multiTouch = true
       // A second finger means a pinch. Put anything mid-gesture back, so content grabbed
       // on the way into a two-finger gesture is not left moved by it.
-      this.endDrag(true)
-      this.endTransform()
+      this.endDrag(true, e)
+      this.endTransform(e)
       this.marquee.cancel()
       this.restartGesture()
       e.preventDefault()
@@ -665,11 +745,11 @@ export class SceneInputDispatcher {
 
     if (this.transform) {
       const world = this.worldAt(p.x, p.y)
-      if (world) this.updateTransform(world, e.shiftKey, e.altKey)
+      if (world) this.updateTransform(world, e.shiftKey, e.altKey, e)
       return
     }
     if (this.drag) {
-      this.updateDrag(pointer)
+      this.updateDrag(pointer, e)
       return
     }
     if (this.marquee.active) {
@@ -704,8 +784,8 @@ export class SceneInputDispatcher {
       // landed on, and a node that is hard to start dragging is not thereby hard to click.
       const wasTap = !this.multiTouch && moved <= this.tapThreshold
 
-      this.endTransform()
-      this.endDrag(false)
+      this.endTransform(e)
+      this.endDrag(false, e)
 
       // A press that never travelled dragged out no area, so there is nothing to resolve -
       // but it still ends, so a listener sees one end per start either way.

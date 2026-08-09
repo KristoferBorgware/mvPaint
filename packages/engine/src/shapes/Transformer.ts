@@ -39,7 +39,8 @@
 // the set never changes, so selecting/deselecting costs nothing beyond these few quads.
 
 import type { Vector2Like } from '../math/Vector2'
-import { radToDeg } from '../math/angle'
+import { Matrix4x4 } from '../math/Matrix4x4'
+import { degToRad, radToDeg } from '../math/angle'
 import { Container } from './Container'
 import { Circle } from './Circle'
 import { Rect } from './Rect'
@@ -53,13 +54,34 @@ import {
   RESIZE_ANCHORS,
   anchorPosition,
   rotateAnchorPosition,
+  worldRotationOf,
+  type AnchorDragBoundFunc,
+  type BoundBoxFunc,
   type OrientedBox,
   type ResizeAnchor,
   type TransformerAnchor,
 } from './transformerMath'
 
+/**
+ * What a Transformer needs from whatever is driving its handles, so that stopTransform() can
+ * reach a gesture the frame does not itself run. SceneInputDispatcher satisfies it and hands
+ * itself over in its own constructor.
+ *
+ * Declared here rather than in the input layer so the dependency points one way: the frame
+ * knows this shape, and nothing in shapes/ imports the dispatcher.
+ */
+export interface TransformerGestureHost {
+  stopTransform(): void
+}
+
 export interface TransformerOptions {
-  /** Anchor diameter in SCREEN pixels, held constant across zoom. Default 10. */
+  /**
+   * Anchor diameter in SCREEN pixels, held constant across zoom. Default 10.
+   *
+   * Screen pixels rather than the frame's own units, so a handle stays the same size to grab
+   * however far the view is zoomed. Konva measures this in local units, where the number means
+   * the same thing only at zoom 1.
+   */
   anchorSize?: number
   /** How far past the top edge the rotate handle sits, in screen pixels. Default 24. */
   rotateAnchorOffset?: number
@@ -71,14 +93,34 @@ export interface TransformerOptions {
   anchorBorderWidth?: number
   /** Which resize anchors to show. Default: all eight. */
   enabledAnchors?: readonly ResizeAnchor[]
+  /** Show the resize anchors at all. Default true. False leaves the border and the rotate handle. */
+  resizeEnabled?: boolean
   /** Show the rotate handle. Default true. */
   rotateEnabled?: boolean
   /**
    * Lock the aspect ratio when dragging a CORNER anchor. Default true - the classic
-   * behaviour, and what the request calls uniform corner scaling. Set false to let
-   * corners scale each axis freely; holding shift inverts whichever way this is set.
+   * behaviour, and what the request calls uniform corner scaling. Set false to let corners
+   * scale each axis freely. Shift forces the lock on whichever way this is set.
    */
   keepRatio?: boolean
+  /** Let a resize dragged past its fixed point mirror the nodes. Default true. */
+  flipEnabled?: boolean
+  /** Scale about the box center rather than the opposite anchor. Default false; alt does it too. */
+  centeredScaling?: boolean
+  /**
+   * Orient the frame to the attached node's own angle when exactly ONE is attached. Default
+   * true. With several attached, or with this off, the frame carries its own angle instead -
+   * upright to begin with, and turned by whatever rotate drags it receives. See `rotation`.
+   */
+  useSingleNodeRotation?: boolean
+  /** Angles (DEGREES) a rotate drag settles onto when within `rotationSnapTolerance`. */
+  rotationSnaps?: readonly number[]
+  /** How close (DEGREES) a rotation must come to a snap to take it. Default 7. */
+  rotationSnapTolerance?: number
+  /** Constrains the box a resize or rotation lands on - see BoundBoxFunc. */
+  boundBoxFunc?: BoundBoxFunc
+  /** Constrains where a handle drag is read from, in world space - see AnchorDragBoundFunc. */
+  anchorDragBoundFunc?: AnchorDragBoundFunc
   /** The four border bars. Default the mv green. */
   borderColor?: RGBA
   /** The inside of each handle. Default the mv green. */
@@ -102,6 +144,8 @@ const ANCHOR_SEGMENTS = 24
 const ANCHOR_HIT_SLOP_PX = 6
 /** Sits above ordinary content; the overlay pass keeps it above the text lane too. */
 const TRANSFORMER_Z_INDEX = 1_000_000
+/** Shared by every frame - see localMatrix, which hands the same one back to every caller. */
+const IDENTITY = Matrix4x4.identity()
 
 type EdgeName = 'top' | 'bottom' | 'left' | 'right'
 const EDGES: readonly EdgeName[] = ['top', 'bottom', 'left', 'right']
@@ -114,14 +158,35 @@ interface AnchorVisual {
 export class Transformer extends Container {
   override readonly nodeName: string = 'Transformer'
 
-  readonly anchorSize: number
-  readonly rotateAnchorOffset: number
-  readonly padding: number
-  readonly borderWidth: number
-  readonly anchorBorderWidth: number
-  readonly enabledAnchors: readonly ResizeAnchor[]
-  readonly rotateEnabled: boolean
+  anchorSize: number
+  rotateAnchorOffset: number
+  padding: number
+  borderWidth: number
+  anchorBorderWidth: number
+  resizeEnabled: boolean
+  rotateEnabled: boolean
   keepRatio: boolean
+  flipEnabled: boolean
+  centeredScaling: boolean
+  useSingleNodeRotation: boolean
+  /** Degrees - converted where the rotate gesture reads them. See math/angle.ts. */
+  rotationSnaps?: readonly number[]
+  /** Degrees. */
+  rotationSnapTolerance: number
+  boundBoxFunc?: BoundBoxFunc
+  anchorDragBoundFunc?: AnchorDragBoundFunc
+
+  private enabled: readonly ResizeAnchor[]
+  /**
+   * The frame's own angle, in RADIANS, which is what `rotation` reads and writes in degrees.
+   *
+   * Held here rather than taken from the attached nodes because a set of them has no one
+   * angle to take. It starts upright each time the set changes and is carried forward by
+   * rotate drags, so a frame around several nodes turns with them and stays turned.
+   */
+  private frameRotation = 0
+  private activeAnchor: TransformerAnchor | null = null
+  private gestureHost: TransformerGestureHost | null = null
 
   private attached: TransformableNode[] = []
   // Each attached node's tree top, as it was when the node was attached. Compared against the
@@ -141,9 +206,17 @@ export class Transformer extends Container {
     this.padding = options.padding ?? 4
     this.borderWidth = options.borderWidth ?? 1.5
     this.anchorBorderWidth = options.anchorBorderWidth ?? 1.5
-    this.enabledAnchors = options.enabledAnchors ?? RESIZE_ANCHORS
+    this.enabled = options.enabledAnchors ?? RESIZE_ANCHORS
+    this.resizeEnabled = options.resizeEnabled ?? true
     this.rotateEnabled = options.rotateEnabled ?? true
     this.keepRatio = options.keepRatio ?? true
+    this.flipEnabled = options.flipEnabled ?? true
+    this.centeredScaling = options.centeredScaling ?? false
+    this.useSingleNodeRotation = options.useSingleNodeRotation ?? true
+    this.rotationSnaps = options.rotationSnaps
+    this.rotationSnapTolerance = options.rotationSnapTolerance ?? 7
+    this.boundBoxFunc = options.boundBoxFunc
+    this.anchorDragBoundFunc = options.anchorDragBoundFunc
 
     const borderColor = options.borderColor ?? DEFAULT_BORDER
     const anchorFill = options.anchorFill ?? DEFAULT_ANCHOR_FILL
@@ -154,9 +227,12 @@ export class Transformer extends Container {
       this.edges.set(edge, rect)
     }
 
-    const names: TransformerAnchor[] = [...this.enabledAnchors]
-    if (this.rotateEnabled) names.push('rotate')
-    for (const name of names) {
+    // Every handle the frame can ever show gets its pair of discs here, whatever is enabled
+    // right now, so that enabling one later is a matter of giving it a size again rather than
+    // adding a shape. Adding one would change the mesh batcher's shape set and re-tessellate
+    // the whole batch (see the class comment); this way switching a handle on is as cheap as
+    // the frame appearing in the first place.
+    for (const name of [...RESIZE_ANCHORS, 'rotate' as const]) {
       this.anchors.set(name, {
         outer: this.makeAnchor(`__transformer-${name}-border`, anchorStroke, TRANSFORMER_Z_INDEX + 1),
         inner: this.makeAnchor(`__transformer-${name}`, anchorFill, TRANSFORMER_Z_INDEX + 2),
@@ -164,6 +240,65 @@ export class Transformer extends Container {
     }
 
     this.hideAll()
+  }
+
+  /**
+   * Which resize handles the frame shows and hit-tests. Live: assigning re-lays the frame out
+   * on the next update(), and the handles dropped stop being grabbable at the same moment
+   * they stop being drawn.
+   */
+  get enabledAnchors(): readonly ResizeAnchor[] {
+    return this.enabled
+  }
+  set enabledAnchors(value: readonly ResizeAnchor[]) {
+    this.enabled = value
+  }
+
+  /** The resize handles that are both enabled and switched on, plus the rotate handle. */
+  private shownAnchors(): readonly TransformerAnchor[] {
+    const names: TransformerAnchor[] = this.resizeEnabled ? [...this.enabled] : []
+    if (this.rotateEnabled) names.push('rotate')
+    return names
+  }
+
+  /**
+   * The frame's angle in DEGREES, the same unit every other node's rotation carries.
+   *
+   * With one node attached and useSingleNodeRotation on, this reports that node's world angle,
+   * since the frame is hugging it. Otherwise it is the frame's own, which a rotate drag
+   * carries forward and a change of attached set puts back upright.
+   *
+   * Writing it turns the frame without touching what it wraps, so the two disagree until the
+   * next rotate drag re-fits them - the same as Konva, where the transformer's rotation is its
+   * own attribute rather than a proxy for the nodes'.
+   */
+  override get rotation(): number {
+    return radToDeg(this.fitRotation())
+  }
+  override set rotation(value: number) {
+    this.frameRotation = degToRad(value)
+  }
+
+  /**
+   * The frame the box is fitted in, in radians - what update()'s caller measures the attached
+   * nodes along. See boxForNodes, which takes it as its third argument.
+   */
+  fitRotation(): number {
+    if (this.useSingleNodeRotation && this.attached.length === 1) return worldRotationOf(this.attached[0])
+    return this.frameRotation
+  }
+
+  /**
+   * Identity, always. The frame's parts are placed in WORLD coordinates (see placeEdge), so
+   * anything this contributed would be applied to them a second time - a rotation written here
+   * would swing the whole frame about the scene origin, away from the nodes it is drawn around,
+   * and the handles anchorAt() finds would no longer be the ones on screen.
+   *
+   * So the transform fields this inherits from Node are inert rather than dangerous, and
+   * `rotation` is free to mean the frame's own angle instead (see above).
+   */
+  override localMatrix(): Matrix4x4 {
+    return IDENTITY
   }
 
   protected override attrKeys(): readonly string[] {
@@ -175,8 +310,14 @@ export class Transformer extends Container {
       'borderWidth',
       'anchorBorderWidth',
       'enabledAnchors',
+      'resizeEnabled',
       'rotateEnabled',
       'keepRatio',
+      'flipEnabled',
+      'centeredScaling',
+      'useSingleNodeRotation',
+      'rotationSnaps',
+      'rotationSnapTolerance',
     ]
   }
 
@@ -228,13 +369,49 @@ export class Transformer extends Container {
     return shape
   }
 
-  /** The nodes this frame currently wraps. */
+  /**
+   * The nodes this frame currently wraps. Assigning replaces the set, exactly as attach()
+   * does - the spelling a Konva application reaches for first.
+   */
   get nodes(): readonly TransformableNode[] {
     return this.attached
+  }
+  set nodes(value: readonly TransformableNode[]) {
+    this.attach(value)
   }
 
   get currentBox(): OrientedBox | null {
     return this.box
+  }
+
+  /**
+   * Which handle a gesture currently holds, or null between gestures. Set by whatever is
+   * driving the handles; see bindGestureHost.
+   */
+  getActiveAnchor(): TransformerAnchor | null {
+    return this.activeAnchor
+  }
+
+  isTransforming(): boolean {
+    return this.activeAnchor !== null
+  }
+
+  /**
+   * Ends a handle gesture where it stands, keeping what it has done so far. The nodes are left
+   * as they are and a 'transformend' goes out, the same as releasing the handle would.
+   */
+  stopTransform(): void {
+    this.gestureHost?.stopTransform()
+  }
+
+  /** Wires the frame to whatever runs its handle gestures. Null unwires it. */
+  bindGestureHost(host: TransformerGestureHost | null): void {
+    this.gestureHost = host
+  }
+
+  /** Told by the gesture host which handle is held, so the frame can report it. */
+  setActiveAnchor(anchor: TransformerAnchor | null): void {
+    this.activeAnchor = anchor
   }
 
   /** Replaces the attached set; an empty list hides the frame. */
@@ -252,13 +429,18 @@ export class Transformer extends Container {
   }
 
   /**
-   * Drops one node from the attached set, if it is in it.
+   * Drops one node from the attached set, if it is in it. Called with nothing, empties the
+   * set - which is what detach() means to a Konva application, and what clear() means here.
    *
    * Named for its pair, attach(), and deliberately NOT `remove` - a Transformer is a Node,
    * and Node.remove() means "take me out of my parent". Two methods with one name doing
    * unrelated things to different objects is a trap on a class that inherits one of them.
    */
-  detach(node: TransformableNode): void {
+  detach(node?: TransformableNode): void {
+    if (node === undefined) {
+      this.attach([])
+      return
+    }
     const index = this.attached.indexOf(node)
     if (index < 0) return
     const next = [...this.attached]
@@ -340,6 +522,11 @@ export class Transformer extends Container {
     this.attached = next
     this.attachedRoots = next.map((node) => node.root())
     this.box = null
+    // Upright again for the new set. A frame's own angle belongs to the set it was turned
+    // around, so carrying it onto a different one would frame the new nodes at an angle
+    // nothing asked for. A single node re-adopts its own angle immediately anyway - see
+    // fitRotation.
+    this.frameRotation = 0
     if (next.length === 0) this.hideAll()
     if (hasListener('attachchange')) this.fire('attachchange', { nodes: next }, true)
   }
@@ -357,6 +544,9 @@ export class Transformer extends Container {
       this.hideAll()
       return
     }
+    // What the box was actually fitted at, so `rotation` reports the frame on screen rather
+    // than the angle it was asked for - the two differ the moment a rotate drag is snapped.
+    this.frameRotation = box.rotation
 
     const framed = this.framedBox(box)
     const perPixel = 1 / this.zoom
@@ -376,13 +566,25 @@ export class Transformer extends Container {
     // asked for on a small handle, rather than letting the inner disc invert.
     const size = this.anchorSize * perPixel
     const inner = Math.max(size - 2 * this.anchorBorderWidth * perPixel, size * 0.2)
-    for (const name of this.enabledAnchors) {
-      const at = anchorPosition(framed, name)
+    const shown = this.shownAnchors()
+    for (const name of shown) {
+      const at =
+        name === 'rotate'
+          ? rotateAnchorPosition(framed, this.rotateAnchorOffset * perPixel)
+          : anchorPosition(framed, name)
       this.placeAnchor(name, at.x, at.y, size, inner)
     }
-    if (this.anchors.has('rotate')) {
-      const at = rotateAnchorPosition(framed, this.rotateAnchorOffset * perPixel)
-      this.placeAnchor('rotate', at.x, at.y, size, inner)
+
+    // The handles this frame is not showing collapse instead, which is how a name taken out of
+    // enabledAnchors stops being drawn. Zeroing one that is already zero writes nothing at all
+    // (see Node's transform setters), so a frame whose set of handles never changes runs this
+    // loop without touching anything.
+    for (const [name, visual] of this.anchors) {
+      if (shown.includes(name)) continue
+      visual.outer.scaleX = 0
+      visual.outer.scaleY = 0
+      visual.inner.scaleX = 0
+      visual.inner.scaleY = 0
     }
   }
 
@@ -412,10 +614,12 @@ export class Transformer extends Container {
       bestIsCorner = isCorner
     }
 
-    if (this.anchors.has('rotate')) {
-      consider('rotate', rotateAnchorPosition(framed, this.rotateAnchorOffset / this.zoom), false)
-    }
-    for (const name of this.enabledAnchors) {
+    // The same list update() draws, so what can be grabbed is exactly what is on screen.
+    for (const name of this.shownAnchors()) {
+      if (name === 'rotate') {
+        consider('rotate', rotateAnchorPosition(framed, this.rotateAnchorOffset / this.zoom), false)
+        continue
+      }
       const isCorner = name.startsWith('top-') || name.startsWith('bottom-')
       consider(name, anchorPosition(framed, name), isCorner && !name.endsWith('-center'))
     }
