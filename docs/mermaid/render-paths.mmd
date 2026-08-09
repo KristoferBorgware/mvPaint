@@ -1,0 +1,65 @@
+%% Rendered to ../render-paths.svg. See docs/README.md for the command.
+flowchart TB
+
+  SEAM["THE WHOLE SEAM BETWEEN THE TWO PATHS IS TWO THINGS<br/>systems/createSceneRenderer.ts — one function, one branch, the fallback behind a dynamic import()<br/>so a browser with WebGPU never downloads, parses or executes a byte of the second renderer<br/>systems/SceneRendererHandle.ts — one interface, naming no graphics API<br/>deleting the fallback later is deleting src/webgl/ and the catch"]
+
+  SHARED["SHARED — everything that is not graphics API code<br/>not one GPUDevice, GPURenderPassEncoder,<br/>WebGL2RenderingContext or WebGLTexture appears in any of it<br/><br/>shapes/ the scene graph · scene/ picking, culling, selection<br/>events/ · input/ · camera/ · math/ · svg/<br/>render/gather.ts — visibility, depth, lanes,<br/>the opaque split, the run merge<br/>render/meshFormat · textFormat · imageFormat · shadowFormat<br/>the byte layouts, and the offset constants both shader<br/>languages interpolate<br/>render/drawOrder · opacity · stroke · contours · shadowMath<br/>text/layout.ts — the shaper<br/>render/capture.ts — the backend-neutral capture arithmetic"]
+
+  subgraph GPUP["webgpu/ — THE PRIMARY PATH"]
+    GPU1["GpuContext · FrameRenderer · SceneRenderer"]
+    GPU2["lanes/ MeshBatcher · TextBatcher · ImageBatcher · ShadowBatcher"]
+    GPU3["pipelines/ · layouts.ts · vertexLayouts.ts · depthFormat.ts"]
+    GPU4["shaders/ *.wgsl.ts"]
+    GPU5["MSDFFontBook · MSDFFontLibrary · ImageTexture · ShadowAtlas · CaptureTarget"]
+  end
+
+  subgraph GLP["webgl/ — A SECOND, SELF-CONTAINED IMPLEMENTATION"]
+    GL1["Gl2Context · GlSceneRenderer"]
+    GL2["lanes/ GlMeshBatcher · GlTextBatcher · GlImageBatcher · GlShadowBatcher"]
+    GL3["GlProgram · GlObjectTexture"]
+    GL4["shaders/ *.glsl.ts<br/>a template string interpolating the SAME<br/>OBJECT_*_OFFSET constants the WGSL does"]
+    GL5["GlMSDFFontBook · GlMSDFFontLibrary · GlImageTexture · GlShadowAtlas · GlCaptureTarget"]
+  end
+
+  SAME["THE SAME PICTURE, BOTH WAYS<br/>same scene objects · same picking, culling and z-order answers · 4x MSAA on both<br/>all four lanes implemented, the shadow bake included: silhouette, separable morphology and<br/>separable Gaussian are all ordinary render passes into small textures, so none of it needed a compute shader"]
+
+  subgraph DIV["THE THREE GENUINE DIVERGENCES — and they are the whole list"]
+    D1["1 · PER-OBJECT RECORDS<br/>WebGPU: a read-only storage buffer · WebGL2: an RGBA32F texture read with texelFetch<br/>GLES 3.0 has no storage buffers, and a 16 KB UBO would hold about fifty of a 304-byte mesh record<br/>every stride is a multiple of 16 bytes, so a record is a whole number of texels — 19 of them for mesh<br/>u32 fields are written as plain floats, since 2u read back through a float texture is a denormal some GPUs flush to zero"]
+    D2["2 · WHERE THE MULTISAMPLING COMES FROM<br/>WebGPU: a multisampled texture that resolves into the swapchain when the pass ends<br/>WebGL2: the browser's own multisampled drawing buffer — one blit and one colour buffer fewer per frame<br/>antialias true is a hint, so Gl2Context.sampleCount reports what was granted, not what was asked for"]
+    D3["3 · RENDER-TO-TEXTURE ORIENTATION<br/>WebGPU puts NDC y = +1 in a texture's FIRST texel row, GL in its LAST<br/>corrected in exactly two places, and pinned by webgl/webgl.test.ts<br/>because getting one without the other gives upside-down shadows"]
+  end
+
+  SCALE["WHAT ACTUALLY DIFFERS FOR A USER IS SCALE<br/>hundreds of thousands of objects on the primary path, tens of thousands on the fallback<br/>backend webgl2 forces it, because a fallback nobody can reach on purpose is a fallback nobody tests"]
+
+  GPU1 ~~~ GPU2
+  GPU2 ~~~ GPU3
+  GPU3 ~~~ GPU4
+  GPU4 ~~~ GPU5
+  GL1 ~~~ GL2
+  GL2 ~~~ GL3
+  GL3 ~~~ GL4
+  GL4 ~~~ GL5
+
+  SEAM --> SHARED
+  SHARED --> GPU1
+  SHARED --> GL1
+  GPU5 --> SAME
+  GL5 --> SAME
+  SAME --> D1
+  D1 --> D2
+  D2 --> D3
+  D3 --> SCALE
+
+  classDef seam fill:#ffffff,stroke:#c3cadb,stroke-width:1.5px,color:#1b1e26
+  classDef shared fill:#fff8ec,stroke:#b4761a,stroke-width:1.5px,color:#1b1e26
+  classDef device fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
+  classDef fallback fill:#f2f8ef,stroke:#3d8a26,stroke-width:1.5px,color:#1b1e26
+
+  class SEAM,SCALE seam
+  class SHARED,SAME,D1,D2,D3 shared
+  class GPU1,GPU2,GPU3,GPU4,GPU5 device
+  class GL1,GL2,GL3,GL4,GL5 fallback
+
+  style GPUP fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style GLP fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style DIV fill:#f7f9fc,stroke:#c3cadb,color:#5b6478

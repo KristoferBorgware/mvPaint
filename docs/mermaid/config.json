@@ -11,6 +11,10 @@
     "padding": 12,
     "curve": "basis"
   },
+  "class": {
+    "htmlLabels": false,
+    "useMaxWidth": false
+  },
   "themeVariables": {
     "fontFamily": "ui-monospace, Menlo, Consolas, monospace",
     "fontSize": "14px",

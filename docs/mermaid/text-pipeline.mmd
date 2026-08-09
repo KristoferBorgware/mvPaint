@@ -1,0 +1,69 @@
+%% Rendered to ../text-pipeline.svg. See docs/README.md for the command.
+flowchart TB
+
+  subgraph OFFLINE["OFFLINE — packages/scripts — run once, committed as assets"]
+    TTF["a .ttf per style<br/>regular · bold · italic · bold-italic"]
+    GENM["gen:msdf<br/>msdf-bmfont-xml"]
+    GENP["gen:polygons<br/>flatten contours to line segments"]
+    ASSETM["style.png + style.json<br/>distance field · glyph boxes<br/>advances · kerning · decoration metrics"]
+    ASSETP["style.polygons.json<br/>outlines in whole font units<br/>same boxes, advances, kerning"]
+  end
+
+  subgraph LOADTIME["LOAD TIME — the application fetches, the engine keys by name"]
+    CACHE["GLOBAL CACHE — resources/fontSources.ts<br/>metrics JSON · atlas PNG bytes · PolygonFontBook"]
+    LIB["MSDFFontLibrary — per renderer<br/>one MSDFFontBook per family<br/>4 styles in one texture_2d_array,<br/>a style's STYLE_ORDER index IS its layer"]
+    REG["FontRegistry — global, device-free<br/>one VectorFonts per family<br/>PolygonFontBook, or TtfFontBook<br/>from @mvpaint/ttf for a font parsed live"]
+  end
+
+  NODEM["MSDFText<br/>fontFamily: 'inter'"]
+  NODEV["VectorText<br/>fontFamily: 'inter'"]
+
+  PROV["FontProvider — metrics, an atlas index, fauxBold, fauxItalic<br/>device-free, so text measures with no renderer at all"]
+
+  SHAPER["text/layout.ts — layoutText(runs, options, fonts) — ONE SHAPER FOR BOTH<br/>resolve each run to a style, synthesizing faux bold and faux italic for a face that is missing<br/>kern · letter-space · baseline-shift · greedy wrap to maxWidth · break on a newline<br/>align · padding · bend onto a path<br/>emit back to front: highlights, drop shadows, glows, glyphs, underline, strikethrough"]
+
+  SHAPED["ShapedText — quads + materials + width, height, lineCount, referenceBaseline<br/>memoized on the node until its content, layout or fonts change"]
+
+  OUTM["4 vertices per glyph<br/>uv into the atlas layer<br/>atlasLayer travels in the OBJECT record,<br/>because it belongs to the run, not the glyph"]
+  INV["WHAT THROWS THAT MEMO AWAY — three routes, deliberately different sizes<br/>this node's runs, layout or fontFamily change → invalidateShaping(): THIS NODE re-shapes, the lane reads every other memo back unchanged<br/>a family's atlases replaced, or a new family loaded → the font epoch: EVERY MSDFText re-shapes, its memo having been measured against metrics that are gone<br/>outlines registered after a VectorText was built → no epoch and none needed, since an unresolved name is never memoized"]
+
+  OUTV["VectorFonts.glyphMesh(codePoint)<br/>rings → classifyContours → earcut<br/>quadCorner applies the same shear and<br/>curve rotation the MSDF quad gets"]
+
+  LANEM["TEXT LANE — TextBatcher<br/>one bind group for all four styles<br/>one draw per FAMILY change"]
+  LANEV["MESH LANE — MeshBatcher<br/>ordinary triangles: picks per glyph,<br/>bounds, real baked shadow, mesh gradients"]
+
+  TTF --> GENM
+  TTF --> GENP
+  GENM --> ASSETM
+  GENP --> ASSETP
+  ASSETM --> CACHE
+  ASSETP --> CACHE
+  CACHE -->|"decode · upload — once, before any frame"| LIB
+  CACHE -->|"no device to involve"| REG
+  LIB -->|"resolveFamily(name)"| PROV
+  REG -->|"vectorFontsFor(name)"| PROV
+  NODEM --> PROV
+  NODEV --> PROV
+  PROV --> SHAPER
+  SHAPER --> SHAPED
+  SHAPED --> OUTM
+  SHAPED --> OUTV
+  SHAPED -.-> INV
+  OUTM --> LANEM
+  OUTV --> LANEV
+
+  classDef offline fill:#ffffff,stroke:#c3cadb,stroke-width:1.5px,color:#1b1e26
+  classDef cache fill:#f2f8ef,stroke:#3d8a26,stroke-width:1.5px,color:#1b1e26
+  classDef device fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
+  classDef shared fill:#fff8ec,stroke:#b4761a,stroke-width:1.5px,color:#1b1e26
+  classDef node fill:#ffffff,stroke:#8b93a7,stroke-width:1.5px,color:#1b1e26
+
+  class TTF,GENM,GENP,ASSETM,ASSETP offline
+  class CACHE,REG cache
+  class LIB,LANEM,LANEV,OUTM,OUTV device
+  class PROV,SHAPER,SHAPED shared
+  class NODEM,NODEV node
+  class INV shared
+
+  style OFFLINE fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style LOADTIME fill:#f7f9fc,stroke:#c3cadb,color:#5b6478

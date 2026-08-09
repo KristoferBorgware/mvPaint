@@ -76,8 +76,8 @@ export function fontEpoch(): number {
 
 // --- object records: "did any object's per-frame data change?" ------------------------------
 //
-// The third counter, and the one that answers a different question from the two above. Those
-// say the packed GEOMETRY is stale. This one says a per-object RECORD is - the transform,
+// The fourth counter, and the one that answers a different question from the two geometry ones.
+// Those say the packed GEOMETRY is stale. This one says a per-object RECORD is - the transform,
 // depth, opacity and paint the batchers refresh every frame without touching geometry at all.
 //
 // It exists because refreshing them was the last thing in the engine that was O(everything

@@ -1,0 +1,104 @@
+%% Rendered to ../node-hierarchy.svg. See docs/README.md for the command.
+classDiagram
+  direction LR
+
+  class Node["Node — nodeType 'Node'"] {
+    x · y · rotation
+    scaleX · scaleY · skewX · skewY
+    offsetX · offsetY · width · height
+    visible · opacity · zIndex
+    listening · preventDefault
+    draggable · dragDistance · dragBoundFunc
+    position scale skew offset size — compound, NOT in attrKeys()
+    localMatrix() worldMatrix() absoluteOpacity()
+    on() off() fire() find() matches()
+    remove() destroy() moveTo()
+  }
+
+  class Container["Container — nodeType 'Container'"] {
+    the child list, and nothing else
+    eachChild() addChild() removeChildren()
+  }
+
+  class Shape["Shape — nodeType 'Shape' — abstract"] {
+    pickable · overlay
+    fill · fillPriority
+    ten fillLinear/fillRadialGradient fields
+    stroke · strokeWidth · strokeAlign
+    lineJoin · lineCap · miterLimit
+    strokeScaleEnabled
+    seven shadow fields
+    buildGeometry(sink) tessellate()
+    materials() localBounds()
+    markGeometryDirty()
+  }
+
+  class Group["Group — draws nothing"]
+  class Layer["Layer — nodeType 'Layer' — draws nothing"]
+  class Transformer["Transformer → mesh"]
+  class MarqueeOverlay["MarqueeOverlay → mesh"]
+
+  class Rect["Rect → mesh"]
+  class Circle["Circle → mesh"]
+  class Polyline["Polyline → mesh"]
+  class Path["Path → mesh"]
+  class CustomShape["CustomShape → mesh — abstract"]
+  class Image["Image → IMAGE"]
+
+  class Text["Text — abstract"] {
+    runs · fontFamily
+    align · maxWidth · lineHeight
+    direction · orientation
+    padding · textPath
+    invalidateShaping()
+  }
+
+  class MSDFText["MSDFText → TEXT"]
+  class VectorText["VectorText → mesh"]
+  class UniformMSDFText["UniformMSDFText"] {
+    withSingleRun(MSDFText)
+    text · fontSize · fontStyle
+    textDecoration · letterSpacing
+    fill · stroke · strokeWidth
+    getTextWidth() measureSize()
+  }
+  class UniformVectorText["UniformVectorText"] {
+    withSingleRun(VectorText)
+  }
+
+  Node <|-- Container
+  Node <|-- Shape
+  Container <|-- Group
+  Container <|-- Layer
+  Container <|-- Transformer
+  Container <|-- MarqueeOverlay
+  Shape <|-- Rect
+  Shape <|-- Circle
+  Shape <|-- Polyline
+  Shape <|-- Path
+  Shape <|-- CustomShape
+  Shape <|-- Image
+  Shape <|-- Text
+  Text <|-- MSDFText
+  Text <|-- VectorText
+  MSDFText <|-- UniformMSDFText
+  VectorText <|-- UniformVectorText
+
+  style Node fill:#fff8ec,stroke:#b4761a,color:#1b1e26
+  style Container fill:#ffffff,stroke:#8b93a7,color:#1b1e26
+  style Shape fill:#ffffff,stroke:#8b93a7,color:#1b1e26
+  style Text fill:#ffffff,stroke:#8b93a7,color:#1b1e26
+  style Group fill:#f7f9fc,stroke:#c3cadb,color:#1b1e26
+  style Layer fill:#f7f9fc,stroke:#c3cadb,color:#1b1e26
+  style Transformer fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style MarqueeOverlay fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style Rect fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style Circle fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style Polyline fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style Path fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style CustomShape fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style Image fill:#f2f8ef,stroke:#3d8a26,color:#1b1e26
+  style MSDFText fill:#f2f8ef,stroke:#3d8a26,color:#1b1e26
+  style VectorText fill:#eef6f6,stroke:#007a80,color:#1b1e26
+  style UniformMSDFText fill:#ffffff,stroke:#8b93a7,color:#1b1e26
+  style UniformVectorText fill:#ffffff,stroke:#8b93a7,color:#1b1e26

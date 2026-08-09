@@ -31,7 +31,14 @@ section on:
 - **Nothing heavy happens during a frame.** Fetching, decoding and uploading are load-time work
   behind a ref-counted cache; drawing binds what is already there.
 
-The source is `docs/mermaid/architecture-overview.mmd` — see [docs/README.md](docs/README.md).
+Six sections carry a diagram of their own, where the detail belongs: the class hierarchy under
+[Scene graph](#scene-graph), the draw order under
+[Passes and draw order](#passes-and-draw-order), the anatomy of a lane under
+[Buffers and records](#buffers-and-records), the routes a change can take under
+[Invalidation](#invalidation), the two glyph sources under [Text](#text), and what the two
+backends do and do not share under [Render paths](#render-paths).
+
+Sources are in `docs/mermaid/` — see [docs/README.md](docs/README.md).
 
 ## Contents
 
@@ -94,6 +101,13 @@ them at different points in the frame.
 ---
 
 ## Scene graph
+
+![The class hierarchy. Node holds the transform and every attribute Konva puts on its own Node; Container adds only a child list; Shape adds the paint and geometry vocabulary. Each leaf is tagged with the lane it draws through.](docs/node-hierarchy.svg)
+
+Three tiers own everything, and the lane tag on each leaf is worth reading twice: **`Image`
+draws through the image lane but still carries mesh geometry** — that is what its silhouette,
+bounds and hit test are made of — and **`VectorText` draws through the *mesh* lane**, because it
+is text turned into ordinary triangles. `Group` and `Layer` draw nothing at all.
 
 ### Node, Container, Shape
 
@@ -288,7 +302,8 @@ inert. It is separate from `Shape.pickable`, which governs whether hit-testing c
 node at all.
 
 Selectors are CSS-like: `#id`, `.name`, or a bare word matching `nodeName` (the concrete class,
-e.g. `'Rect'`) or `nodeType` (the tier: `'Node'`, `'Container'`, `'Shape'`). `getAttr()` /
+e.g. `'Rect'`) or `nodeType` (the tier: `'Node'`, `'Container'`, `'Shape'`, and `'Layer'`, which
+names its own so a selector can reach every layer without naming each one). `getAttr()` /
 `setAttr()` read and write typed fields by string key, so a property inspector or a
 deserializer needs no per-type switch; `setAttr()` prefers a `set<Key>()` method where the
 class declares one, because some attributes pair a read-only property with a method that also
@@ -636,6 +651,8 @@ only loop that would see a stale gauge.
 
 ## Passes and draw order
 
+![One worked frame of seven objects. The mesh lane's index buffer holds opaque, translucent and overlay regions; the opaque head draws once, the translucent slices of all four lanes merge furthest-first into four runs, and the overlay tail draws last with depth off — six draw calls in all.](docs/draw-order.svg)
+
 Alpha blending is order-dependent and the depth test is not, and no single draw order serves
 both. So the frame is drawn in three phases, split by whether an object can be *proven* to
 paint only opaque fragments (`render/opacity.ts`). These are phases of one WebGPU render pass,
@@ -726,6 +743,12 @@ switch shadows off.
 ---
 
 ## Buffers and records
+
+![A shape emits local-space triangles into a sink and caches them. rebuild() rebases and packs them into the lane's shared buffers only when membership changes; updateObjects() refreshes one record per shape-material pair every frame by dirty range. Whether a value sits in the vertex buffer or the object record is what decides whether changing it repacks.](docs/lane-anatomy.svg)
+
+Every lane has the same anatomy, and the diagram is the whole of it. The two tracks are the
+distinction the invalidation model rests on: **`rebuild()` runs when *which* objects belong to
+the lane changes, `updateObjects()` runs every frame.**
 
 ### Bind group frequency
 
@@ -877,7 +900,9 @@ there is one copy of each record layout and every reader derives from it.
 
 ## Invalidation
 
-Three global counters in `shapes/contentEpoch.ts` answer three different questions. Each is a
+![Six kinds of change routed to what they cost. Four counters live in contentEpoch.ts; adding or removing a node needs none, because the visible set is recomputed every frame; and a value edited in place through a property reference announces nothing at all.](docs/invalidation.svg)
+
+Four global counters in `shapes/contentEpoch.ts` answer four different questions. Each is a
 counter rather than a per-node flag, so the renderer compares one integer per frame regardless of
 how large the visible set is.
 
@@ -886,10 +911,12 @@ how large the visible set is.
 | Mesh geometry epoch | `Shape.markGeometryDirty()` | repack the mesh lane |
 | Text shaping epoch | a text node re-shaping | repack the text lane |
 | Object record epoch | any setter that changes a per-object record | run `updateObjects()` at all |
+| Font epoch | an `MSDFFontBook`'s atlases being replaced | re-shape every `MSDFText`, since each memoized its layout and then ignored the provider it was handed |
 
-All three are coarse: any node bumps the whole lane, and a node belonging to another scene bumps
-it just the same. The failure mode is therefore a rebuild that turns out to have been
-unnecessary.
+All four are coarse: any node bumps the whole lane, and a node belonging to another scene bumps
+it just the same. That is the trade a counter makes — the renderer compares one integer instead
+of one flag per visible object — and it is the right way round, because a needless rebuild is
+only slow where a missed one is wrong.
 
 ### Transforms and paint
 
@@ -985,9 +1012,16 @@ Two implementations over one shaper. This section covers how they fit the render
 [FONTS.md](FONTS.md) covers the whole pipeline end to end — source file, generation, loading,
 shaping, both render paths, and switching fonts at runtime.
 
+![A .ttf becomes two kinds of generated asset offline. Both reach the engine through the global cache, one ending in a device-owned atlas texture and one in a device-free registry, and both are then reached by one family name. A single shaper serves both, and only the last step — four vertices per glyph, or real tessellated outlines — differs.](docs/text-pipeline.svg)
+
+The shape of that picture is the argument for the design: **everything up to and including
+shaping is one implementation, and the fork is the last step.** A glyph's placement, wrap,
+kerning, alignment and decorations are decided identically whichever way it is going to be
+drawn.
+
 | Path | Class | Draws through | Asset |
 | --- | --- | --- | --- |
-| Distance field | `Text` | text lane, four vertices per glyph | MSDF atlas: a PNG plus metrics JSON per style |
+| Distance field | `MSDFText` | text lane, four vertices per glyph | MSDF atlas: a PNG plus metrics JSON per style |
 | Outline | `VectorText` | mesh lane, tessellated glyph outlines | polygon atlas: flattened outlines per style |
 
 `text/layout.ts` is the shaper for both. It resolves each run to a font atlas (synthesizing a
@@ -1069,12 +1103,13 @@ per node. `TextBatcher` records the book each node was shaped against and splits
 ranges on it (`drawRange`), so a span in one family is a single draw however many styles it
 mixes, and none of this reaches the cross-lane merge that keeps a shadow behind its caster.
 
-The two invalidations are deliberately different, and the distinction is the load-bearing part:
+The invalidations are deliberately different sizes, and the distinction is the load-bearing part:
 
 | | Route | Re-shapes |
 | --- | --- | --- |
-| One node's `fontFamily` (or a `VectorText`'s `fonts`) | `invalidateShaping()` | that node only; the lane repacks from every other node's cache |
-| A family's atlases replaced, or a new family loaded | the font epoch | every text node |
+| One node's `fontFamily`, runs or layout | `invalidateShaping()` | that node only; the lane repacks from every other node's cache |
+| A family's MSDF atlases replaced, or a new family loaded | the font epoch | every text node |
+| Outlines registered after a `VectorText` was built | neither | that node, whenever it next shapes — an unresolved family is never cached, so there is nothing to announce |
 
 A lane repack is not a re-shape: `TextBatcher.rebuild` calls `shaped()` per node and gets the
 memoized layout back. That is why the per-node route is cheap, and why reaching for the font
@@ -1361,6 +1396,8 @@ two places to get the accounting right instead of one.
 ---
 
 ## Render paths
+
+![One seam of two files, one shared body of code naming no graphics API, two self-contained implementations under it, and three genuine divergences: where per-object records live, where the multisampling comes from, and which texel row NDC y equals plus one lands in.](docs/render-paths.svg)
 
 WebGPU is the primary path. `webgl/` is a **second, self-contained implementation** that serves
 machines without WebGPU support.

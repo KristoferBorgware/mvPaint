@@ -1,0 +1,53 @@
+%% Rendered to ../lane-anatomy.svg. See docs/README.md for the command.
+flowchart TB
+
+  SHAPE["A SHAPE<br/>buildGeometry(sink) emits triangles in the shape's OWN LOCAL SPACE<br/>and there is no colour anywhere in them"]
+
+  SINK["MeshSink — render/meshFormat.ts<br/>vertex(x, y, isFill, material) returns a shape-local index<br/>triangle(a, b, c) references those indices"]
+
+  TESS["tessellate() — the per-shape cache<br/>buildGeometry runs ONCE and the arrays are replayed into whatever sink asks<br/>dropped only by markGeometryDirty()"]
+
+  MAT["Shape.materials() · worldMatrix() · the depth the gather assigned<br/>read fresh every frame, never cached in geometry"]
+
+  subgraph REBUILD["rebuild(shapes) — only when WHICH objects belong to the lane changes"]
+    RB1["guarded by sameMembers() against last frame, plus the lane's content epoch<br/>rebase every shape's local indices into the lane's shared arrays"]
+    RB2["stamp packedId into each vertex<br/>the object index in the low bits, one flag in the top<br/>isFill in the mesh lane, isGlyph in the text lane<br/>the shadow lane packs no flag: every vertex is the same kind of thing"]
+    RB3["upload ONE vertex buffer and ONE index buffer for the whole lane<br/>recreate the object storage buffer and its group(1) bind group"]
+  end
+
+  subgraph UPDATE["updateObjects(shapes, depths) — EVERY frame"]
+    UP1["returns immediately when the object-record epoch has not moved<br/>one record per (shape, material) PAIR<br/>a shape claims a contiguous block, one slot per material it declares,<br/>and its vertices select within that block"]
+    UP2["compare each slot against its ObjectCache<br/>the model matrix by REFERENCE — Matrix4x4 instances are never mutated,<br/>so a static scene collapses to pointer comparisons"]
+    UP3["collect changed slots into ranges, merging any two within 8 slots of each other<br/>past 512 ranges, write the whole buffer once instead of issuing unbounded small writes"]
+  end
+
+  DRAW["ONE DRAW CALL<br/>setBindGroup(0, frame) — viewProjection + resolution, written once a frame<br/>setBindGroup(1, objects) — the storage buffer above, or a float texture on the WebGL2 path<br/>setBindGroup(2, texture + sampler) — per draw range, and rebinding it ENDS a draw<br/>setVertexBuffer · setIndexBuffer · drawIndexed over a half-open range"]
+
+  VFMT["THE FOUR VERTEX LAYOUTS<br/>mesh — position f32x2 · packedId u32<br/>text — position · uv · colour f32x4 · packedId<br/>image — position · uv · packedId<br/>shadow — corner f32x2, each component 0 or 1 · objectId u32"]
+
+  SPLIT["WHERE A VALUE LIVES DECIDES WHAT CHANGING IT COSTS<br/>baked into the VERTEX buffer, so it repacks: positions, packedId, and in the text lane a glyph's uv and its colour<br/>held in the OBJECT record, so it is free: the world matrix, depth, opacity, fill and stroke colour, every gradient parameter<br/>which is why a shape repacks on strokeWidth and a text node repacks on fill colour — the exact inverse of each other"]
+
+  SHAPE --> SINK
+  SINK --> TESS
+  TESS --> RB1
+  SHAPE --> MAT
+  MAT --> UP1
+  RB1 --> RB2
+  RB2 --> RB3
+  UP1 --> UP2
+  UP2 --> UP3
+  RB3 --> DRAW
+  UP3 --> DRAW
+  DRAW --> VFMT
+  DRAW --> SPLIT
+
+  classDef src fill:#ffffff,stroke:#8b93a7,stroke-width:1.5px,color:#1b1e26
+  classDef shared fill:#fff8ec,stroke:#b4761a,stroke-width:1.5px,color:#1b1e26
+  classDef device fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
+
+  class SHAPE,MAT src
+  class SINK,TESS,UP1,UP2,VFMT,SPLIT shared
+  class RB1,RB2,RB3,UP3,DRAW device
+
+  style REBUILD fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
+  style UPDATE fill:#f7f9fc,stroke:#c3cadb,color:#5b6478

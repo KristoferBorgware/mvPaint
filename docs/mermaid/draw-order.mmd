@@ -1,0 +1,47 @@
+%% Rendered to ../draw-order.svg. See docs/README.md for the command.
+flowchart TB
+
+  SCENE["A WORKED FRAME — seven visible objects, ranked scene-wide by zIndex<br/>rank 0, 1 — two solid rects, mesh lane<br/>rank 2 — a translucent card, mesh lane, casting a shadow<br/>rank 3 — an image · rank 4, 5 — two MSDFText · rank 6 — a transformer handle, overlay"]
+
+  DEPTH["rank 0 is FURTHEST BACK and carries the LARGEST depth<br/>depthForRank(rank, count) = (count - rank) / (count + 1)<br/>assigned scene-wide BEFORE culling, so ranks never shift as content scrolls off screen"]
+
+  subgraph PACKED["THE MESH LANE'S PACKED INDEX BUFFER — one buffer, three regions, and every mesh draw in the frame is a half-open range of it"]
+    P1["0 .. meshTranslucentStart<br/>OPAQUE<br/>moved to the front by partitionByOpacity,<br/>which is a STABLE partition"]
+    P2["meshTranslucentStart .. overlayStart<br/>TRANSLUCENT<br/>keeps the back-to-front order it needs"]
+    P3["overlayStart .. end<br/>OVERLAY<br/>packed last, so it is always contiguous"]
+  end
+
+  PASS1["PASS 1 — OPAQUE<br/>order is irrelevant here: for fully opaque fragments the depth buffer IS the sort<br/>ONE drawIndexed, covering ranks 0 and 1<br/>depth tested AND written — which is exactly what pass 2 goes on to read"]
+
+  MERGE["buildDrawRuns — render/drawOrder.ts<br/>walk all four lanes' translucent slices at once, always taking the LARGEST remaining depth<br/>coalesce neighbours from the same lane into one run<br/>MERGE_ORDER shadow, mesh, text, image breaks ties, and the first listed wins"]
+
+  PASS2["PASS 2 — TRANSLUCENT, one draw per LANE CHANGE<br/>shadow → card → image → text, text<br/>FOUR draws: the two text nodes were neighbours in the order, so they coalesced into one<br/>depth is TESTED, so an opaque shape in front still hides all of this<br/>depth is never WRITTEN, so these blend over each other instead of rejecting each other"]
+
+  PASS3["PASS 3 — OVERLAY<br/>ONE draw over the packed tail, covering rank 6<br/>depthCompare 'always', no write: an overlay that wrote depth<br/>would punch a hole through whatever drew after it"]
+
+  SHADOW["WHY A SHADOW LANDS BEHIND ITS OWN CASTER<br/>its depth is the caster's plus HALF a rank step — 0.5 / (count + 1)<br/>which puts it immediately before that caster in the merged sequence:<br/>late enough to land on whatever is below, early enough for the caster to paint over it<br/>and MERGE_ORDER listing shadow first is what settles the tie in the same direction"]
+
+  TOTAL["SIX DRAW CALLS FOR SEVEN OBJECTS<br/>and only the genuinely translucent, lane-alternating content paid per object"]
+
+  SCENE --> DEPTH
+  DEPTH --> P1
+  DEPTH --> P2
+  DEPTH --> P3
+  P1 --> PASS1
+  P2 --> MERGE
+  MERGE --> PASS2
+  PASS1 --> PASS2
+  PASS2 --> PASS3
+  P3 --> PASS3
+  MERGE -.-> SHADOW
+  PASS3 --> TOTAL
+
+  classDef src fill:#ffffff,stroke:#8b93a7,stroke-width:1.5px,color:#1b1e26
+  classDef shared fill:#fff8ec,stroke:#b4761a,stroke-width:1.5px,color:#1b1e26
+  classDef device fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
+
+  class SCENE src
+  class DEPTH,MERGE,SHADOW,P1,P2,P3 shared
+  class PASS1,PASS2,PASS3,TOTAL device
+
+  style PACKED fill:#f7f9fc,stroke:#c3cadb,color:#5b6478
