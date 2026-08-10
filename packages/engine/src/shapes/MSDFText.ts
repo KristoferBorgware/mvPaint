@@ -1,6 +1,6 @@
 // MSDFText - a drawable Shape rendered through the MSDF text lane rather than the mesh lane
 // (it has no tessellate() / fill geometry; TextBatcher shapes it directly from its
-// runs). It inherits position/scale/rotation/offset/visible/pickable/zIndex from Shape and
+// runs). It inherits position/scale/rotation/offset/visible/listening/zIndex from Shape and
 // its styled runs plus block-layout options from Text, caching the shaped result
 // (glyph + decoration quads and per-run materials) until its content changes. Its transform
 // is applied in the vertex shader like every other node, so moving or scaling an MSDFText never

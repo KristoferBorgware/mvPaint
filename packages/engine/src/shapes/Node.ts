@@ -7,16 +7,14 @@
 // The transform lives here rather than on Shape because placing yourself in your parent is
 // not a drawing concern: a Group places the things inside it and draws nothing at all, and
 // a group and a shape have to compose IDENTICALLY or the same gesture would move them
-// differently. Shape adds what is specific to painting - fill, stroke, shadow, pickability -
-// on top of this.
+// differently. Shape adds what is specific to painting - fill, stroke, shadow - on top of this.
 //
-// WHAT ELSE IS HERE, and why it is not on Shape. Every attribute Konva puts on its Node is on
-// this one, declared once: width/height, visible, opacity, zIndex, listening, preventDefault,
-// draggable, dragDistance and dragBoundFunc. Two of them govern a whole subtree - `visible`
-// takes everything under it out of the render and out of picking, and `opacity` multiplies
-// through the chain (see absoluteOpacity) - so a single field on a Group would otherwise have
-// had to be a second, independent copy of the one on Shape, with the same name and the same
-// meaning.
+// WHAT ELSE IS HERE, and why it is not on Shape: width/height, visible, opacity, zIndex,
+// listening, preventDefault, draggable, dragDistance and dragBoundFunc. Three of them govern a
+// whole subtree - `visible` takes everything under it out of the render, `listening` takes it
+// out of the pointer's reach, and `opacity` multiplies through the chain (see absoluteOpacity) -
+// so a single field on a Group would otherwise have had to be a second, independent copy of the
+// one on Shape, with the same name and the same meaning.
 //
 // Three of them are carried but not consulted on a container: `zIndex`, `width` and `height`.
 // Only a Shape occupies a slot in the render order or draws from a size, and a group's extent
@@ -28,12 +26,23 @@
 // class, e.g. 'Rect') or nodeType (the scene-graph tier: 'Node', 'Container' or 'Shape').
 //
 // getAttr()/setAttr() read and write any of those same typed fields by string key, so code
-// that only knows a property's name at runtime (a change-event dispatcher, a property
-// inspector, deserialization) doesn't need a per-shape-type switch. setAttr() prefers a
-// set<Key>() method when the class declares one - some attributes (Text's runs) are
-// read-only properties paired with a method that also invalidates a cache, so a plain
-// assignment would either miss that or throw. attrs is a plain-object snapshot built from
-// attrKeys(), which each class overrides to append its own attribute names to its parent's.
+// that only knows a property's name at runtime (a property inspector, deserialization) doesn't
+// need a per-shape-type switch. setAttr() prefers a set<Key>() method when the class declares
+// one - some attributes (Text's runs) are read-only properties paired with a method that also
+// invalidates a cache, so a plain assignment would either miss that or throw. attrKeys() is the
+// manifest, which each class overrides to append its own attribute names to its parent's, and
+// attrs is a view over it.
+//
+// EVERY ATTRIBUTE ANNOUNCES ITSELF. Each is an accessor that raises '<key>Change' once the
+// value it stores really differs (see announce), so a property inspector hears `rect.x = 5` and
+// `rect.setAttr('x', 5)` alike.
+//
+// It does NOT bubble, unlike the membership and pointer events. A change is a fact about one
+// object, and an undo stack that registered its handler on several nodes of one chain would
+// otherwise record a single edit once per level. Watching a subtree is therefore a listener per
+// node rather than one on the container: 'add' does bubble, so a watcher can attach one as each
+// node joins. Delegation is no substitute - the wrapped handler runs when the event reaches the
+// ancestor it was registered on, which for these is never.
 //
 // The compound accessors - position, scale, skew, offset, size and absolutePosition - read and
 // write the components above in pairs. They are deliberately NOT in attrKeys(): attrs is a
@@ -48,15 +57,17 @@
 // each level, until a handler cancels it or the chain runs out; enter/leave events never
 // bubble (see NON_BUBBLING_EVENTS).
 //
-// `listening` gates propagation and receipt: an event neither fires on nor travels past a
-// node whose isListening() is false, so switching it off on a container makes that whole
-// subtree inert. It is separate from Shape.pickable, which governs whether hit-testing can
-// return a node at all - a node can be hit-testable but event-deaf, or vice versa. A direct
-// fire() call always runs the target's own listeners; `listening` is about events arriving,
-// not about explicit invocation.
+// `listening` is the single switch for whether the pointer can reach a node: an event neither
+// fires on nor travels past a node whose isListening() is false, and hit-testing will not
+// return one either (see scene/picking.ts), so switching it off on a container makes that
+// whole subtree inert - untouchable, unpickable, and uncatchable by a marquee, while still
+// drawing. That is what an overlay wants: a selection frame or a rubber band is a picture of
+// the scene's state, never a thing to click. A direct fire() call still runs the target's own
+// listeners; `listening` is about events arriving, not about explicit invocation.
 //
 // Column-vector / WebGPU-native: child_world = parent_world * child_local.
 
+import { AABB } from '../math/AABB'
 import { degToRad, radToDeg } from '../math/angle'
 import { decompose2D } from '../math/decompose2D'
 import { bumpObjectRecordEpoch } from './contentEpoch'
@@ -108,6 +119,46 @@ export interface SizeLike {
   height: number
 }
 
+/**
+ * A node's own bounds in its own local space, or null for something with nothing to measure.
+ *
+ * A parameter rather than a method call because not every node can answer alone: an MSDFText
+ * has to be shaped against a font atlas first, and the node cannot reach one while the caller
+ * that cares already has it (see scene/picking.ts's localBoundsOf).
+ */
+export type LocalBoundsResolver = (node: Node) => AABB | null
+
+/** An axis-aligned box as a position and a size - what getClientRect reports. */
+export interface ClientRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** See Node.getClientRect. */
+export interface ClientRectOptions {
+  /**
+   * Leave THIS node's own transform out, so the box is in the node's own local space rather
+   * than its parent's. A container's children are still composed through theirs.
+   */
+  skipTransform?: boolean
+  /** Measure the fill alone, ignoring how far the outline reaches past it. */
+  skipStroke?: boolean
+  /** Leave the shadow out. It is IN by default - a shadow is part of what the node covers. */
+  skipShadow?: boolean
+  /** Report the box in this ancestor's local space instead of in the parent's. */
+  relativeTo?: Node
+  /**
+   * How to measure a leaf that cannot measure itself - text, which needs a font book. Consulted
+   * first for every node; a null answer falls back to the node's own measurement.
+   */
+  boundsOf?: LocalBoundsResolver
+}
+
+/** The empty box, for a node with nothing to measure. */
+const EMPTY_CLIENT_RECT: ClientRect = { x: 0, y: 0, width: 0, height: 0 }
+
 /** Every field localMatrix() reads - a complete transform snapshot. See captureTransform. */
 export interface NodeTransform {
   x: number
@@ -158,6 +209,78 @@ export interface NodeOptions {
   dragBoundFunc?: DragBoundFunc
 }
 
+/**
+ * What each of Node's own attributes goes back to on reset - see Node.attrDefaults.
+ *
+ * Frozen, because a default is handed straight to the setter and would otherwise be a shared
+ * object every reset node held a reference to.
+ *
+ * `zIndex` is 0 here, which for a Shape is behind everything that took a number from the
+ * running counter rather than wherever it happened to be made - `shape.zIndex = nextZIndex()`
+ * puts it back on top (see zOrder.ts).
+ */
+export const NODE_ATTR_DEFAULTS: Readonly<Record<string, unknown>> = Object.freeze({
+  id: '',
+  name: '',
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+  rotation: 0,
+  scaleX: 1,
+  scaleY: 1,
+  skewX: 0,
+  skewY: 0,
+  offsetX: 0,
+  offsetY: 0,
+  visible: true,
+  opacity: 1,
+  zIndex: 0,
+  listening: true,
+  preventDefault: true,
+  draggable: false,
+  dragDistance: undefined,
+  dragBoundFunc: undefined,
+})
+
+/**
+ * The object Node.attrs hands out: a proxy with no storage of its own, forwarding every read,
+ * write, delete and enumeration to the node's own accessors.
+ *
+ * A proxy rather than a snapshot because the two things a caller does with `attrs` pull in
+ * opposite directions. Enumerating it wants an object; writing through it wants the node. A
+ * snapshot serves the first and silently drops the second - `node.attrs.x = 5` stores 5 on an
+ * object nothing will read again - and there is no version of a plain object that does both.
+ */
+function makeAttrsView(node: Node): Record<string, unknown> {
+  return new Proxy(Object.create(null) as Record<string, unknown>, {
+    get: (_target, key) => (typeof key === 'string' ? node.getAttr(key) : undefined),
+    set: (_target, key, value) => {
+      if (typeof key !== 'string') return false
+      node.setAttr(key, value)
+      return true
+    },
+    deleteProperty: (_target, key) => {
+      if (typeof key !== 'string') return false
+      node.resetAttr(key)
+      return true
+    },
+    has: (_target, key) => typeof key === 'string' && node.attributeNames().includes(key),
+    ownKeys: () => [...node.attributeNames()],
+    // Object.keys() consults this for every key ownKeys() reported, and skips any it is not
+    // told is enumerable - so without it the proxy would enumerate as empty.
+    getOwnPropertyDescriptor: (_target, key) => {
+      if (typeof key !== 'string' || !node.attributeNames().includes(key)) return undefined
+      return { value: node.getAttr(key), writable: true, enumerable: true, configurable: true }
+    },
+  })
+}
+
+/** An AABB as the x/y/width/height a caller measures with. */
+function rectOf(box: AABB): ClientRect {
+  return { x: box.min.x, y: box.min.y, width: box.max.x - box.min.x, height: box.max.y - box.min.y }
+}
+
 /** [[1, skewX], [skewY, 1]]: x slides by skewX per unit y, y by skewY per unit x. */
 function skewMatrix(skewX: number, skewY: number): Matrix4x4 {
   const m = Matrix4x4.identity()
@@ -168,11 +291,29 @@ function skewMatrix(skewX: number, skewY: number): Matrix4x4 {
 }
 
 export class Node {
+  private _id = ''
   /** Free-form, not required to be unique. Selector target: '#foo'. */
-  id: string
+  get id(): string {
+    return this._id
+  }
+  set id(value: string) {
+    if (value === this._id) return
+    const previous = this._id
+    this._id = value
+    this.announce('id', previous, value)
+  }
 
+  private _name = ''
   /** Space-separated tags. Selector target: '.foo'. See hasName/addName/removeName. */
-  name: string
+  get name(): string {
+    return this._name
+  }
+  set name(value: string) {
+    if (value === this._name) return
+    const previous = this._name
+    this._name = value
+    this.announce('name', previous, value)
+  }
 
   /** This concrete class, e.g. 'Rect' or 'Transformer'. Fixed - not user-assignable, unlike
    * name. Selector target: 'Rect'. */
@@ -186,8 +327,26 @@ export class Node {
   /** Set by Container.addChild; null for a detached node or the root. */
   parent: Node | null = null
 
-  /** When false, events neither fire on this node nor travel through it. See the header. */
-  listening = true
+  /**
+   * Whether the pointer can reach this node and everything under it.
+   *
+   * False makes the subtree inert without hiding it: no event fires on it or travels through
+   * it, hit-testing skips it, and a marquee does not catch it - but it still draws. The walks
+   * turn back at a non-listening node rather than asking each shape about its ancestors, so a
+   * whole overlay layer costs one check (see scene/picking.ts).
+   *
+   * Distinct from `visible`, which takes the subtree out of the picture as well.
+   */
+  private _listening = true
+  get listening(): boolean {
+    return this._listening
+  }
+  set listening(value: boolean) {
+    if (value === this._listening) return
+    const previous = this._listening
+    this._listening = value
+    this.announce('listening', previous, value)
+  }
 
   /**
    * Whether a press on this node also suppresses the browser's own response to the raw event -
@@ -198,7 +357,16 @@ export class Node {
    * middle-button pan, a pinch, the wheel, the context menu - suppress the default whatever
    * this says, since no node is their subject.
    */
-  preventDefault = true
+  private _preventDefault = true
+  get preventDefault(): boolean {
+    return this._preventDefault
+  }
+  set preventDefault(value: boolean) {
+    if (value === this._preventDefault) return
+    const previous = this._preventDefault
+    this._preventDefault = value
+    this.announce('preventDefault', previous, value)
+  }
 
   /**
    * Whether this node and everything under it takes part in the scene.
@@ -211,7 +379,16 @@ export class Node {
    * The walks turn back at a hidden node rather than asking each shape about its ancestors, so
    * hiding a subtree of ten thousand shapes costs one check (see scene/picking.ts).
    */
-  visible = true
+  private _visible = true
+  get visible(): boolean {
+    return this._visible
+  }
+  set visible(value: boolean) {
+    if (value === this._visible) return
+    const previous = this._visible
+    this._visible = value
+    this.announce('visible', previous, value)
+  }
 
   /**
    * Whether a pointer drag over this node repositions it (see input/SceneInputDispatcher).
@@ -221,7 +398,16 @@ export class Node {
    * under the pointer. Those two are the tiers draggableGroup() walks; on a Layer or a bare
    * Container the field is carried and nothing reads it.
    */
-  draggable = false
+  private _draggable = false
+  get draggable(): boolean {
+    return this._draggable
+  }
+  set draggable(value: boolean) {
+    if (value === this._draggable) return
+    const previous = this._draggable
+    this._draggable = value
+    this.announce('draggable', previous, value)
+  }
 
   /**
    * How far the pointer must travel, in CSS pixels, before a drag on this node begins.
@@ -231,7 +417,16 @@ export class Node {
    * follow the pointer from the first move. It governs when the drag STARTS, not what counts as
    * a click: a press that never travels far enough for either is still a click.
    */
-  dragDistance?: number
+  private _dragDistance?: number
+  get dragDistance(): number | undefined {
+    return this._dragDistance
+  }
+  set dragDistance(value: number | undefined) {
+    if (value === this._dragDistance) return
+    const previous = this._dragDistance
+    this._dragDistance = value
+    this.announce('dragDistance', previous, value)
+  }
 
   /**
    * Constrains where a drag may put this node: called with the world-space position the drag
@@ -243,7 +438,16 @@ export class Node {
    *
    *   node.dragBoundFunc = (p) => ({ x: p.x, y: 0 })   // a slider: x only
    */
-  dragBoundFunc?: DragBoundFunc
+  private _dragBoundFunc?: DragBoundFunc
+  get dragBoundFunc(): DragBoundFunc | undefined {
+    return this._dragBoundFunc
+  }
+  set dragBoundFunc(value: DragBoundFunc | undefined) {
+    if (value === this._dragBoundFunc) return
+    const previous = this._dragBoundFunc
+    this._dragBoundFunc = value
+    this.announce('dragBoundFunc', previous, value)
+  }
 
   // --- transform (see the header for what localMatrix() composes them into) ------------
 
@@ -267,32 +471,40 @@ export class Node {
   }
   set x(value: number) {
     if (value === this._x) return
+    const previous = this._x
     this._x = value
     bumpObjectRecordEpoch()
+    this.announce('x', previous, value)
   }
   get y(): number {
     return this._y
   }
   set y(value: number) {
     if (value === this._y) return
+    const previous = this._y
     this._y = value
     bumpObjectRecordEpoch()
+    this.announce('y', previous, value)
   }
   get scaleX(): number {
     return this._scaleX
   }
   set scaleX(value: number) {
     if (value === this._scaleX) return
+    const previous = this._scaleX
     this._scaleX = value
     bumpObjectRecordEpoch()
+    this.announce('scaleX', previous, value)
   }
   get scaleY(): number {
     return this._scaleY
   }
   set scaleY(value: number) {
     if (value === this._scaleY) return
+    const previous = this._scaleY
     this._scaleY = value
     bumpObjectRecordEpoch()
+    this.announce('scaleY', previous, value)
   }
   /** Degrees, about +Z. See math/angle.ts for where the unit changes. */
   get rotation(): number {
@@ -300,8 +512,10 @@ export class Node {
   }
   set rotation(value: number) {
     if (value === this._rotation) return
+    const previous = this._rotation
     this._rotation = value
     bumpObjectRecordEpoch()
+    this.announce('rotation', previous, value)
   }
   /**
    * The node's own pivot, in its local units. Applied FIRST, to the node's own contents,
@@ -312,16 +526,20 @@ export class Node {
   }
   set offsetX(value: number) {
     if (value === this._offsetX) return
+    const previous = this._offsetX
     this._offsetX = value
     bumpObjectRecordEpoch()
+    this.announce('offsetX', previous, value)
   }
   get offsetY(): number {
     return this._offsetY
   }
   set offsetY(value: number) {
     if (value === this._offsetY) return
+    const previous = this._offsetY
     this._offsetY = value
     bumpObjectRecordEpoch()
+    this.announce('offsetY', previous, value)
   }
   /**
    * Shear: skewX slides x by `skewX` per unit of y, and skewY slides y by `skewY` per unit
@@ -335,16 +553,20 @@ export class Node {
   }
   set skewX(value: number) {
     if (value === this._skewX) return
+    const previous = this._skewX
     this._skewX = value
     bumpObjectRecordEpoch()
+    this.announce('skewX', previous, value)
   }
   get skewY(): number {
     return this._skewY
   }
   set skewY(value: number) {
     if (value === this._skewY) return
+    const previous = this._skewY
     this._skewY = value
     bumpObjectRecordEpoch()
+    this.announce('skewY', previous, value)
   }
 
   // --- size, transparency, stacking -----------------------------------------------------
@@ -362,13 +584,19 @@ export class Node {
     return this._width
   }
   set width(value: number) {
+    if (value === this._width) return
+    const previous = this._width
     this._width = value
+    this.announce('width', previous, value)
   }
   get height(): number {
     return this._height
   }
   set height(value: number) {
+    if (value === this._height) return
+    const previous = this._height
     this._height = value
+    this.announce('height', previous, value)
   }
 
   private _opacity = 1
@@ -394,8 +622,10 @@ export class Node {
   }
   set opacity(value: number) {
     if (value === this._opacity) return
+    const previous = this._opacity
     this._opacity = value
     bumpObjectRecordEpoch()
+    this.announce('opacity', previous, value)
   }
 
   private _zIndex = 0
@@ -414,8 +644,10 @@ export class Node {
   }
   set zIndex(value: number) {
     if (value === this._zIndex) return
+    const previous = this._zIndex
     this._zIndex = value
     bumpObjectRecordEpoch()
+    this.announce('zIndex', previous, value)
   }
 
   /**
@@ -523,41 +755,116 @@ export class Node {
     ]
   }
 
+  /**
+   * The names of every attribute this node exposes. The public face of attrKeys(), for code
+   * outside the class hierarchy that has to walk them - a serializer, a property inspector.
+   */
+  attributeNames(): readonly string[] {
+    return this.attrKeys()
+  }
+
+  /** What each resettable attribute goes back to. The public face of attrDefaults(). */
+  attributeDefaults(): Readonly<Record<string, unknown>> {
+    return this.attrDefaults()
+  }
+
   getAttr(key: string): unknown {
     return (this as unknown as Record<string, unknown>)[key]
   }
 
   /**
-   * Writes an attribute and, if anything is listening, raises '<key>Change' with the old and
-   * new values. Only a real change is reported, compared by identity - so replacing a fill
-   * array raises it while editing that array in place does not.
+   * Raises '<key>Change' on THIS node, carrying the old and new values. Called by every
+   * attribute setter after it has stored a value that really differs.
+   *
+   * It does not bubble. A change is a fact about one object, and a watcher wanting a whole
+   * subtree's changes says so - `group.on('xChange', selector, handler)` delegates. Bubbling by
+   * default would instead make every ancestor hear every descendant's every write, which an
+   * undo stack records as one edit per level of nesting.
+   *
+   * Gated on the global census, so a scene nobody is watching pays one map lookup per write
+   * rather than building an event object (see events/listenerCensus.ts).
+   */
+  protected announce(key: string, oldVal: unknown, newVal: unknown): void {
+    const changeEvent = attrChangeEventName(key)
+    if (!hasListener(changeEvent)) return
+    this.fire(changeEvent, { attr: key, oldVal, newVal })
+  }
+
+  /**
+   * Writes an attribute by name. The '<key>Change' event comes from the property itself (see
+   * announce), so this raises nothing of its own and `node.x = 5` and `node.setAttr('x', 5)`
+   * are indistinguishable to a watcher.
+   *
+   * The exception is an attribute backed by a set<Key>() METHOD rather than a property - some
+   * are read-only properties paired with a method that also invalidates a cache - which is
+   * preferred when the class declares one. A method cannot announce from an assignment that
+   * never happens, so the comparison is made here for that path alone.
    */
   setAttr(key: string, value: unknown): this {
-    const changeEvent = attrChangeEventName(key)
-    const watched = hasListener(changeEvent)
-    const oldVal = watched ? this.getAttr(key) : undefined
-
     const setterName = 'set' + key.charAt(0).toUpperCase() + key.slice(1)
     const target = this as unknown as Record<string, unknown>
     const setter = target[setterName]
-    if (typeof setter === 'function') {
-      ;(setter as (v: unknown) => void).call(this, value)
-    } else {
+    if (typeof setter !== 'function') {
       target[key] = value
+      return this
     }
 
+    const changeEvent = attrChangeEventName(key)
+    const watched = hasListener(changeEvent)
+    const oldVal = watched ? this.getAttr(key) : undefined
+    ;(setter as (v: unknown) => void).call(this, value)
     if (watched) {
       const newVal = this.getAttr(key)
-      if (newVal !== oldVal) this.fire(changeEvent, { attr: key, oldVal, newVal }, true)
+      if (newVal !== oldVal) this.fire(changeEvent, { attr: key, oldVal, newVal })
     }
     return this
   }
 
-  /** A snapshot of every attribute this node currently exposes - see attrKeys(). */
+  /**
+   * The value an attribute goes back to when it is reset - see resetAttr. Override to append
+   * the subclass's own alongside its attrKeys() entries; the two lists are checked against each
+   * other by the attribute test, since a key in one and not the other is a hole nothing else
+   * would report.
+   *
+   * An attribute whose starting value is computed rather than fixed is deliberately absent: an
+   * Image's texture has no stand-in, and a Shape's zIndex comes from a running counter. Those
+   * cannot be reset, and say so rather than inventing a value.
+   */
+  protected attrDefaults(): Readonly<Record<string, unknown>> {
+    return NODE_ATTR_DEFAULTS
+  }
+
+  /**
+   * Puts one attribute back to its default (see attrDefaults), raising the change event like
+   * any other write. Throws for an attribute that has no default.
+   */
+  resetAttr(key: string): this {
+    const defaults = this.attrDefaults()
+    if (!(key in defaults)) {
+      throw new Error(`Node.resetAttr: '${key}' has no default to go back to on a ${this.nodeName}.`)
+    }
+    return this.setAttr(key, defaults[key])
+  }
+
+  // Built on first access and kept, so `node.attrs` is one object for the life of the node
+  // rather than a fresh proxy per read.
+  private attrsView: Record<string, unknown> | null = null
+
+  /**
+   * A live, writable view of this node's attributes - see attrKeys() for which.
+   *
+   *   node.attrs.x = 5           // moves the node, and raises 'xChange'
+   *   Object.keys(node.attrs)    // the attribute names
+   *   delete node.attrs.x        // back to the default (see resetAttr)
+   *
+   * Reads and writes go straight through getAttr()/setAttr(), so this is a second way to reach
+   * the properties rather than a copy of them: there is no snapshot to fall out of step, and no
+   * write that lands somewhere the node cannot see. Assigning `undefined` assigns undefined -
+   * `dragDistance` means something by it - and deleting is how to ask for the default instead.
+   */
   get attrs(): Record<string, unknown> {
-    const result: Record<string, unknown> = {}
-    for (const key of this.attrKeys()) result[key] = this.getAttr(key)
-    return result
+    if (!this.attrsView) this.attrsView = makeAttrsView(this)
+    return this.attrsView
   }
 
   // --- spatial seam ---
@@ -762,6 +1069,65 @@ export class Node {
     const local = this.parent.worldMatrix().inverse().transformPoint(new Vector3(value.x, value.y, 0))
     this.x = local.x
     this.y = local.y
+  }
+
+  // --- measurement ---
+
+  /**
+   * The box this node and everything under it covers, as x/y/width/height in the PARENT's
+   * space - or in whatever `relativeTo` names.
+   *
+   * One measurement that works on any node, which is what makes it the one to reach for when
+   * aligning, snapping, fitting a view or exporting with margins. A shape measures its own
+   * triangles, a container the union of its children carried up through their local matrices,
+   * and an empty container the empty box at the origin.
+   *
+   *   node.getClientRect()                            // where it sits in its parent
+   *   node.getClientRect({ relativeTo: scene.root })  // where it sits in the scene
+   *   node.getClientRect({ skipTransform: true })     // how big it is, wherever it is
+   *
+   * The SHADOW IS IN IT, because a shadow is part of what the node covers on screen and a box
+   * that cropped it would be wrong for the thing this is usually for. `skipShadow` takes it
+   * back out. The stroke is in it too, and how far it reaches depends on strokeAlign.
+   *
+   * Recomputed per call. What it is derived from - a shape's tessellation - is cached, so the
+   * walk itself is the whole of it.
+   */
+  getClientRect(options: ClientRectOptions = {}): ClientRect {
+    const box = new AABB()
+    const into = options.skipTransform ? Matrix4x4.identity() : this.localMatrix()
+    this.encapsulateClientBox(box, into, options)
+    if (!box.valid()) return EMPTY_CLIENT_RECT
+
+    if (options.relativeTo) {
+      // `into` has already put the box in this node's parent's space, so the rest of the way is
+      // the parent's own world transform seen from the ancestor.
+      const from = this.parent ? this.parent.worldMatrix() : Matrix4x4.identity()
+      const mapped = box.transformed(options.relativeTo.worldMatrix().inverse().mul(from))
+      return rectOf(mapped)
+    }
+    return rectOf(box)
+  }
+
+  /**
+   * Accumulates this node's own extent and its descendants' into `box`. `into` maps this node's
+   * LOCAL space into whatever space the box is being gathered in.
+   */
+  private encapsulateClientBox(box: AABB, into: Matrix4x4, options: ClientRectOptions): void {
+    const own = options.boundsOf?.(this) ?? this.selfBounds(options)
+    if (own && own.valid()) box.encapsulate(own.transformed(into))
+    this.eachChild((child) => {
+      if (!child.visible) return
+      child.encapsulateClientBox(box, into.mul(child.localMatrix()), options)
+    })
+  }
+
+  /**
+   * This node's own extent in its own local space, ignoring any children. Null for anything
+   * with nothing to draw, which is every Node and Container; Shape overrides it.
+   */
+  protected selfBounds(_options: ClientRectOptions): AABB | null {
+    return null
   }
 
   // --- traversal / search (uniform over leaves and containers) ---

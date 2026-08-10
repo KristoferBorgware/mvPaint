@@ -268,6 +268,9 @@ export async function createWebGl2SceneRenderer(
     pick(screenX: number, screenY: number) {
       return scene.pick(screenX, screenY)
     },
+    pickAll(screenX: number, screenY: number) {
+      return scene.pickAll(screenX, screenY)
+    },
     localBoundsOf(node: TransformableNode) {
       return scene.localBoundsOf(node)
     },

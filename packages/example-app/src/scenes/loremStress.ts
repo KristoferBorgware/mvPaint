@@ -291,7 +291,7 @@ export function addPageFrame(root: Container, index: number, layout: LoremLayout
     strokeWidth: 1.5,
   })
   // Decorative paper, not content - clicking it shouldn't compete with the text on top of it.
-  background.pickable = false
+  background.listening = false
   root.addChild(background)
 
   root.addChild(

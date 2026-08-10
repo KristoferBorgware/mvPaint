@@ -861,7 +861,7 @@ it('Transformer: the frame re-fits itself as the selection changes shape, and do
       assert(r.width === 1 && r.height === 1, 'every transformer part stays a unit shape')
       assert(r.strokeWidth === 0, 'transformer parts are fill-only, so nothing re-tessellates')
       assert(r.overlay, 'transformer parts draw in the always-on-top overlay pass')
-      assert(!r.pickable && !r.draggable, 'transformer parts are never picked or dragged as content')
+      assert(!r.listening && !r.draggable, 'transformer parts are never picked or dragged as content')
     })
     assert(parts === 4 + 9 * 2, 'four border edges plus two parts for each of the nine handles')
     assert(circles === 9 * 2, 'the handles are circles - only the four border bars are quads')
@@ -922,7 +922,7 @@ it('Transformer: the box never describes a set other than the one attached', () 
     assert(near(t.currentBox!.cx, 400) && near(t.currentBox!.cy, 300), 'the next refit fits the new selection')
 
     // Adding and removing invalidate it too - the box describes a set, not just a count.
-    t.add(first)
+    t.addNode(first)
     assert(t.currentBox === null, 'adding a node drops it as well')
     fit()
     const both = t.currentBox!
@@ -950,11 +950,11 @@ it('Transformer: the attached set, which the application drives one node at a ti
 
     assert(t.nodes.length === 0, 'a fresh transformer holds nothing')
 
-    t.add(a)
+    t.addNode(a)
     assert(t.nodes.length === 1 && t.has(a), 'add() attaches one node')
-    t.add(b)
+    t.addNode(b)
     assert(t.nodes.length === 2 && t.has(b), 'and another alongside it')
-    t.add(a)
+    t.addNode(a)
     assert(t.nodes.length === 2, 'adding one already attached changes nothing')
     assert(changes.length === 2, 'and announces nothing either')
 
@@ -981,7 +981,7 @@ it('Transformer: the attached set, which the application drives one node at a ti
 
     // The frame's own parts can never end up inside the set it is framing.
     const ownPart = t.children[0] as Rect
-    t.add(ownPart)
+    t.addNode(ownPart)
     assert(t.nodes.length === 0, "the transformer refuses to attach its own visuals")
     t.attach([ownPart, a])
     assert(t.nodes.length === 1 && t.nodes[0] === a, 'and filters them out of a wholesale attach too')
@@ -1084,10 +1084,11 @@ it('getAttr/setAttr/attrs: string-keyed access to a node\'s typed fields', () =>
     rect.setAttr('x', 42)
     assert(rect.x === 42, 'setAttr falls back to a direct assignment when no dedicated setter exists')
 
-    const snapshot = rect.attrs
-    assert(snapshot.x === 42 && snapshot.id === rect.id && snapshot.fill === rect.fill, 'attrs includes both the base Node keys and the subclass ones')
+    const view = rect.attrs
+    assert(view.x === 42 && view.id === rect.id && view.fill === rect.fill, 'attrs includes both the base Node keys and the subclass ones')
     rect.x = 100
-    assert(snapshot.x === 42 && rect.attrs.x === 100, 'attrs is a fresh snapshot each read, not a live view')
+    assert(view.x === 100, 'attrs is a live view, so a held reference follows the node')
+    assert(rect.attrs === view, 'and it is one object per node rather than a new one per read')
 
     // A class that declares a dedicated setFoo() alongside a plain foo field: setAttr must
     // call it rather than assign foo directly, since some real attributes (Text.runs,
@@ -1656,8 +1657,13 @@ it('...and writing the same value back announces nothing', () => {
     shape.fillPriority = 'color'
     assert(objectRecordEpoch() === was, 'writing a value back unchanged announces nothing')
 
-    // A colour goes through the parser, so it is a fresh tuple every time and cannot be compared
-    // that way - assigning one always announces, which is the safe direction.
+    // A colour is compared on the form it was WRITTEN in rather than on the tuple it parses to,
+    // which is what lets one colour name written twice cost nothing.
     shape.fill = 'teal'
-    assert(objectRecordEpoch() > was, 'a re-assigned colour announces, since a parsed tuple is always new')
+    assert(objectRecordEpoch() === was, 'a colour name written back unchanged announces nothing')
+
+    // A freshly built tuple is a new value even when its four numbers match, the same identity
+    // rule the gradient points follow.
+    shape.fill = [0, 0.5, 0.5, 1]
+    assert(objectRecordEpoch() > was, 'while a new tuple announces, since nothing can prove it equal')
 })

@@ -223,14 +223,19 @@ render path implements, and it mentions no graphics API.
 
 ### Dirty marking
 
-- Changing a transform, colour or gradient is free. These live in a per-object GPU buffer
-  refreshed every frame.
-- Changing what a shape *is* — a radius, a point list, a stroke width — re-tessellates it, and
-  says so on its own. Assign and it appears.
+- Changing a transform, colour, gradient or image tint is free. These live in a per-object GPU
+  buffer refreshed every frame.
+- Changing what a shape *is* — a radius, a point list, a stroke width, a dash pattern — 
+  re-tessellates it, and says so on its own. Assign and it appears.
+- Changing what an `Image` shows — its texture, crop, fit, tiling, flip, wrap or filter — repacks
+  the image lane, and says so on its own too.
+- Changing how text is laid out — `align`, `maxWidth`, `lineHeight`, `padding`, `fontFamily`,
+  `textPath` — re-shapes it, and says so on its own.
 - Adding or removing nodes needs no mark. The visible set is recomputed each frame.
 - `shape.markGeometryDirty()` is left for the two cases no setter can see: an array edited in
   place (`points.push(...)` rather than assigning a new list), and a property of your own
-  `CustomShape` that its `describe()` reads.
+  `CustomShape` that its `describe()` reads. `text.markDirty()` is the same for a `textPath`
+  object edited rather than replaced.
 
 ### Shared resources
 
@@ -295,7 +300,7 @@ Two conventions:
 children, and `Group` and `Layer` extend that. `Shape` extends `Node` directly and adds
 everything that paints.
 
-The attribute set on `Node` follows Konva's, so a Konva scene reads here without translation:
+Every node carries the same attribute set, drawable or not:
 `width`/`height`, `visible`, `opacity`, `zIndex`, `listening`, `preventDefault`, `draggable`,
 `dragDistance` and `dragBoundFunc` sit alongside the transform, with `position`, `scale`,
 `skew`, `offset`, `size` and `absolutePosition` as compound accessors over the components.

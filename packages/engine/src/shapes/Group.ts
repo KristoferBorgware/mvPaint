@@ -40,20 +40,11 @@
 import { AABB } from '../math/AABB'
 import { Matrix4x4 } from '../math/Matrix4x4'
 import { Container } from './Container'
-import { Node, type NodeOptions } from './Node'
+import { Node, type LocalBoundsResolver, type NodeOptions } from './Node'
 import { Shape } from './Shape'
 
 /** A group adds no options of its own - everything it takes is a Node's. */
 export type GroupOptions = NodeOptions
-
-/**
- * A node's own bounds in its own local space, or null for something with nothing to
- * measure. Shapes answer this from their tessellated triangles; an MSDFText has to be shaped
- * against a font atlas first, which is why the resolver is a parameter rather than a
- * method call - the group cannot reach an MSDFFontBook, and the caller that cares already has
- * one (see scene/picking.ts's localBoundsOf).
- */
-export type LocalBoundsResolver = (node: Node) => AABB | null
 
 /** What a group measures with when the caller has no opinion: mesh geometry only. */
 export const shapeGeometryBounds: LocalBoundsResolver = (node) =>

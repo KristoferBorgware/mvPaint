@@ -45,10 +45,19 @@ export function shapeLocalBounds(shape: Shape): AABB {
   return shape.localBounds()
 }
 
-/** True if the world point falls inside any of the shape's fill/stroke triangles. */
+/**
+ * True if the world point falls inside any of the shape's hit triangles.
+ *
+ * The cheap rejection is against hitBounds(), NOT localBounds(). The two are the same box for
+ * almost every shape, and differ for exactly the shapes this distinction exists for: a shape
+ * given its own hitStrokeWidth is hit-tested against a wider ribbon than it draws, and a
+ * rejection measured on the drawn box would clear every point that ribbon was widened to catch
+ * - leaving the property with no effect at all through this function, which is the only way a
+ * pointer ever reaches a shape.
+ */
 export function hitTestShape(shape: Shape, worldX: number, worldY: number): boolean {
   const world = shape.worldMatrix()
-  const worldBounds = shape.localBounds().transformed(world)
+  const worldBounds = shape.hitBounds().transformed(world)
   if (!worldBounds.valid() || !worldBounds.contains(new Vector3(worldX, worldY, 0))) return false
   const local = world.inverse().transformPoint(new Vector3(worldX, worldY, 0))
   return shape.hitTestLocal(local.x, local.y)
@@ -106,16 +115,35 @@ function collectShapes(node: Node, predicate: (shape: Shape) => boolean, out: Sh
   }
 }
 
-function collectSortedShapes(scene: Scene, predicate: (shape: Shape) => boolean): Shape[] {
+/**
+ * The same walk, additionally turning back at a node the pointer cannot reach. `listening` is
+ * read at each level rather than each shape asking isListening() about its ancestors, so an
+ * overlay layer holding a thousand pieces of editor furniture costs one check.
+ */
+function collectListeningShapes(node: Node, out: Shape[]): void {
+  if (!node.visible || !node.listening) return
+  if (node instanceof Shape) out.push(node)
+  if (node instanceof Container) {
+    for (const child of node.children) collectListeningShapes(child, out)
+  }
+}
+
+/**
+ * Every shape a pointer could land on, ascending by zIndex - visible, listening, and with
+ * every non-listening subtree pruned whole. This is the candidate set for pickNode() and for
+ * marquee selection (scene/selection.ts), so the two can never disagree about what is
+ * reachable.
+ */
+export function collectPickCandidates(scene: Scene): Shape[] {
   const all: Shape[] = []
-  collectShapes(scene.root, predicate, all)
+  collectListeningShapes(scene.root, all)
   return all.sort((a, b) => a.zIndex - b.zIndex)
 }
 
 /**
  * Every visible Shape (mesh shape or MSDFText) in the scene, ascending by zIndex (ties keep
- * scene order) - rank 0 is furthest back. Includes non-pickable shapes (e.g. a
- * selection-highlight overlay still needs a correct depth to render at).
+ * scene order) - rank 0 is furthest back. Includes shapes the pointer cannot reach: a
+ * selection-highlight overlay is not pickable and still needs a correct depth to render at.
  *
  * `sorted = false` skips the zIndex sort and returns plain traversal order instead - an
  * O(n log n) cost that's waste for a scene built front-to-back in one pass, where creation
@@ -139,15 +167,15 @@ export function depthForRank(rank: number, count: number): number {
 }
 
 /**
- * The topmost pickable node under a world point, or null. Walks the SAME zIndex-sorted
- * order the renderer derives depth from (see collectZOrder), front-to-back (highest
- * zIndex/rank first), so picking always matches what's visually on top. Invisible and
- * non-pickable nodes (see `pickable`) are skipped. `fonts` may be omitted when the
- * scene has no MSDFText nodes worth testing (e.g. before the atlases have loaded) - text
- * candidates are then skipped rather than matched.
+ * The topmost node under a world point, or null. Walks the SAME zIndex-sorted order the
+ * renderer derives depth from (see collectZOrder), front-to-back (highest zIndex/rank first),
+ * so picking always matches what's visually on top. Hidden and non-listening subtrees are
+ * skipped whole (see `listening`). `fonts` may be omitted when the scene has no MSDFText nodes
+ * worth testing (e.g. before the atlases have loaded) - text candidates are then skipped rather
+ * than matched.
  */
 export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: MSDFFontFamilies): PickableNode | null {
-  const ordered = collectSortedShapes(scene, (shape) => shape.pickable)
+  const ordered = collectPickCandidates(scene)
   for (let i = ordered.length - 1; i >= 0; i--) {
     const node = ordered[i]
     if (node instanceof MSDFText) {
@@ -165,6 +193,37 @@ export function pickNode(scene: Scene, worldX: number, worldY: number, fonts?: M
  * this same function so text inside a group is bounded by its glyphs like text anywhere
  * else.
  */
+/**
+ * EVERY node under a world point, topmost first - the same walk pickNode() makes, without the
+ * early return.
+ *
+ * pickNode() answers "what did I click on", which is one node and is what a click means. This
+ * answers "what is here", which a click cannot: an editor cycling through stacked shapes on
+ * repeated clicks in one place, an alt-click reaching for the thing underneath, or a readout
+ * naming everything below the pointer all need the whole column rather than its top.
+ *
+ * It tests every candidate rather than stopping at the first hit, so reach for pickNode() when
+ * one answer is all that is wanted.
+ */
+export function getAllIntersections(
+  scene: Scene,
+  worldX: number,
+  worldY: number,
+  fonts?: MSDFFontFamilies,
+): PickableNode[] {
+  const ordered = collectPickCandidates(scene)
+  const hits: PickableNode[] = []
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const node = ordered[i]
+    if (node instanceof MSDFText) {
+      if (fonts && hitTestText(node, fonts, worldX, worldY)) hits.push(node)
+    } else if (hitTestShape(node, worldX, worldY)) {
+      hits.push(node)
+    }
+  }
+  return hits
+}
+
 export function localBoundsOf(node: TransformableNode, fonts: MSDFFontFamilies): AABB {
   if (node instanceof Group) return node.bounds((child) => nodeLocalBounds(child, fonts))
   return node instanceof MSDFText ? textLocalBounds(node.shaped(fonts.resolveFamily(node.fontFamily))) : shapeLocalBounds(node)

@@ -314,7 +314,7 @@ export function attachSceneInput(
       const hit = event.target
       if (hit === root || !(hit instanceof Shape)) return
       const target = selectionTarget(hit)
-      if ((event.evt as PointerEvent | undefined)?.shiftKey) transformer.add(target)
+      if ((event.evt as PointerEvent | undefined)?.shiftKey) transformer.addNode(target)
       else if (!transformer.has(target)) transformer.attach([target])
     })
 
@@ -391,7 +391,7 @@ export function attachSceneInput(
       // Same rule as a press: a rectangle that catches part of a group has caught the group.
       // Deduplicated, since several members map to the same one.
       const targets = [...new Set(covered.map(selectionTarget))]
-      if (marqueeAdds) for (const node of targets) transformer.add(node)
+      if (marqueeAdds) for (const node of targets) transformer.addNode(node)
       else transformer.attach(targets)
     })
   }

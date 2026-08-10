@@ -19,7 +19,7 @@
 // changes) is a follow-up once the batcher can pass pixels-per-unit into tessellation.
 
 import type { Vector2Like } from '../math/Vector2'
-import { Shape, type ShapeOptions } from './Shape'
+import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import {strokePolyline} from '../render/stroke'
 
@@ -41,6 +41,25 @@ export interface CircleOptions extends ShapeOptions {
   segments?: number
 }
 
+
+/** See Node.attrDefaults. width/height come back through radius, so all three agree at 0. */
+let cachedCircleAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
+ * module-level spread is evaluated in whatever order the bundler happened to link the two - so
+ * an import cycle, or a dev server reloading one module without the other, reads the imported
+ * name before it exists. Deferring it to the first call puts the read long after every module
+ * has finished evaluating.
+ */
+function circleAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedCircleAttrDefaults ??= Object.freeze({
+    ...shapeAttrDefaults(),
+    radius: 0,
+    segments: undefined,
+  }))
+}
+
 export class Circle extends Shape {
   override readonly nodeName: string = 'Circle'
 
@@ -51,8 +70,10 @@ export class Circle extends Shape {
   }
   set radius(value: number) {
     if (value === this._radius) return
+    const previous = this._radius
     this._radius = value
     this.markGeometryDirty()
+    this.announce('radius', previous, value)
   }
 
   /** Rim segments, or undefined to pick a count from the radius. Assigning it re-tessellates. */
@@ -62,8 +83,10 @@ export class Circle extends Shape {
   }
   set segments(value: number | undefined) {
     if (value === this._segments) return
+    const previous = this._segments
     this._segments = value
     this.markGeometryDirty()
+    this.announce('segments', previous, value)
   }
 
   constructor(options: CircleOptions = {}) {
@@ -87,6 +110,10 @@ export class Circle extends Shape {
 
   protected override attrKeys(): readonly string[] {
     return [...super.attrKeys(), 'radius', 'segments']
+  }
+
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return circleAttrDefaults()
   }
 
   override get width(): number {
@@ -122,7 +149,9 @@ export class Circle extends Shape {
 
     if (this.hasStroke()) {
       strokePolyline(rim, sink, {
-        width: this.strokeWidth,
+        width: this.strokeWidthForBuild(),
+        dash: this.dashForBuild(),
+        dashOffset: this.dashOffset,
         closed: true,
         align: this.strokeAlign,
         join: this.lineJoin,

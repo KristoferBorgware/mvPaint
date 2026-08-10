@@ -39,13 +39,13 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import { Shape } from '../shapes/Shape'
-import { meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
+import { imageGeometryEpoch, meshGeometryEpoch, textShapingEpoch } from '../shapes/contentEpoch'
 import { MSDFText } from '../shapes/MSDFText'
 import { Camera2D } from '../camera/Camera2D'
 import type { CaptureView } from '../render/capture'
 import { Scene } from '../scene/Scene'
 import { AABB } from '../math/AABB'
-import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { collectZOrder, getAllIntersections, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
 import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { SceneGather, sameMembers } from '../render/gather'
 import type { TransformableNode } from '../shapes/Group'
@@ -134,6 +134,7 @@ export class SceneRenderer {
   // packs many nodes into shared buffers and never revisits them. See shapes/contentEpoch.
   private builtMeshEpoch = -1
   private builtTextEpoch = -1
+  private builtImageEpoch = -1
   private imageGeometryDirty = true
   // The shapes/text currently packed into the batchers - i.e. the last computed visible
   // set - so draw() can tell whether culling's output actually changed this frame.
@@ -267,7 +268,7 @@ export class SceneRenderer {
   }
 
   /**
-   * The topmost pickable shape/text under a viewport pixel (CSS px, relative to the
+   * The topmost reachable shape/text under a viewport pixel (CSS px, relative to the
    * canvas's own top-left - e.g. `event.clientX/Y` minus `canvas.getBoundingClientRect()`).
    */
   pick(screenX: number, screenY: number): PickableNode | null {
@@ -279,13 +280,26 @@ export class SceneRenderer {
     return pickNode(this.scene, world.x, world.y, this.fonts)
   }
 
+  /**
+   * EVERY reachable shape/text under a viewport pixel, topmost first - pick() without the early
+   * return. See scene/picking.ts's getAllIntersections for when the whole column is wanted.
+   */
+  pickAll(screenX: number, screenY: number): PickableNode[] {
+    const world = screenToWorld(this.camera, screenX, screenY, {
+      width: this.canvas.clientWidth,
+      height: this.canvas.clientHeight,
+    })
+    if (!world) return []
+    return getAllIntersections(this.scene, world.x, world.y, this.fonts)
+  }
+
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
   localBoundsOf(node: TransformableNode): AABB {
     return localBoundsOf(node, this.fonts)
   }
 
   /**
-   * Every visible, pickable shape meeting a world-space rectangle - what a marquee
+   * Every reachable shape meeting a world-space rectangle - what a marquee
    * selects. Goes through the renderer so MSDFText is measured against the loaded atlases.
    */
   nodesInBox(from: Vector2Like, to: Vector2Like, options: MarqueeOptions = {}): Shape[] {
@@ -302,8 +316,14 @@ export class SceneRenderer {
     this.textGeometryDirty = true
   }
 
-  /** Force an image-lane rebuild on the next draw (after adding/removing an Image, or
-   * changing one's texture, crop, tiling or flip - none of which is a per-frame value). */
+  /**
+   * Force an image-lane rebuild on the next draw.
+   *
+   * An escape hatch rather than routine bookkeeping: an Image's own packed properties announce
+   * themselves (see Image and contentEpoch.ts), and adding or removing one is caught by the
+   * visible-set comparison. This is for a change neither of those can see - a texture whose
+   * PIXELS were rewritten in place under the same object.
+   */
   markImageGeometryDirty(): void {
     this.imageGeometryDirty = true
   }
@@ -434,12 +454,18 @@ export class SceneRenderer {
     this.visibleTexts = visibleTexts
     this.textBatcher.updateObjects(depths)
 
-    // Image lane. Its geometry only changes when the visible SET does, or when a node's
-    // texture/crop/tiling/flip does - all of which come with an explicit dirty mark, since
-    // none of them is a per-frame value the way a transform or a tint is.
-    if (this.imageGeometryDirty || !sameMembers(visibleImages, this.visibleImages)) {
+    // Image lane. Its packed geometry changes when the visible SET does, or when a node's
+    // texture, crop, tiling, flip, wrap, filter or size does - the latter announced through the
+    // image content epoch, since none of them is a per-frame value the way a transform or a
+    // tint is.
+    if (
+      this.imageGeometryDirty ||
+      this.builtImageEpoch !== imageGeometryEpoch() ||
+      !sameMembers(visibleImages, this.visibleImages)
+    ) {
       this.imageBatcher.rebuild(visibleImages)
       this.imageGeometryDirty = false
+      this.builtImageEpoch = imageGeometryEpoch()
     }
     this.visibleImages = visibleImages
     this.imageBatcher.updateObjects(depths as ReadonlyMap<Image, number>)

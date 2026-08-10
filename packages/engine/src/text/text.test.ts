@@ -1137,11 +1137,11 @@ it('padding insets a vertical block on its own axes', () => {
 
 const styleOf = (node: { runs: readonly TextRun[] }) => node.runs[0].style ?? {}
 
-it('a uniform text node is one run, sized and painted as Konva would', () => {
+it('a uniform text node is one run, sized and painted from the node itself', () => {
     const label = new UniformMSDFText({ text: 'Hello' })
     assert(label.runs.length === 1, 'exactly one run')
     assert(label.runs[0].text === 'Hello', 'carrying the string')
-    assert(styleOf(label).fontSize === 12, "at Konva's default size, not the engine's 32")
+    assert(styleOf(label).fontSize === 12, "at the uniform default size, not the engine's 32")
     assert(JSON.stringify(styleOf(label).color) === '[0,0,0,1]', 'and opaque black, which nothing else in this engine defaults to')
 
     // Saying nothing about fill is what gets the black; saying `null` means what it says.

@@ -57,7 +57,7 @@
 
 import type { MeshMaterial, MeshSink } from '../render/meshFormat'
 import { strokePolyline } from '../render/stroke'
-import { Shape, type ShapeOptions } from './Shape'
+import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
 import { ShapeContext, type ShapeDescription } from './ShapeContext'
 
 export interface CustomShapeOptions extends ShapeOptions {
@@ -68,6 +68,24 @@ export interface CustomShapeOptions extends ShapeOptions {
    * zoomed far in wants a smaller value rather than a rebuild.
    */
   tolerance?: number
+}
+
+
+/** See Node.attrDefaults. */
+let cachedCustomShapeAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
+ * module-level spread is evaluated in whatever order the bundler happened to link the two - so
+ * an import cycle, or a dev server reloading one module without the other, reads the imported
+ * name before it exists. Deferring it to the first call puts the read long after every module
+ * has finished evaluating.
+ */
+function customShapeAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedCustomShapeAttrDefaults ??= Object.freeze({
+    ...shapeAttrDefaults(),
+    tolerance: 0.25,
+  }))
 }
 
 export abstract class CustomShape extends Shape {
@@ -86,8 +104,10 @@ export abstract class CustomShape extends Shape {
   }
   set tolerance(value: number) {
     if (value === this._tolerance) return
+    const previous = this._tolerance
     this._tolerance = value
     this.markGeometryDirty()
+    this.announce('tolerance', previous, value)
   }
 
   // The description, not the triangles: Shape caches those separately and asks for them on
@@ -103,6 +123,10 @@ export abstract class CustomShape extends Shape {
 
   protected override attrKeys(): readonly string[] {
     return [...super.attrKeys(), 'tolerance']
+  }
+
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return customShapeAttrDefaults()
   }
 
   /**

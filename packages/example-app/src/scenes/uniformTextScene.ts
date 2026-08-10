@@ -74,6 +74,10 @@ export function buildUniformTextScene(scene: Scene, resources: SceneResources): 
   // The lower one is a plain MSDFText given the SAME assignment. It does nothing there - a text
   // lane paints from the run, and `Shape.fill` is not part of that - which is exactly the
   // mismatch this class removes.
+  //
+  // It also prints a warning to the console, on purpose. Assigning a fill that goes nowhere is
+  // what the warning exists to catch, so a scene demonstrating the mismatch demonstrates the
+  // warning with it - the console line here is part of the exhibit, not a fault in it.
   root.addChild(heading(-40, -320, 'Against a plain MSDFText'))
   root.addChild(caption(-40, -292, 'both told fill = crimson; only one of them is listening', 420))
 

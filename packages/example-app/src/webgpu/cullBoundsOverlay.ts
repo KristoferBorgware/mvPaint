@@ -65,7 +65,7 @@ export class CullBoundsOverlay extends Container {
    */
   private makePart(name: string): Rect {
     const rect = new Rect({ name, width: 1, height: 1, offsetX: 0.5, offsetY: -0.5, fill: [...OUTLINE_COLOR], strokeWidth: 0, zIndex: Z_INDEX, scaleX: 0, scaleY: 0 })
-    rect.pickable = false
+    rect.listening = false
     this.addChild(rect)
     return rect
   }

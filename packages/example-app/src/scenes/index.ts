@@ -3,6 +3,7 @@
 
 import { buildColorScene } from './colorScene'
 import { buildCustomShapeScene } from './customShapeScene'
+import { buildDashScene } from './dashScene'
 import { buildGroupScene } from './groupScene'
 import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildLayerScene } from './layerScene'
@@ -48,6 +49,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'strokeWidth under transforms. By default the width is a local-space measurement and scales with the node; strokeScaleEnabled: false builds the ribbon through the world transform instead, so the outline holds its width under group scale, animated scale and non-uniform scale alike. The right-hand row is the other axis: strokeAlign inside/center/outside, with the node bounds printed underneath, since moving the ribbon changes what the node measures.',
     build: buildStrokeScaleScene,
+  },
+  {
+    id: 'dashes',
+    title: 'Dashed strokes',
+    description:
+      'dash/dashOffset/dashEnabled: the outline is cut into pieces before the ribbon is built, so every piece is an ordinary open path. Covers the pattern vocabulary (including a dotted line, which is a dash short enough that its two round caps meet), a pattern measured around a corner rather than restarting at it, strokeAlign surviving the cut, a dash carried through the gauge under strokeScaleEnabled: false, and dashOffset animated into marching ants. The bottom right is hitStrokeWidth: three hairlines drawn one unit wide, two of which are easy to grab, and the third scaled by six along with its hit ribbon.',
+    build: buildDashScene,
   },
   {
     id: 'groups',

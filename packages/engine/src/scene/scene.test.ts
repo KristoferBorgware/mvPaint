@@ -158,7 +158,7 @@ it('picking: hitTestShape tests against the shape\'s own tessellated triangles',
     assert(!hitTestShape(rotated, 19, 0), 'rotated rect misses where the unrotated rect would have hit')
 })
 
-it('picking: pickNode finds the topmost hit and respects visible/pickable', () => {
+it('picking: pickNode finds the topmost hit and respects visible/listening', () => {
     const scene = new Scene()
     const back = scene.root.addChild(centredRect({ name: 'back', x: 0, y: 0, width: 100, height: 100 }))
     const front = scene.root.addChild(centredRect({ name: 'front', x: 20, y: 0, width: 60, height: 60 }))
@@ -171,9 +171,9 @@ it('picking: pickNode finds the topmost hit and respects visible/pickable', () =
     assert(pickNode(scene, 20, 0) === back, 'invisible node is skipped, falls through to the one below')
     front.visible = true
 
-    front.pickable = false
-    assert(pickNode(scene, 20, 0) === back, 'non-pickable node is skipped, falls through to the one below')
-    front.pickable = true
+    front.listening = false
+    assert(pickNode(scene, 20, 0) === back, 'a non-listening node is skipped, falls through to the one below')
+    front.listening = true
 })
 
 //     collectZOrder and picking ---
@@ -223,14 +223,14 @@ it('higher zIndex is in FRONT, end to end', () => {
     assert(pickNode(scene, 0, 0) === front, 'and picking agrees with it')
 })
 
-//     offset, visible/pickable from the same base as every mesh shape, which is what
+//     offset, visible/listening from the same base as every mesh shape, which is what
 //     makes cross-lane zIndex ordering (a shape in front of text, or vice versa)
 //     possible without picking/depth needing to special-case "which lane" a node is in ---
 it('MSDFText is a Shape now (not a lane-specific special case): it inherits zIndex,', () => {
-    assert(MSDFText.prototype instanceof Shape, 'MSDFText extends Shape, carrying zIndex/offset/pickable like a mesh shape')
+    assert(MSDFText.prototype instanceof Shape, 'MSDFText extends Shape, carrying zIndex/offset/listening like a mesh shape')
     const beforeText = new Rect({ width: 1, height: 1 })
     assert(new MSDFText().zIndex > beforeText.zIndex, 'MSDFText takes its zIndex from the same counter every mesh shape does')
-    assert(new MSDFText().pickable, 'MSDFText inherits the pickable default')
+    assert(new MSDFText().listening, 'MSDFText inherits the listening default')
 
     // Shape's full styling vocabulary (width/height/fill/stroke/...) is inherited too, even
     // though MSDFText's own rich per-run styling doesn't use it - one shared vocabulary instead
@@ -329,10 +329,10 @@ it('marquee: nodesInBox picks up everything a dragged rectangle meets', () => {
       'contain mode takes a shape that is fully inside',
     )
 
-    // The same visible/pickable rules picking uses - an overlay must not be marquee-able.
-    right.pickable = false
-    assert(!nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }).includes(right), 'a non-pickable shape is skipped')
-    right.pickable = true
+    // The same visible/listening rules picking uses - an overlay must not be marquee-able.
+    right.listening = false
+    assert(!nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }).includes(right), 'a non-listening shape is skipped')
+    right.listening = true
     left.visible = false
     assert(!nodesInBox(scene, { x: -200, y: -100 }, { x: 200, y: 100 }).includes(left), 'an invisible shape is skipped')
     left.visible = true

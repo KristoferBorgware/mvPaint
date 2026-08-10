@@ -23,7 +23,7 @@
 //     layer must not make them one draggable object.
 //   - A layer is not one. It extends Container rather than Group, so closestGroup(),
 //     outermostGroup() and draggableGroup() walk straight past it and every shape inside stays
-//     independently pickable, draggable, selectable and transformable - as if the layer were
+//     independently reachable, draggable, selectable and transformable - as if the layer were
 //     not there.
 //
 // It still carries a transform, because every Node does and composing it costs nothing while

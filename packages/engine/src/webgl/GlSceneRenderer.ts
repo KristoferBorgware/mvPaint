@@ -25,12 +25,12 @@ import { flipRows, type CapturePlan, type CaptureView } from '../render/capture'
 import { GlCaptureTarget } from './GlCaptureTarget'
 import type { AABB } from '../math/AABB'
 import { Scene } from '../scene/Scene'
-import { collectZOrder, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
+import { collectZOrder, getAllIntersections, localBoundsOf, pickNode, type PickableNode } from '../scene/picking'
 import { nodesInBox, type MarqueeOptions } from '../scene/selection'
 import { screenToWorld } from '../input/viewport'
 import { Shape } from '../shapes/Shape'
 import type { TransformableNode } from '../shapes/Group'
-import { meshGeometryEpoch } from '../shapes/contentEpoch'
+import { imageGeometryEpoch, meshGeometryEpoch } from '../shapes/contentEpoch'
 import { SceneGather, sameMembers } from '../render/gather'
 import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { textShapingEpoch } from '../shapes/contentEpoch'
@@ -92,6 +92,7 @@ export class GlSceneRenderer {
   private imageGeometryDirty = true
   private builtMeshEpoch = -1
   private builtTextEpoch = -1
+  private builtImageEpoch = -1
   private visibleMeshShapes: readonly Shape[] = []
   private visibleTexts: readonly MSDFText[] = []
   private visibleImages: readonly Image[] = []
@@ -221,6 +222,19 @@ export class GlSceneRenderer {
     return pickNode(this.scene, world.x, world.y, this.fonts)
   }
 
+  /**
+   * EVERY reachable shape/text under a viewport pixel, topmost first - pick() without the early
+   * return. See scene/picking.ts's getAllIntersections for when the whole column is wanted.
+   */
+  pickAll(screenX: number, screenY: number): PickableNode[] {
+    const world = screenToWorld(this.camera, screenX, screenY, {
+      width: this.canvas.clientWidth,
+      height: this.canvas.clientHeight,
+    })
+    if (!world) return []
+    return getAllIntersections(this.scene, world.x, world.y, this.fonts)
+  }
+
   localBoundsOf(node: TransformableNode): AABB {
     return localBoundsOf(node, this.fonts)
   }
@@ -325,9 +339,14 @@ export class GlSceneRenderer {
     // The image lane's geometry only changes when the visible SET does, or when a node's
     // texture, crop, tiling or flip does - all of which come with an explicit dirty mark,
     // since none of them is a per-frame value the way a transform or a tint is.
-    if (this.imageGeometryDirty || !sameMembers(g.images, this.visibleImages)) {
+    if (
+      this.imageGeometryDirty ||
+      this.builtImageEpoch !== imageGeometryEpoch() ||
+      !sameMembers(g.images, this.visibleImages)
+    ) {
       this.imageBatcher.rebuild(g.images)
       this.imageGeometryDirty = false
+      this.builtImageEpoch = imageGeometryEpoch()
     }
     this.visibleImages = g.images
     this.imageBatcher.updateObjects(g.depths as ReadonlyMap<Image, number>)

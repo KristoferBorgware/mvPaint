@@ -102,7 +102,7 @@ them at different points in the frame.
 
 ## Scene graph
 
-![The class hierarchy. Node holds the transform and every attribute Konva puts on its own Node; Container adds only a child list; Shape adds the paint and geometry vocabulary. Each leaf is tagged with the lane it draws through.](docs/node-hierarchy.svg)
+![The class hierarchy. Node holds the transform and the whole common attribute set; Container adds only a child list; Shape adds the paint and geometry vocabulary. Each leaf is tagged with the lane it draws through.](docs/node-hierarchy.svg)
 
 Three tiers own everything, and the lane tag on each leaf is worth reading twice: **`Image`
 draws through the image lane but still carries mesh geometry** — that is what its silhouette,
@@ -116,16 +116,17 @@ transform** — position, rotation, scale, skew and pivot offset (`rotation` in 
 `math/angle.ts` for where the unit changes). Every node in the tree is
 placeable, drawable or not.
 
-It also carries every attribute Konva puts on its own `Node`, which is the reference this API is
-shaped after: `width`/`height`, `visible`, `opacity`, `zIndex`, `listening`, `preventDefault`,
-`draggable`, `dragDistance` and `dragBoundFunc` — plus the compound accessors `position`,
-`scale`, `skew`, `offset`, `size` and `absolutePosition`, which read and write the components in
-pairs. `attrKeys()` lists the components rather than the compounds, so `node.attrs` reports each
-value once. Three of Konva's are deliberately absent, each because of what this renderer is
-rather than what the attribute is: `globalCompositeOperation` (a canvas blend mode; here a
-pipeline per mode and a repack of the draw list), `transformsEnabled` (names an optimisation
-`localMatrix()` already performs unconditionally) and `filters` (Konva's run over a cached
-canvas; there is no cache-to-texture layer). `shapes/konvaParity.test.ts` pins all three claims.
+It also carries the attributes every node has, drawable or not: `width`/`height`, `visible`,
+`opacity`, `zIndex`, `listening`, `preventDefault`, `draggable`, `dragDistance` and
+`dragBoundFunc` — plus the compound accessors `position`, `scale`, `skew`, `offset`, `size` and
+`absolutePosition`, which read and write the components in pairs. `attrKeys()` lists the
+components rather than the compounds, so `node.attrs` reports each value once. Three attributes
+a 2D scene graph might be expected to carry are deliberately absent, each because of what this
+renderer is rather than what the attribute is: `globalCompositeOperation` (a canvas blend mode;
+here a pipeline per mode and a repack of the draw list), `transformsEnabled` (names an
+optimisation `localMatrix()` already performs unconditionally) and `filters` (a filter runs over
+a cached raster; there is no cache-to-texture layer). `shapes/nodeAttributes.test.ts` pins all
+three claims.
 
 `visible` and `opacity` are the two that govern a whole subtree — a hidden node takes everything
 under it out of the render and out of picking, and opacity multiplies through the chain
@@ -948,11 +949,11 @@ way assigning `x` always did:
 
 | | |
 | --- | --- |
-| `Shape` | `strokeWidth`, `strokeAlign`, `lineJoin`, `lineCap`, `miterLimit`, `strokeScaleEnabled` |
+| `Shape` | `strokeWidth`, `strokeEnabled`, `strokeAlign`, `dash`, `dashOffset`, `dashEnabled`, `lineJoin`, `lineCap`, `miterLimit`, `strokeScaleEnabled` |
 | `Rect` | `width`, `height`, `cornerRadius`, `cornerSegments` |
 | `Circle` | `radius`, `segments` — and `width`/`height`, which are the radius under another name |
 | `Polyline` | `points`, `closed` |
-| `Path` | `filled` |
+| `Path` | `contours`, `filled` |
 | `Image` | `width`, `height` |
 | `CustomShape` | `tolerance` |
 
@@ -960,17 +961,33 @@ way assigning `x` always did:
 nothing more; gaining or losing a colour changes whether the stroker emits a ribbon at all, so
 `null` on either side of the assignment repacks as well.
 
-`markGeometryDirty()` drops the shape's tessellation and pick caches, bumps its
+`fillEnabled` and `strokeEnabled` look alike and are not. A fill's triangles exist whatever the
+fill says and the paint is chosen per frame, so switching the fill off is a record rewrite;
+a stroke's ribbon is geometry that was either emitted or not, so switching the stroke off is a
+re-tessellation — and it changes what the shape measures, exactly as `strokeAlign` does.
+
+`markGeometryDirty()` drops the shape's tessellation, bounds and pick caches, bumps its
 `geometryVersion` (the shadow atlas keys its baked silhouette on that), and bumps the mesh
 epoch. Every setter above guards on the value differing first, so writing a node's own value
 back — which a property inspector bound to a slider does constantly — costs nothing.
 
+`hitStrokeWidth` is the one geometry-shaped property that deliberately does **not** go through
+it: only the pick cache is rebuilt, so a hairline can be made easy to click without repacking a
+lane or re-baking a shadow, and without the fat hit ribbon reaching anything that measures the
+shape.
+
+What it does is stroke the outline **at that width instead**, in the shape's own units like
+`strokeWidth` itself, so the hit ribbon is ordinary local-space geometry: a transform is applied
+over it rather than baked into it, and it scales with the node and its groups exactly as the line
+it belongs to does. The pair is set together and read as one thing — a 1-unit line with a 24-unit
+target — and a ribbon that stayed put while the line grew would break that pairing at the first
+scale. Substituting does mean a hit width below the drawn width makes a shape harder to hit than
+it looks, which is the caller's to avoid.
+
 **Two things still need the call by hand**, because neither is an assignment a setter can see:
 
-- **Editing an array in place.** `line.points.push(p)` and `line.points[0].x = 4` are invisible;
-  assigning a new list is not. The same goes for `Path.contours`, which is `readonly` — its
-  contour grouping is computed once at construction, so a `Path`'s outline is fixed for its
-  lifetime.
+- **Editing an array in place.** `line.points.push(p)`, `line.points[0].x = 4` and
+  `path.contours[0].points.push(p)` are invisible; assigning a new list is not.
 - **A `CustomShape` property its own `describe()` reads.** `Shape` cannot see an assignment to a
   field it does not declare, so give it a setter that calls `markGeometryDirty()` the way
   `tolerance` does. A change to the *length* of `materials()` is the same story.
@@ -978,6 +995,18 @@ back — which a property inspector bound to a slider does constantly — costs 
 Toggling `visible` also repacks, by a different route: an invisible shape never enters the
 ordered list, so the visible set changes and the membership comparison catches it without any
 epoch.
+
+### Image content
+
+An `Image` sits in two lanes and goes stale in each on different events. Its quad is tessellated
+like any mesh shape — which is what gives it a hit test, bounds and a shadow silhouette — while
+the pixels are drawn from a buffer the image lane packs itself. So `width`/`height` invalidate
+both, and `texture`, `crop`, `fit`, `tileX`/`tileY`, `flipX`/`flipY`, `wrapX`/`wrapY` and
+`filter` bump the image epoch alone. `tint` bumps nothing: the batcher re-reads it every frame
+alongside the transform and the depth, so it is free to animate.
+
+`handle.markImageGeometryDirty()` remains as an escape hatch for the one thing none of that can
+see — a texture whose *pixels* were rewritten in place under the same object.
 
 ### Text content
 

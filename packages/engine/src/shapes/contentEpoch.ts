@@ -1,4 +1,4 @@
-// Two counters saying "some node's CONTENT changed since you last looked".
+// Three counters saying "some node's CONTENT changed since you last looked".
 //
 // The lanes rebuild their shared GPU buffers only when they have to, and until now the only
 // things that could tell them so were the visible set changing and an explicit dirty call on
@@ -26,6 +26,7 @@
 
 let meshEpochCounter = 0
 let textEpochCounter = 0
+let imageEpochCounter = 0
 
 /** Called by Shape.markGeometryDirty(): this node's tessellated geometry has changed. */
 export function bumpMeshGeometryEpoch(): void {
@@ -37,6 +38,20 @@ export function bumpTextShapingEpoch(): void {
   textEpochCounter++
 }
 
+/**
+ * Called when an Image changes something the image lane packs rather than reads per frame:
+ * its texture, the source rectangle, the fit, tiling, flipping, the wrap mode, the filter, or
+ * the quad's own size.
+ *
+ * The image lane needs its own counter because an Image sits in two of them. Its quad is
+ * tessellated like any mesh shape - which is what gives it a hit test, bounds and a shadow
+ * silhouette - while the pixels are drawn from a separately packed buffer, and the two go stale
+ * on different events. Resizing an Image is both; changing its crop is only this.
+ */
+export function bumpImageGeometryEpoch(): void {
+  imageEpochCounter++
+}
+
 export function meshGeometryEpoch(): number {
   return meshEpochCounter
 }
@@ -45,9 +60,13 @@ export function textShapingEpoch(): number {
   return textEpochCounter
 }
 
+export function imageGeometryEpoch(): number {
+  return imageEpochCounter
+}
+
 // --- fonts: "are the metrics a cached layout was shaped against still the current ones?" -----
 //
-// The third question, and the one the two counters above cannot answer. They say a node's own
+// The fourth question, and the one the three counters above cannot answer. They say a node's own
 // content changed. This says the FONTS changed underneath every node at once - which happens
 // when an application loads an atlas at runtime (handle.setMSDFFonts) rather than handing one to
 // createSceneRenderer.
@@ -76,7 +95,7 @@ export function fontEpoch(): number {
 
 // --- object records: "did any object's per-frame data change?" ------------------------------
 //
-// The fourth counter, and the one that answers a different question from the two geometry ones.
+// The fifth counter, and the one that answers a different question from the three geometry ones.
 // Those say the packed GEOMETRY is stale. This one says a per-object RECORD is - the transform,
 // depth, opacity and paint the batchers refresh every frame without touching geometry at all.
 //
@@ -93,7 +112,7 @@ export function fontEpoch(): number {
 // not moved and the visible set is the same objects in the same order, a frame's whole
 // updateObjects pass is provably a no-op and is skipped.
 //
-// A counter rather than per-node flags, for the reason the two above are: the renderer
+// A counter rather than per-node flags, for the reason the others are: the renderer
 // compares one integer instead of one per visible object, and a needless refresh is only slow
 // where a missed one is wrong. The setters guard on the value actually differing, so writing a
 // node's own value back - which the transformer does to its handles every frame - bumps

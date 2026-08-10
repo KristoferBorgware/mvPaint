@@ -4,7 +4,7 @@
 // no special-case rendering.
 //
 // The ATTACHED SET is what this frame wraps and what a gesture moves, and it belongs to
-// whoever is driving the editor - attach() replaces it wholesale, add()/detach()/toggle()
+// whoever is driving the editor - attach() replaces it wholesale, addNode()/detach()/toggle()
 // edit it one node at a time. The engine never decides what goes in it. That is worth being
 // precise about: an application's idea of "the selection" may be broader than this (rows in
 // a panel, a locked layer, a group whose members are edited together), so the two are
@@ -368,7 +368,7 @@ export class Transformer extends Container {
   private adopt<T extends Shape>(shape: T): T {
     // Handles are hit-tested geometrically by anchorAt(), never through pickNode() -
     // otherwise they would shadow the very shapes they are meant to manipulate.
-    shape.pickable = false
+    shape.listening = false
     shape.draggable = false
     // Drawn in the always-on-top pass, so the frame never punches a depth hole through
     // the text lane the way an ordinary translucent shape would.
@@ -430,8 +430,14 @@ export class Transformer extends Container {
     this.setAttached(next)
   }
 
-  /** Adds one node, if it is not already attached. */
-  add(node: TransformableNode): void {
+  /**
+   * Attaches one more node, if it is not already attached.
+   *
+   * Named for `nodes`, the set it appends to, and deliberately NOT `add` - a Transformer is a
+   * Container, and Container.add() means "put these inside me". A frame's attached nodes are
+   * not its children; they are what it wraps, and they stay where they are in the scene.
+   */
+  addNode(node: TransformableNode): void {
     if (this.owns(node) || this.attached.includes(node)) return
     this.setAttached([...this.attached, node])
   }
@@ -459,7 +465,7 @@ export class Transformer extends Container {
   /** Adds the node if it is absent, drops it if present - a shift-click, in one call. */
   toggle(node: TransformableNode): void {
     if (this.attached.includes(node)) this.detach(node)
-    else this.add(node)
+    else this.addNode(node)
   }
 
   has(node: TransformableNode): boolean {

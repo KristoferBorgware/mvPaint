@@ -723,24 +723,39 @@ it('attribute change events', () => {
     assert(seen[0].type === 'xChange' && seen[0].attr === 'x', 'named after the attribute, and carrying its name')
     assert(seen[0].oldVal === 1 && seen[0].newVal === 5, 'with the values on either side of the change')
     assert(seen[0].target === rect, 'targeted at the node that changed')
-    assert(atRoot.length === 1, 'and bubbling, so a container can watch its subtree')
+    assert(atRoot.length === 0, 'and NOT bubbling - a change is a fact about one node')
 
     rect.setAttr('x', 5)
     assert(seen.length === 1, 'setting the same value again reports nothing')
 
-    // Direct assignment deliberately does not raise it - the attributes are plain fields.
+    // The event comes from the property, so the two ways of writing it are indistinguishable.
     rect.x = 99
-    assert(seen.length === 1, 'assigning the field directly does not raise a change event')
+    assert(seen.length === 2, 'assigning the property directly raises it just the same')
+    assert(seen[1].oldVal === 5 && seen[1].newVal === 99, 'with the same values either side')
 
-    // Identity comparison: a replaced array is a change, an edited one is not.
+    // Delegation cannot stand in for the bubble, because delegation IS the bubble: the wrapped
+    // handler runs when the event reaches the ancestor it was registered on, and this one never
+    // gets there. Watching a subtree means a listener per node - 'add' bubbles, so a watcher can
+    // attach one as each node joins.
+    const delegated: string[] = []
+    root.on('xChange', '.watched', () => delegated.push('reached'))
+    rect.name = 'watched'
+    rect.x = 123
+    assert(delegated.length === 0, 'a selector on an ancestor hears nothing either, since nothing travels there')
+
+    // Identity comparison on the form it was WRITTEN in: a replaced array is a change, the same
+    // one handed back is not, however it was edited in place.
     const fills: AttrChangeEvent[] = []
     rect.on('fillChange', (e) => fills.push(e as AttrChangeEvent))
     rect.setAttr('fill', [0, 1, 0, 1])
     assert(fills.length === 1, 'replacing an array attribute is a change')
-    const sameArray = rect.fill
-    ;(sameArray as unknown as number[])[0] = 0.5
+    const sameArray = rect.fillInput as unknown as number[]
+    sameArray[0] = 0.5
     rect.setAttr('fill', sameArray)
     assert(fills.length === 1, 'handing back the same array is not, however it was edited in place')
+    rect.fill = 'tomato'
+    rect.fill = 'tomato'
+    assert(fills.length === 2, 'and one colour name written twice is one change')
 
     // A change routed through a dedicated setter still reports.
     const runs: AttrChangeEvent[] = []

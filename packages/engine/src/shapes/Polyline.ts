@@ -11,7 +11,7 @@
 // comes from its own point list, not a settable size parameter).
 
 import type { Vector2Like } from '../math/Vector2'
-import { Shape, type ShapeOptions } from './Shape'
+import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import {strokePolyline} from '../render/stroke'
 
@@ -19,6 +19,25 @@ export interface PolylineOptions extends ShapeOptions {
   points: Vector2Like[]
   /** Loop back to the start (a closed contour) vs. an open path with caps. Default false. */
   closed?: boolean
+}
+
+
+/** See Node.attrDefaults. An empty point list draws nothing, which is the honest blank state. */
+let cachedPolylineAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
+ * module-level spread is evaluated in whatever order the bundler happened to link the two - so
+ * an import cycle, or a dev server reloading one module without the other, reads the imported
+ * name before it exists. Deferring it to the first call puts the read long after every module
+ * has finished evaluating.
+ */
+function polylineAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedPolylineAttrDefaults ??= Object.freeze({
+    ...shapeAttrDefaults(),
+    points: Object.freeze([]),
+    closed: false,
+  }))
 }
 
 export class Polyline extends Shape {
@@ -37,8 +56,10 @@ export class Polyline extends Shape {
   }
   set points(value: Vector2Like[]) {
     if (value === this._points) return
+    const previous = this._points
     this._points = value
     this.markGeometryDirty()
+    this.announce('points', previous, value)
   }
 
   /** Whether the last point joins the first. Assigning it re-tessellates. */
@@ -48,8 +69,10 @@ export class Polyline extends Shape {
   }
   set closed(value: boolean) {
     if (value === this._closed) return
+    const previous = this._closed
     this._closed = value
     this.markGeometryDirty()
+    this.announce('closed', previous, value)
   }
 
   constructor(options: PolylineOptions) {
@@ -62,10 +85,16 @@ export class Polyline extends Shape {
     return [...super.attrKeys(), 'points', 'closed']
   }
 
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return polylineAttrDefaults()
+  }
+
   protected override buildGeometry(sink: MeshSink): void {
     if (!this.hasStroke() || this.points.length < 2) return
     strokePolyline(this.points, sink, {
-      width: this.strokeWidth,
+      width: this.strokeWidthForBuild(),
+      dash: this.dashForBuild(),
+      dashOffset: this.dashOffset,
       closed: this.closed,
       align: this.strokeAlign,
       join: this.lineJoin,

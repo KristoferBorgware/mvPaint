@@ -29,10 +29,10 @@ import { layoutText, type FontProvider, type TextRunStyle } from '../text/layout
 import type { FontStyle } from '../text/msdfProvider'
 import { Text } from './Text'
 
-/** Konva's default text size. Deliberately not the engine's 32 - see the class headers. */
+/** The size a uniform text node starts at. Deliberately not the engine's 32 - see the class headers. */
 export const UNIFORM_TEXT_FONT_SIZE = 12
 
-/** Konva's Text paints black unless told otherwise, and so does this. */
+/** A uniform text node paints black unless told otherwise, unlike every other shape. */
 export const UNIFORM_TEXT_FILL: RGBA = [0, 0, 0, 1]
 
 /** A `fill` of null paints nothing, which for glyphs means transparent rather than absent. */
@@ -104,7 +104,7 @@ export function toDecorations(value: string): { underline: boolean; strikethroug
 type TextClass = abstract new (...args: any[]) => Text
 
 /**
- * `Base` with Konva's Text attributes on the front of it, over exactly one run.
+ * `Base` with a flat, per-node style vocabulary on the front of it, over exactly one run.
  *
  * Not exported from the package: what an application uses is UniformMSDFText or
  * UniformVectorText, which are this applied to each of the two glyph sources.
@@ -211,6 +211,14 @@ export function withSingleRun<T extends TextClass>(Base: T) {
     // On any other Shape these are the paint the mesh lane reads. On a text node the glyphs take
     // their colour from the run, so each of these is overridden to reach it - which is what makes
     // `text.fill = 'red'` mean what it says.
+
+    /**
+     * True, unlike the base classes: this node has exactly one run and projects the shape's
+     * paint onto it, so the warning Text raises for a fill that goes nowhere does not apply.
+     */
+    protected override paintsFromShape(): boolean {
+      return true
+    }
 
     /** The glyphs' colour. Opaque black unless the constructor was told otherwise; null paints nothing. */
     override get fill(): RGBA | null {

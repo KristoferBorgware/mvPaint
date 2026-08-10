@@ -1,10 +1,10 @@
 // Shape - the base for every drawable scene-graph node (Rect, Circle, Polyline, Path,
 // MSDFText, VectorText). Carries what is specific to PAINTING and is common to every drawable:
-// pickability, the overlay pass, the complete fill/stroke styling API (flat color or gradient
-// fill; stroke color/width/join/cap/miter limit) and the shadow settings - all in one place
-// rather than split by how a shape happens to be drawn. Concrete shapes only add what's
-// genuinely specific to them (Rect: corner rounding; Circle: radius; Polyline: points; Path:
-// contours; MSDFText/VectorText: runs and block layout).
+// the overlay pass, the complete fill/stroke styling API (flat colour or gradient fill; stroke
+// colour, width, dash, join, cap, miter limit and alignment) and the shadow settings - all in
+// one place rather than split by how a shape happens to be drawn. Concrete shapes only add
+// what's genuinely specific to them (Rect: corner rounding; Circle: radius; Polyline: points;
+// Path: contours; MSDFText/VectorText: runs and block layout).
 //
 // What every node carries is NOT here: the transform, plus width/height, visible, opacity,
 // zIndex, listening, preventDefault and the three drag fields all live on Node (see that
@@ -31,23 +31,26 @@
 // it tessellates real glyph outlines, and is therefore picked, bounded and shadowed by
 // everything below without a single special case.
 //
-// hitTestLocal()/localBounds() (used by scene/picking.ts) build a SEPARATE flat
-// xs/ys/tris/bounds structure derived from the same buildGeometry() output, cached and
-// invalidated alongside geometryCache - not a second tessellation, just a picking-
-// friendly layout of the one cached result, so repeated picks against an unchanged
-// shape (e.g. every mousemove while hovering) don't redo any array-building work either.
+// hitTestLocal()/localBounds() (used by scene/picking.ts) read two further caches derived from
+// that same output and invalidated with it: a flat xs/ys/tris/bounds layout for repeated point
+// tests, and the drawn extent as a box. Neither is a second tessellation, so repeated picks
+// against an unchanged shape (every mousemove while hovering) redo no array-building work. The
+// one exception is a shape with its own hitStrokeWidth, whose hit ribbon really is different
+// triangles and so really is a second pass - see ensurePickCache.
 //
 // WHAT INVALIDATES WHAT. A transform change (x/y/rotation/scale/offset/zIndex) invalidates
 // nothing: it is applied per frame from the object's world matrix and never baked into the
 // cached local-space geometry. A fill or stroke COLOUR is the same - solid colours, like
-// gradient parameters, are read from the per-object buffer every frame.
+// gradient parameters, are read from the per-object buffer every frame, which is also why
+// fillEnabled is free while strokeEnabled is not.
 //
-// Everything buildGeometry() reads announces itself. Every geometry input on this class and
-// its subclasses is an accessor that calls markGeometryDirty() when the value actually
-// changes: strokeWidth, strokeAlign, lineJoin, lineCap, miterLimit, strokeScaleEnabled here,
-// and Circle.radius, Rect.cornerRadius, Polyline.points, Path.filled and CustomShape.tolerance
-// on the shapes that have them. `stroke` is the one that does both - a colour swap is a record
-// rewrite, while gaining or losing a colour changes whether a ribbon exists at all.
+// Everything buildGeometry() reads announces itself. Every geometry input on this class and its
+// subclasses is an accessor that calls markGeometryDirty() when the value actually changes:
+// strokeWidth, strokeEnabled, strokeAlign, dash, dashOffset, dashEnabled, lineJoin, lineCap,
+// miterLimit and strokeScaleEnabled here, and Circle.radius, Rect.cornerRadius,
+// Polyline.points, Path.contours, Path.filled and CustomShape.tolerance on the shapes that have
+// them. `stroke` is the one that does both - a colour swap is a record rewrite, while gaining
+// or losing a colour changes whether a ribbon exists at all.
 //
 // Two things still need the call by hand, because neither is an assignment this class can see:
 // mutating an array in place (points.push(), or editing a contour) rather than assigning a new
@@ -101,8 +104,15 @@ import { Vector3 } from '../math/Vector3'
 import { parseColor, parseStops } from '../render/color'
 import type {ColorInput, ColorStopsInput, FillPriority, GradientStop, MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { sameGauge, type LineCap, type LineJoin, type StrokeAlign, type StrokeGauge } from '../render/stroke'
-import { Node, type NodeOptions } from './Node'
+import { NODE_ATTR_DEFAULTS, Node, type ClientRectOptions, type NodeOptions } from './Node'
 import { nextZIndex } from './zOrder'
+
+/**
+ * The one empty pattern every solid shape shares, so that a scene of ten thousand undashed
+ * shapes allocates no array for the dash it does not have - and so that the constructor's
+ * `dash ?? EMPTY_DASH` matches the default by identity and announces nothing.
+ */
+const EMPTY_DASH: readonly number[] = Object.freeze([])
 
 export interface ShapeOptions extends NodeOptions {
   /**
@@ -143,10 +153,22 @@ export interface ShapeOptions extends NodeOptions {
   shadowForStrokeEnabled?: boolean
   /** Flat fill colour. Omitted (or null) is no fill - the shape draws nothing but still picks. */
   fill?: ColorInput | null
+  /** Master switch over the fill, keeping its colour. Default true. See Shape.fillEnabled. */
+  fillEnabled?: boolean
+  /** Master switch over the stroke, keeping its colour and width. Default true. */
+  strokeEnabled?: boolean
   /** Outline colour. Omitted (or null) is no outline, whatever strokeWidth says. */
   stroke?: ColorInput | null
   /** Stroke width in world units; 0 = no stroke. Default 2. */
   strokeWidth?: number
+  /** Stroke width used for hit-testing alone. Default 'auto' - the drawn width. */
+  hitStrokeWidth?: number | 'auto'
+  /** Alternating on/off lengths in local units. Default solid. See Shape.dash. */
+  dash?: readonly number[]
+  /** How far into the dash pattern the outline starts. Default 0. */
+  dashOffset?: number
+  /** Master switch over the dash, keeping the pattern. Default true. */
+  dashEnabled?: boolean
   /**
    * Which side of the outline the stroke expands onto: 'center' (default), 'inside' or
    * 'outside'. It changes the shape's measured size - see Shape.strokeAlign.
@@ -170,21 +192,21 @@ export abstract class Shape extends Node {
   override readonly nodeType: string = 'Shape'
 
   /**
-   * Excluded from pickNode() hit-testing when false (e.g. a selection-highlight overlay).
-   *
-   * Separate from `listening`, which governs whether events reach the node at all, and from
-   * `draggable`, which a drag needs on top of this: a drag only ever reaches a node that
-   * pickNode() returns, so `pickable = false` already rules one out.
-   */
-  pickable = true
-
-  /**
    * When true the shape is drawn in the overlay pass, after everything else and without
    * writing depth - for editor furniture (selection frames, handles, rubber bands) that
    * must sit on top of the scene without occluding it. A translucent overlay that DID
    * write depth would punch a hole through whatever draws later, notably the text lane.
    */
-  overlay = false
+  private _overlay = false
+  get overlay(): boolean {
+    return this._overlay
+  }
+  set overlay(value: boolean) {
+    if (value === this._overlay) return
+    const previous = this._overlay
+    this._overlay = value
+    this.announce('overlay', previous, value)
+  }
 
   // --- shadow (the canvas 2D model; see the file header) ------------------------------
   private shadowColorValue: RGBA = [0, 0, 0, 1]
@@ -194,8 +216,11 @@ export abstract class Shape extends Node {
     return this.shadowColorValue
   }
   set shadowColor(value: ColorInput) {
+    if (value === this.shadowColorWritten) return
+    const previous = this.shadowColorValue
     this.shadowColorValue = parseColor(value)
     this.shadowColorWritten = value
+    this.announce('shadowColor', previous, this.shadowColorValue)
   }
   /** What shadowColor was last assigned, in the form it was written. See fillInput. */
   get shadowColorInput(): ColorInput {
@@ -206,7 +231,16 @@ export abstract class Shape extends Node {
    * sigma = shadowBlur/2. Changing it re-bakes the shape's atlas texture, so it is the one
    * shadow field that isn't free to animate; the rest are per-frame quad parameters.
    */
-  shadowBlur = 0
+  private _shadowBlur = 0
+  get shadowBlur(): number {
+    return this._shadowBlur
+  }
+  set shadowBlur(value: number) {
+    if (value === this._shadowBlur) return
+    const previous = this._shadowBlur
+    this._shadowBlur = value
+    this.announce('shadowBlur', previous, value)
+  }
   /**
    * Grows the silhouette outward by this many local units before blurring it - or erodes it
    * inward when negative. Not part of the canvas 2D shadow model; this is CSS box-shadow's
@@ -216,23 +250,77 @@ export abstract class Shape extends Node {
    * The grow/shrink uses a square structuring element, so a large spread squares off corners
    * a touch - see webgpu/shaders/shadowBake.wgsl.ts. Like shadowBlur, changing it re-bakes.
    */
-  shadowSpread = 0
+  private _shadowSpread = 0
+  get shadowSpread(): number {
+    return this._shadowSpread
+  }
+  set shadowSpread(value: number) {
+    if (value === this._shadowSpread) return
+    const previous = this._shadowSpread
+    this._shadowSpread = value
+    this.announce('shadowSpread', previous, value)
+  }
   /**
    * Offset in local units, downward-positive. Scales with the shape's absolute scale but
    * is not turned by its rotation - see render/shadowMath.ts's shadowWorldOffset.
    */
-  shadowOffsetX = 0
-  shadowOffsetY = 0
+  private _shadowOffsetX = 0
+  get shadowOffsetX(): number {
+    return this._shadowOffsetX
+  }
+  set shadowOffsetX(value: number) {
+    if (value === this._shadowOffsetX) return
+    const previous = this._shadowOffsetX
+    this._shadowOffsetX = value
+    this.announce('shadowOffsetX', previous, value)
+  }
+  private _shadowOffsetY = 0
+  get shadowOffsetY(): number {
+    return this._shadowOffsetY
+  }
+  set shadowOffsetY(value: number) {
+    if (value === this._shadowOffsetY) return
+    const previous = this._shadowOffsetY
+    this._shadowOffsetY = value
+    this.announce('shadowOffsetY', previous, value)
+  }
   /** Multiplies shadowColor's alpha; 0 hides the shadow. */
-  shadowOpacity = 1
+  private _shadowOpacity = 1
+  get shadowOpacity(): number {
+    return this._shadowOpacity
+  }
+  set shadowOpacity(value: number) {
+    if (value === this._shadowOpacity) return
+    const previous = this._shadowOpacity
+    this._shadowOpacity = value
+    this.announce('shadowOpacity', previous, value)
+  }
   /** Master switch - false suppresses the shadow however the other fields are set. */
-  shadowEnabled = true
+  private _shadowEnabled = true
+  get shadowEnabled(): boolean {
+    return this._shadowEnabled
+  }
+  set shadowEnabled(value: boolean) {
+    if (value === this._shadowEnabled) return
+    const previous = this._shadowEnabled
+    this._shadowEnabled = value
+    this.announce('shadowEnabled', previous, value)
+  }
   /**
    * Whether the stroke ring is part of the silhouette the shadow is cast from. False casts
    * from the fill alone, so a thick decorative outline doesn't fatten the shadow with it.
    * Re-bakes the atlas texture when changed.
    */
-  shadowForStrokeEnabled = true
+  private _shadowForStrokeEnabled = true
+  get shadowForStrokeEnabled(): boolean {
+    return this._shadowForStrokeEnabled
+  }
+  set shadowForStrokeEnabled(value: boolean) {
+    if (value === this._shadowForStrokeEnabled) return
+    const previous = this._shadowForStrokeEnabled
+    this._shadowForStrokeEnabled = value
+    this.announce('shadowForStrokeEnabled', previous, value)
+  }
 
   private fillValue: RGBA | null = null
   /**
@@ -251,9 +339,15 @@ export abstract class Shape extends Node {
     return this.fillValue
   }
   set fill(value: ColorInput | null) {
+    // Compared on the form it was WRITTEN in, which is what a caller can reasonably expect to
+    // hold still: 'tomato' twice is one colour, while a freshly built tuple is a new value even
+    // if its four numbers match - the same identity rule the gradient points follow.
+    if (value === this.fillWritten) return
+    const previous = this.fillValue
     this.fillValue = value === null ? null : parseColor(value)
     this.fillWritten = value
     bumpObjectRecordEpoch()
+    this.announce('fill', previous, this.fillValue)
   }
   private fillWritten: ColorInput | null = null
   /**
@@ -270,7 +364,51 @@ export abstract class Shape extends Node {
   }
 
   /**
-   * Whether this shape's fill paints anything: a colour, or a gradient with stops in it.
+   * A master switch over the fill, leaving the colour and the gradient where they are.
+   *
+   * Free, and free to animate: the fill mechanism is a per-object record the batchers rewrite
+   * every frame, so switching this reads as 'none' from the next frame without repacking a
+   * buffer. That is the difference from strokeEnabled - see there.
+   */
+  private _fillEnabled = true
+  get fillEnabled(): boolean {
+    return this._fillEnabled
+  }
+  set fillEnabled(value: boolean) {
+    if (value === this._fillEnabled) return
+    const previous = this._fillEnabled
+    this._fillEnabled = value
+    bumpObjectRecordEpoch()
+    this.announce('fillEnabled', previous, value)
+  }
+
+  /**
+   * A master switch over the stroke, leaving strokeWidth and the colour where they are.
+   *
+   * It RE-TESSELLATES, where fillEnabled does not, and the asymmetry is in how the two are
+   * drawn rather than in the flags. A fill's triangles exist whatever the fill says and the
+   * paint is chosen per frame; a stroke's ribbon is geometry the stroker either emitted or did
+   * not, so switching this is the same kind of change as changing the width.
+   *
+   * Because it moves geometry it moves the measurements too - localBounds() is the extent of
+   * the triangles actually emitted, so a shape with its stroke switched off measures its fill
+   * alone. See strokeAlign for the same effect from the other direction.
+   */
+  private _strokeEnabled = true
+  get strokeEnabled(): boolean {
+    return this._strokeEnabled
+  }
+  set strokeEnabled(value: boolean) {
+    if (value === this._strokeEnabled) return
+    const previous = this._strokeEnabled
+    this._strokeEnabled = value
+    this.markGeometryDirty()
+    this.announce('strokeEnabled', previous, value)
+  }
+
+  /**
+   * Whether this shape's fill paints anything: switched on, and a colour or a gradient with
+   * stops in it.
    *
    * Not the same as having fill TRIANGLES, which every closed shape has regardless - see
    * FillPriority's 'none' for why they are kept.
@@ -279,9 +417,9 @@ export abstract class Shape extends Node {
     return this.fillPriority !== 'none'
   }
 
-  /** Whether this shape's stroke paints anything: a colour AND a width to draw it at. */
+  /** Whether this shape's stroke paints anything: switched on, a colour, AND a width. */
   hasStroke(): boolean {
-    return this.strokeValue !== null && this.strokeWidth > 0
+    return this._strokeEnabled && this.strokeValue !== null && this.strokeWidth > 0
   }
 
   /**
@@ -294,6 +432,7 @@ export abstract class Shape extends Node {
    */
   private _fillPriority: FillPriority = 'color'
   get fillPriority(): FillPriority {
+    if (!this._fillEnabled) return 'none'
     if (this._fillPriority === 'color') return this.fillValue === null ? 'none' : 'color'
     if (this._fillPriority === 'linear-gradient') return this.linearStops.length > 0 ? 'linear-gradient' : 'none'
     if (this._fillPriority === 'radial-gradient') return this.radialStops.length > 0 ? 'radial-gradient' : 'none'
@@ -301,8 +440,10 @@ export abstract class Shape extends Node {
   }
   set fillPriority(value: FillPriority) {
     if (value === this._fillPriority) return
+    const previous = this._fillPriority
     this._fillPriority = value
     bumpObjectRecordEpoch()
+    this.announce('fillPriority', previous, value)
   }
 
   // Gradient geometry. Assigning a point announces itself; reaching through one to write .x
@@ -312,16 +453,22 @@ export abstract class Shape extends Node {
     return this._fillLinearGradientStartPoint
   }
   set fillLinearGradientStartPoint(value: Vector2Like) {
+    if (value === this._fillLinearGradientStartPoint) return
+    const previous = this._fillLinearGradientStartPoint
     this._fillLinearGradientStartPoint = value
     bumpObjectRecordEpoch()
+    this.announce('fillLinearGradientStartPoint', previous, value)
   }
   private _fillLinearGradientEndPoint: Vector2Like = { x: 0, y: 0 }
   get fillLinearGradientEndPoint(): Vector2Like {
     return this._fillLinearGradientEndPoint
   }
   set fillLinearGradientEndPoint(value: Vector2Like) {
+    if (value === this._fillLinearGradientEndPoint) return
+    const previous = this._fillLinearGradientEndPoint
     this._fillLinearGradientEndPoint = value
     bumpObjectRecordEpoch()
+    this.announce('fillLinearGradientEndPoint', previous, value)
   }
   private linearStops: GradientStop[] = []
   private linearStopsWritten: ColorStopsInput = []
@@ -334,9 +481,12 @@ export abstract class Shape extends Node {
     return this.linearStops
   }
   set fillLinearGradientColorStops(value: ColorStopsInput) {
+    if (value === this.linearStopsWritten) return
+    const previous = this.linearStops
     this.linearStops = parseStops(value)
     this.linearStopsWritten = value
     bumpObjectRecordEpoch()
+    this.announce('fillLinearGradientColorStops', previous, this.linearStops)
   }
   /** The stop list as it was written, flat form included. See fillInput. */
   get fillLinearGradientColorStopsInput(): ColorStopsInput {
@@ -348,8 +498,11 @@ export abstract class Shape extends Node {
     return this._fillRadialGradientStartPoint
   }
   set fillRadialGradientStartPoint(value: Vector2Like) {
+    if (value === this._fillRadialGradientStartPoint) return
+    const previous = this._fillRadialGradientStartPoint
     this._fillRadialGradientStartPoint = value
     bumpObjectRecordEpoch()
+    this.announce('fillRadialGradientStartPoint', previous, value)
   }
   private _fillRadialGradientStartRadius = 0
   get fillRadialGradientStartRadius(): number {
@@ -357,16 +510,21 @@ export abstract class Shape extends Node {
   }
   set fillRadialGradientStartRadius(value: number) {
     if (value === this._fillRadialGradientStartRadius) return
+    const previous = this._fillRadialGradientStartRadius
     this._fillRadialGradientStartRadius = value
     bumpObjectRecordEpoch()
+    this.announce('fillRadialGradientStartRadius', previous, value)
   }
   private _fillRadialGradientEndPoint: Vector2Like = { x: 0, y: 0 }
   get fillRadialGradientEndPoint(): Vector2Like {
     return this._fillRadialGradientEndPoint
   }
   set fillRadialGradientEndPoint(value: Vector2Like) {
+    if (value === this._fillRadialGradientEndPoint) return
+    const previous = this._fillRadialGradientEndPoint
     this._fillRadialGradientEndPoint = value
     bumpObjectRecordEpoch()
+    this.announce('fillRadialGradientEndPoint', previous, value)
   }
   private _fillRadialGradientEndRadius = 0
   get fillRadialGradientEndRadius(): number {
@@ -374,8 +532,10 @@ export abstract class Shape extends Node {
   }
   set fillRadialGradientEndRadius(value: number) {
     if (value === this._fillRadialGradientEndRadius) return
+    const previous = this._fillRadialGradientEndRadius
     this._fillRadialGradientEndRadius = value
     bumpObjectRecordEpoch()
+    this.announce('fillRadialGradientEndRadius', previous, value)
   }
   private radialStops: GradientStop[] = []
   private radialStopsWritten: ColorStopsInput = []
@@ -384,9 +544,12 @@ export abstract class Shape extends Node {
     return this.radialStops
   }
   set fillRadialGradientColorStops(value: ColorStopsInput) {
+    if (value === this.radialStopsWritten) return
+    const previous = this.radialStops
     this.radialStops = parseStops(value)
     this.radialStopsWritten = value
     bumpObjectRecordEpoch()
+    this.announce('fillRadialGradientColorStops', previous, this.radialStops)
   }
   /** The stop list as it was written, flat form included. See fillInput. */
   get fillRadialGradientColorStopsInput(): ColorStopsInput {
@@ -403,15 +566,18 @@ export abstract class Shape extends Node {
     return this.strokeValue
   }
   set stroke(value: ColorInput | null) {
+    if (value === this.strokeWritten) return
+    const previous = this.strokeValue
     const next = value === null ? null : parseColor(value)
     // One colour for another is a record rewrite and nothing else. Gaining or losing a colour
     // is a geometry change: hasStroke() is what decides whether the stroker emits a ribbon at
     // all, so the triangles differ either side of null.
-    const drewBefore = this.strokeValue !== null
+    const drewBefore = previous !== null
     this.strokeValue = next
     this.strokeWritten = value
     bumpObjectRecordEpoch()
     if (drewBefore !== (next !== null)) this.markGeometryDirty()
+    this.announce('stroke', previous, next)
   }
   /** What stroke was last assigned, in the form it was written. See fillInput. */
   get strokeInput(): ColorInput | null {
@@ -429,9 +595,79 @@ export abstract class Shape extends Node {
   }
   set strokeWidth(value: number) {
     if (value === this._strokeWidth) return
+    const previous = this._strokeWidth
     this._strokeWidth = value
     this.markGeometryDirty()
+    this.announce('strokeWidth', previous, value)
   }
+  /**
+   * Alternating on/off lengths in local units - `[10, 5]` is ten drawn, five blank, repeating.
+   * Empty (the default) draws a solid line. An odd-length list is doubled, so `[6]` is six on
+   * and six off.
+   *
+   * Measured along the OUTLINE rather than per edge, so a dash keeps its length around a corner
+   * and a dash spanning one still gets a proper join. Each drawn piece is an open path and is
+   * therefore capped per `lineCap` - which is what makes `lineCap: 'round'` turn `[0, 12]` into
+   * a dotted line.
+   *
+   * It is real geometry, not a shader trick: each piece is a ribbon of its own, so assigning
+   * this re-tessellates, and a very fine pattern over a long path is a lot of triangles. It
+   * follows the shape's scale like the rest of the geometry, and under strokeScaleEnabled =
+   * false it is measured after the transform along with the width.
+   *
+   * Assigning a new list announces itself; editing the one already there does not - see
+   * Polyline.points for the same rule.
+   */
+  private _dash: readonly number[] = []
+  get dash(): readonly number[] {
+    return this._dash
+  }
+  set dash(value: readonly number[]) {
+    if (value === this._dash) return
+    const previous = this._dash
+    this._dash = value
+    this.markGeometryDirty()
+    this.announce('dash', previous, value)
+  }
+
+  /**
+   * How far into the dash pattern the outline starts, in local units. Animating it is what
+   * makes a marching-ants selection border - at the price of a re-tessellation per frame,
+   * since a dash is geometry.
+   */
+  private _dashOffset = 0
+  get dashOffset(): number {
+    return this._dashOffset
+  }
+  set dashOffset(value: number) {
+    if (value === this._dashOffset) return
+    const previous = this._dashOffset
+    this._dashOffset = value
+    this.markGeometryDirty()
+    this.announce('dashOffset', previous, value)
+  }
+
+  /** Master switch over the dash, keeping the pattern. False draws the outline solid. */
+  private _dashEnabled = true
+  get dashEnabled(): boolean {
+    return this._dashEnabled
+  }
+  set dashEnabled(value: boolean) {
+    if (value === this._dashEnabled) return
+    const previous = this._dashEnabled
+    this._dashEnabled = value
+    this.markGeometryDirty()
+    this.announce('dashEnabled', previous, value)
+  }
+
+  /**
+   * The pattern the stroker is to use, or undefined for a solid line - what a shape passes as
+   * `dash`, rather than reading the field, so that dashEnabled is honoured in one place.
+   */
+  protected dashForBuild(): readonly number[] | undefined {
+    return this._dashEnabled && this._dash.length > 0 ? this._dash : undefined
+  }
+
   /**
    * Which way the stroke expands from the outline it follows.
    *
@@ -461,8 +697,10 @@ export abstract class Shape extends Node {
   }
   set strokeAlign(value: StrokeAlign) {
     if (value === this._strokeAlign) return
+    const previous = this._strokeAlign
     this._strokeAlign = value
     this.markGeometryDirty()
+    this.announce('strokeAlign', previous, value)
   }
 
   // The remaining four stroke shapes. Each is read by the stroker while it builds the ribbon,
@@ -473,8 +711,10 @@ export abstract class Shape extends Node {
   }
   set lineJoin(value: LineJoin) {
     if (value === this._lineJoin) return
+    const previous = this._lineJoin
     this._lineJoin = value
     this.markGeometryDirty()
+    this.announce('lineJoin', previous, value)
   }
 
   private _lineCap: LineCap = 'butt'
@@ -483,8 +723,10 @@ export abstract class Shape extends Node {
   }
   set lineCap(value: LineCap) {
     if (value === this._lineCap) return
+    const previous = this._lineCap
     this._lineCap = value
     this.markGeometryDirty()
+    this.announce('lineCap', previous, value)
   }
 
   private _miterLimit = 10
@@ -493,8 +735,10 @@ export abstract class Shape extends Node {
   }
   set miterLimit(value: number) {
     if (value === this._miterLimit) return
+    const previous = this._miterLimit
     this._miterLimit = value
     this.markGeometryDirty()
+    this.announce('miterLimit', previous, value)
   }
   /**
    * Whether the shape's scale applies to its stroke as well. Default true.
@@ -530,19 +774,83 @@ export abstract class Shape extends Node {
   }
   set strokeScaleEnabled(value: boolean) {
     if (value === this._strokeScaleEnabled) return
+    const previous = this._strokeScaleEnabled
     this._strokeScaleEnabled = value
     this.markGeometryDirty()
+    this.announce('strokeScaleEnabled', previous, value)
   }
 
   // A Shape is its own (single) material - see materials(). Held as a fixed one-element
   // array so the common case costs no per-frame allocation in the batcher's hot loop.
   private readonly selfMaterials: readonly MeshMaterial[] = [this]
 
+  /**
+   * The width the outline is stroked at FOR HIT-TESTING, in place of the width it is drawn at.
+   * 'auto' - the default - hit-tests against the drawn width, so what can be hit is exactly what
+   * is drawn.
+   *
+   * A hairline is the case this exists for. A 1-unit line is a correct picture and an almost
+   * unhittable target: the pointer has to land inside a ribbon one unit across. Setting this to
+   * 24 makes the same line easy to grab without thickening it by one pixel on screen.
+   *
+   *   hit region  =  the shape stroked at this width instead
+   *
+   * IN THE SHAPE'S OWN UNITS, like strokeWidth and every other length on a Shape, so it scales
+   * with the node and with its groups. A hit ribbon and the line it belongs to keep their ratio
+   * at every size, which is what a caller who reaches for this actually wants: the two are set
+   * together and read as one thing - a 1-unit line with a 24-unit target - and a band that
+   * stayed put while the line grew would break that pairing at the first scale.
+   *
+   * It substitutes rather than adds, so a value BELOW the drawn width makes the shape harder to
+   * hit than it looks. That is the caller's to avoid, and the pairing above is why: whatever
+   * moves strokeWidth moves this.
+   *
+   * It costs a SECOND tessellation, kept apart from the drawn one, because an outline stroked
+   * at another width is different triangles. Nothing else is affected: the shape draws,
+   * measures, bounds and casts its shadow from the geometry it is drawn with, so the hit ribbon
+   * never reaches a group's extent or a transformer's frame.
+   */
+  private _hitStrokeWidth: number | 'auto' = 'auto'
+  get hitStrokeWidth(): number | 'auto' {
+    return this._hitStrokeWidth
+  }
+  set hitStrokeWidth(value: number | 'auto') {
+    if (value === this._hitStrokeWidth) return
+    const previous = this._hitStrokeWidth
+    this._hitStrokeWidth = value
+    // The DRAWN geometry is untouched, so this deliberately does not go through
+    // markGeometryDirty(): no lane repacks, and the shadow atlas does not re-bake.
+    this.pickCache = null
+    this.announce('hitStrokeWidth', previous, value)
+  }
+
+  // Non-null only while ensurePickCache() is running its own tessellation pass, which is the
+  // whole of its lifetime - see strokeWidthForBuild().
+  private pickStrokeWidth: number | null = null
+
+  /**
+   * The width the stroker is to build with right now: `strokeWidth` for the geometry that is
+   * drawn, and `hitStrokeWidth` for the separate pass that builds the pick cache.
+   *
+   * Subclasses pass THIS to the stroker rather than reading strokeWidth directly, which is what
+   * lets one buildGeometry() serve both passes. The public `strokeWidth` always reports the
+   * drawn width, whichever pass is running.
+   */
+  protected strokeWidthForBuild(): number {
+    return this.pickStrokeWidth ?? this._strokeWidth
+  }
+
   private geometryCache: CachedGeometry | null = null
   // Derived from geometryCache (same lifetime, invalidated together) - a flat, picking-
-  // friendly layout (no MeshSink round-trip) built lazily on first hitTestLocal()/
-  // localBounds() call, not on every tessellate().
+  // friendly layout (no MeshSink round-trip) built lazily on the first hitTestLocal() call,
+  // not on every tessellate(). Its triangles are the DRAWN ones unless the shape set its own
+  // hitStrokeWidth, in which case they come from a pass of their own.
   private pickCache: PickGeometry | null = null
+  // The drawn extent, kept apart from the pick cache's box so that a widened hit ribbon cannot
+  // reach anything that MEASURES this shape. Invalidated with the geometry it is derived from.
+  private boundsCache: AABB | null = null
+  // The same, from the fill vertices alone - see localFillBounds.
+  private fillBoundsCache: AABB | null = null
   private geometryVersionCounter = 0
 
   constructor(options: ShapeOptions = {}) {
@@ -561,8 +869,14 @@ export abstract class Shape extends Node {
     this.shadowEnabled = options.shadowEnabled ?? true
     this.shadowForStrokeEnabled = options.shadowForStrokeEnabled ?? true
     this.fill = options.fill ?? null
+    this.fillEnabled = options.fillEnabled ?? true
     this.stroke = options.stroke ?? null
+    this.strokeEnabled = options.strokeEnabled ?? true
     this.strokeWidth = options.strokeWidth ?? 2
+    this.hitStrokeWidth = options.hitStrokeWidth ?? 'auto'
+    this.dash = options.dash ?? EMPTY_DASH
+    this.dashOffset = options.dashOffset ?? 0
+    this.dashEnabled = options.dashEnabled ?? true
     this.strokeAlign = options.strokeAlign ?? 'center'
     this.lineJoin = options.lineJoin ?? 'miter'
     this.lineCap = options.lineCap ?? 'butt'
@@ -573,7 +887,6 @@ export abstract class Shape extends Node {
   protected override attrKeys(): readonly string[] {
     return [
       ...super.attrKeys(),
-      'pickable',
       'overlay',
       'shadowColor',
       'shadowBlur',
@@ -584,6 +897,7 @@ export abstract class Shape extends Node {
       'shadowEnabled',
       'shadowForStrokeEnabled',
       'fill',
+      'fillEnabled',
       'fillPriority',
       'fillLinearGradientStartPoint',
       'fillLinearGradientEndPoint',
@@ -594,13 +908,22 @@ export abstract class Shape extends Node {
       'fillRadialGradientEndRadius',
       'fillRadialGradientColorStops',
       'stroke',
+      'strokeEnabled',
       'strokeWidth',
+      'hitStrokeWidth',
+      'dash',
+      'dashOffset',
+      'dashEnabled',
       'strokeAlign',
       'lineJoin',
       'lineCap',
       'miterLimit',
       'strokeScaleEnabled',
     ]
+  }
+
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return shapeAttrDefaults()
   }
 
   /**
@@ -626,6 +949,8 @@ export abstract class Shape extends Node {
   markGeometryDirty(): void {
     this.geometryCache = null
     this.pickCache = null
+    this.boundsCache = null
+    this.fillBoundsCache = null
     this.geometryVersionCounter++
     // The renderer packs many shapes into shared buffers and cannot see this node's flag,
     // so the change is announced lane-wide too (see contentEpoch.ts).
@@ -696,9 +1021,79 @@ export abstract class Shape extends Node {
     return false
   }
 
-  /** This shape's fill+stroke triangles as an axis-aligned box, in its own local space. */
-  localBounds(): AABB {
+  /**
+   * The box this shape can be HIT within, in its own local space - the extent of exactly the
+   * triangles hitTestLocal() tests against, which is the hit ribbon on a shape that has one.
+   *
+   * The counterpart to localBounds(), and the two differ only under hitStrokeWidth. Anything
+   * rejecting a point cheaply before running the exact test has to use THIS one: a hairline's
+   * DRAWN box is a hairline wide, so a rejection against that would throw away every point the
+   * hit ribbon was widened to catch, and the widening would do nothing whatsoever. See
+   * scene/picking.ts's hitTestShape, which is where a point actually arrives.
+   */
+  hitBounds(): AABB {
     return this.ensurePickCache().bounds
+  }
+
+  /**
+   * This shape's fill+stroke triangles as an axis-aligned box, in its own local space.
+   *
+   * The DRAWN triangles, always. A shape with its own hitStrokeWidth has a second, differently
+   * sized set for hit-testing, and this is deliberately not measured from those: a group's
+   * extent, a transformer's frame, a marquee test and the shadow silhouette all read this, and
+   * every one of them is about the picture rather than about what is easy to click. Use
+   * hitBounds() for the other question - could the pointer be on this.
+   */
+  localBounds(): AABB {
+    if (!this.boundsCache) {
+      const box = new AABB()
+      for (const v of this.ensureGeometryCache().vertices) box.encapsulate(new Vector3(v.x, v.y, 0))
+      this.boundsCache = box
+    }
+    return this.boundsCache
+  }
+
+  /**
+   * The extent of the FILL triangles alone, with the outline ignored - what getClientRect
+   * reports under `skipStroke`.
+   *
+   * Free to derive, because the tessellation already says which vertices are which: the sink
+   * takes an `isFill` flag per vertex so the batchers can tell a fill from a stroke, and that
+   * flag is kept in the cache. No second tessellation is involved.
+   */
+  localFillBounds(): AABB {
+    if (!this.fillBoundsCache) {
+      const box = new AABB()
+      for (const v of this.ensureGeometryCache().vertices) {
+        if (v.isFill) box.encapsulate(new Vector3(v.x, v.y, 0))
+      }
+      this.fillBoundsCache = box
+    }
+    return this.fillBoundsCache
+  }
+
+  /**
+   * How far this shape's own extent reaches once the shadow is counted, in local space - the
+   * box unioned with a copy of itself moved by the offset and grown by the blur and spread.
+   *
+   * The blur is a Gaussian rather than a hard edge, so there is no exact outer limit; one blur
+   * radius out is where the canvas model puts the visible end of it, and is what this uses.
+   */
+  private shadowedBounds(box: AABB): AABB {
+    if (!this.hasShadow() || !box.valid()) return box
+    const grow = this.shadowBlur + this.shadowSpread
+    const union = box.clone()
+    union.encapsulate(new Vector3(box.min.x - grow + this.shadowOffsetX, box.min.y - grow + this.shadowOffsetY, 0))
+    union.encapsulate(new Vector3(box.max.x + grow + this.shadowOffsetX, box.max.y + grow + this.shadowOffsetY, 0))
+    return union
+  }
+
+  protected override selfBounds(options: ClientRectOptions): AABB | null {
+    const box = options.skipStroke ? this.localFillBounds() : this.localBounds()
+    if (!box.valid()) return null
+    // shadowForStrokeEnabled decides what the shadow is cast FROM, which is a different question
+    // from how far it then reaches - the offset and the blur apply either way.
+    return options.skipShadow ? box : this.shadowedBounds(box)
   }
 
   /**
@@ -717,6 +1112,8 @@ export abstract class Shape extends Node {
   protected override releaseResources(): void {
     this.geometryCache = null
     this.pickCache = null
+    this.boundsCache = null
+    this.fillBoundsCache = null
   }
 
   private ensureGeometryCache(): CachedGeometry {
@@ -734,18 +1131,60 @@ export abstract class Shape extends Node {
     return this.geometryCache
   }
 
+  /**
+   * The flat xs/ys/tris/bounds layout hit-testing works from.
+   *
+   * Ordinarily it is the DRAWN tessellation rearranged - the same triangles, laid out for
+   * repeated point tests instead of for a MeshSink. A shape given a hitStrokeWidth is the
+   * exception: its outline is stroked at that width instead, so buildGeometry() runs a second
+   * time with the stroker told the hit width (see strokeWidthForBuild).
+   *
+   * Its bounds come from that same pass and are used ONLY as the cheap rejection test guarding
+   * the exact one - a widened ribbon has to widen the box or the box would clear the very points
+   * the widening was for. What the shape MEASURES is localBounds(), which is the drawn geometry
+   * and is kept apart from this for exactly that reason.
+   */
   private ensurePickCache(): PickGeometry {
-    if (!this.pickCache) {
-      const geometry = this.ensureGeometryCache()
-      const xs = geometry.vertices.map((v) => v.x)
-      const ys = geometry.vertices.map((v) => v.y)
-      const tris: number[] = []
-      const bounds = new AABB()
-      for (const v of geometry.vertices) bounds.encapsulate(new Vector3(v.x, v.y, 0))
-      for (const [a, b, c] of geometry.triangles) tris.push(a, b, c)
-      this.pickCache = { xs, ys, tris, bounds }
-    }
+    const cached = this.pickCache
+    // Same staleness rule as the drawn pass: local-space triangles stay good until an input
+    // changes, and only a stroke held at a fixed width is built against the world scale.
+    // Checked here rather than in the per-frame sweep that does the same job for the drawn
+    // geometry, since a hit test happens on a pointer event rather than on a frame.
+    if (cached && (cached.gauge === undefined || sameGauge(cached.gauge, this.worldGauge()))) return cached
+
+    // 'auto', and a width of nothing, is the drawn geometry itself - no second pass.
+    const hit = this._hitStrokeWidth
+    const padded = hit !== 'auto' && hit > 0
+    const geometry = padded ? this.buildPickGeometry(hit) : this.ensureGeometryCache()
+
+    const xs = geometry.vertices.map((v) => v.x)
+    const ys = geometry.vertices.map((v) => v.y)
+    const tris: number[] = []
+    const bounds = new AABB()
+    for (const v of geometry.vertices) bounds.encapsulate(new Vector3(v.x, v.y, 0))
+    for (const [a, b, c] of geometry.triangles) tris.push(a, b, c)
+    this.pickCache = { xs, ys, tris, bounds, gauge: padded ? this.strokeGauge() : undefined }
     return this.pickCache
+  }
+
+  /** One tessellation pass with the stroker asked for `width` in place of the drawn one. */
+  private buildPickGeometry(width: number): CachedGeometry {
+    const vertices: CachedVertex[] = []
+    const triangles: CachedTriangle[] = []
+    this.pickStrokeWidth = width
+    try {
+      this.buildGeometry({
+        vertex: (x, y, isFill, material = 0) => vertices.push({ x, y, isFill, material }) - 1,
+        triangle: (a, b, c) => {
+          triangles.push([a, b, c])
+        },
+      })
+    } finally {
+      // Restored even if a subclass's buildGeometry() throws, since leaving it set would make
+      // every later DRAWN tessellation come out at the hit width.
+      this.pickStrokeWidth = null
+    }
+    return { vertices, triangles, gauge: this.strokeGauge() }
   }
 
   /**
@@ -759,6 +1198,11 @@ export abstract class Shape extends Node {
    */
   protected strokeGauge(): StrokeGauge | undefined {
     if (this.strokeScaleEnabled) return undefined
+    return this.worldGauge()
+  }
+
+  /** The linear part of the world matrix, as the stroker's gauge. */
+  private worldGauge(): StrokeGauge {
     const m = this.worldMatrix().m
     // Column-major: column 0 is the x axis, column 1 the y axis (see Node.applyLocalMatrix).
     return { a: m[0], b: m[1], c: m[4], d: m[5] }
@@ -797,6 +1241,58 @@ export abstract class Shape extends Node {
 }
 
 
+/**
+ * What each of Shape's own attributes goes back to on reset - Node's, plus the paint. Frozen
+ * all the way down, since a default is handed straight to a setter that stores what it is
+ * given (see Node.attrDefaults).
+ */
+let cachedShapeAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
+ * module-level spread is evaluated in whatever order the bundler happened to link the two - so
+ * an import cycle, or a dev server reloading one module without the other, reads the imported
+ * name before it exists. Deferring it to the first call puts the read long after every module
+ * has finished evaluating.
+ */
+export function shapeAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedShapeAttrDefaults ??= Object.freeze({
+    ...NODE_ATTR_DEFAULTS,
+    overlay: false,
+    shadowColor: Object.freeze([0, 0, 0, 1]),
+    shadowBlur: 0,
+    shadowSpread: 0,
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
+    shadowOpacity: 1,
+    shadowEnabled: true,
+    shadowForStrokeEnabled: true,
+    fill: null,
+    fillEnabled: true,
+    fillPriority: 'color',
+    fillLinearGradientStartPoint: Object.freeze({ x: 0, y: 0 }),
+    fillLinearGradientEndPoint: Object.freeze({ x: 0, y: 0 }),
+    fillLinearGradientColorStops: Object.freeze([]),
+    fillRadialGradientStartPoint: Object.freeze({ x: 0, y: 0 }),
+    fillRadialGradientStartRadius: 0,
+    fillRadialGradientEndPoint: Object.freeze({ x: 0, y: 0 }),
+    fillRadialGradientEndRadius: 0,
+    fillRadialGradientColorStops: Object.freeze([]),
+    stroke: null,
+    strokeEnabled: true,
+    strokeWidth: 2,
+    hitStrokeWidth: 'auto',
+    dash: EMPTY_DASH,
+    dashOffset: 0,
+    dashEnabled: true,
+    strokeAlign: 'center',
+    lineJoin: 'miter',
+    lineCap: 'butt',
+    miterLimit: 10,
+    strokeScaleEnabled: true,
+  }))
+}
+
 interface CachedVertex {
   x: number
   y: number
@@ -817,6 +1313,16 @@ interface PickGeometry {
   ys: number[]
   tris: number[]
   bounds: AABB
+  /**
+   * The world scale the HIT ribbon was built against, and undefined when there is no hit ribbon
+   * - when the pick layout is the drawn tessellation rearranged, which markGeometryDirty()
+   * already invalidates.
+   *
+   * A hit ribbon is measured after the transform, so unlike everything else derived from
+   * buildGeometry() it goes stale when the node is merely SCALED. Keeping the scale here is
+   * what lets ensurePickCache() notice.
+   */
+  gauge: StrokeGauge | undefined
 }
 
 function edgeSign(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {

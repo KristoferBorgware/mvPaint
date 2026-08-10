@@ -110,7 +110,7 @@ export class MarqueeOverlay extends Container {
       scaleX: 0,
       scaleY: 0,
     })
-    rect.pickable = false
+    rect.listening = false
     rect.draggable = false
     rect.overlay = true
     this.addChild(rect)

@@ -50,6 +50,19 @@ export function peekZIndex(): number {
 }
 
 /**
+ * Winds the counter FORWARD so that the next number handed out is above `zIndex`. Never
+ * backwards, so it cannot undo the guarantee above.
+ *
+ * What a document reader calls for each shape it rebuilds (see serialize/serialize.ts). A saved
+ * drawing carries absolute zIndex values from the session that made it, and the counter in this
+ * session knows nothing about them - so without this, the first shape drawn after a load takes
+ * a number from near zero and lands underneath the drawing it was meant to go on top of.
+ */
+export function reserveZIndex(zIndex: number): void {
+  if (Number.isFinite(zIndex) && zIndex >= counter) counter = Math.floor(zIndex) + 1
+}
+
+/**
  * Wind the counter back, for tests that assert on absolute zIndex values.
  *
  * Nothing in a running application should call this: it is the one operation that can make a

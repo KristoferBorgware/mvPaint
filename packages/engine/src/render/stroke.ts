@@ -28,6 +28,7 @@
 // joints - a bit of extra geometry traded for a simple, easy-to-verify algorithm.
 
 import type { Vector2Like } from '../math/Vector2'
+import { dashContour, normalizeDashPattern } from './dash'
 import type { MeshSink } from './meshFormat'
 import { nestingDepths, signedArea } from './contours'
 
@@ -75,6 +76,16 @@ export interface StrokeOptions {
    * material either way (see strokeContours).
    */
   align?: StrokeAlign
+  /**
+   * Alternating on/off lengths, in the space the points are given in. Omitted, or empty, draws
+   * a solid line. An odd-length list is doubled - see normalizeDashPattern.
+   *
+   * The pattern is measured along the path rather than per edge, so a dash keeps its length
+   * around a corner, and a dash that spans one still gets a proper join.
+   */
+  dash?: readonly number[]
+  /** How far into the pattern the path starts. Default 0. */
+  dashOffset?: number
   /**
    * The transform this ribbon will be seen through, when `width` is meant to survive it -
    * see StrokeGauge and Shape.strokeScaleEnabled. Omitted (the usual case), the ribbon is
@@ -149,27 +160,38 @@ function emitArc(
   }
 }
 
-/** Emits a round or square cap at `p`, given the OUTWARD-facing side normal there. */
+/**
+ * Emits a round or square cap at `p`, given the OUTWARD-facing side normal there and how far
+ * the ribbon reaches to each side.
+ *
+ * The two reaches are equal for every centred stroke, which is every open path a caller writes
+ * by hand. They differ for a dash cut from an inside- or outside-aligned ring, which is a
+ * one-sided ribbon - so the cap is built about the MIDDLE of the ribbon's end edge rather than
+ * about the path point, and is half the ribbon's total width across. Both reduce to the
+ * symmetric case exactly when the reaches match.
+ */
 function strokeCap(
   sink: MeshSink,
   p: Vector2Like,
   normal: [number, number],
-  s: number,
+  sPlus: number,
+  sMinus: number,
   cap: LineCap,
   roundSegments: number,
 ): void {
   if (cap === 'butt') return // the segment quad already ends flush at p.
 
   const [nx, ny] = normal
-  const p0 = { x: p.x + nx * s, y: p.y + ny * s }
-  const p1 = { x: p.x - nx * s, y: p.y - ny * s }
+  const p0 = { x: p.x + nx * sPlus, y: p.y + ny * sPlus }
+  const p1 = { x: p.x - nx * sMinus, y: p.y - ny * sMinus }
+  const reach = (sPlus + sMinus) / 2
   // Outward direction = normal rotated +90°.
   const dx = -ny
   const dy = nx
 
   if (cap === 'square') {
-    const e0 = { x: p0.x + dx * s, y: p0.y + dy * s }
-    const e1 = { x: p1.x + dx * s, y: p1.y + dy * s }
+    const e0 = { x: p0.x + dx * reach, y: p0.y + dy * reach }
+    const e1 = { x: p1.x + dx * reach, y: p1.y + dy * reach }
     const i0 = sink.vertex(p0.x, p0.y, false)
     const i1 = sink.vertex(p1.x, p1.y, false)
     const ie0 = sink.vertex(e0.x, e0.y, false)
@@ -181,10 +203,11 @@ function strokeCap(
 
   // round: a half-circle from +normal to -normal, sweeping +π (which always passes
   // through the outward direction, since outward is exactly +90° from +normal).
-  const hubIdx = sink.vertex(p.x, p.y, false)
+  const hub = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 }
+  const hubIdx = sink.vertex(hub.x, hub.y, false)
   const firstIdx = sink.vertex(p0.x, p0.y, false)
   const startAngle = Math.atan2(ny, nx)
-  emitArc(sink, p, s, startAngle, Math.PI, Math.max(2, roundSegments), hubIdx, firstIdx)
+  emitArc(sink, hub, reach, startAngle, Math.PI, Math.max(2, roundSegments), hubIdx, firstIdx)
 }
 
 /**
@@ -224,6 +247,62 @@ export function strokePolyline(points: readonly Vector2Like[], sink: MeshSink, o
     return
   }
 
+  // A dashed stroke is this same function run over each drawn piece, so nothing below knows a
+  // dash from an ordinary open path. The one thing the pieces cannot work out for themselves is
+  // which side of the line the ribbon belongs on: `align` is answered from a RING's winding, and
+  // a dash is an open path with no enclosed side, so the sides are resolved once from the whole
+  // contour here and carried into each piece.
+  const pattern = normalizeDashPattern(options.dash)
+  if (pattern) {
+    const wasClosed = options.closed ?? true
+    const sides = ribbonSides(points, wasClosed, options.width, options.align ?? 'center')
+    for (const piece of dashContour(points, wasClosed, pattern, options.dashOffset ?? 0)) {
+      strokeRun(piece, sink, { ...options, closed: false, dash: undefined }, sides)
+    }
+    return
+  }
+
+  strokeRun(points, sink, options, undefined)
+}
+
+/** How far the ribbon reaches along +normal and along -normal. See ribbonSides. */
+interface RibbonSides {
+  plus: number
+  minus: number
+}
+
+/**
+ * Equal halves for a centred stroke; the whole width on one side for the other two, which is
+ * all "inside" and "outside" mean geometrically - every join, miter and cap then falls out
+ * unchanged.
+ *
+ * Which side is which comes from the ring's own winding. perp() gives the RIGHT normal, so a
+ * counter-clockwise ring (positive shoelace area) encloses the -normal side and a clockwise one
+ * the +normal side. An open path has no enclosed side at all, so it stays centred.
+ */
+function ribbonSides(
+  points: readonly Vector2Like[],
+  closed: boolean,
+  width: number,
+  align: StrokeAlign,
+): RibbonSides {
+  const half = width / 2
+  if (align === 'center' || !closed) return { plus: half, minus: half }
+  const enclosedOnMinus = signedArea(points) > 0
+  const onPlus = (align === 'outside') === enclosedOnMinus
+  return onPlus ? { plus: width, minus: 0 } : { plus: 0, minus: width }
+}
+
+/**
+ * One unbroken run of ribbon. `sides` overrides what the run would work out for itself, and is
+ * given only by the dashing above, where the answer belongs to the contour the run came from.
+ */
+function strokeRun(
+  points: readonly Vector2Like[],
+  sink: MeshSink,
+  options: StrokeOptions,
+  sides: RibbonSides | undefined,
+): void {
   const {
     width,
     closed = true,
@@ -233,28 +312,13 @@ export function strokePolyline(points: readonly Vector2Like[], sink: MeshSink, o
     roundSegments = 8,
     align = 'center',
   } = options
-  const half = width / 2
   const n = points.length
   if (n < 2 || width <= 0) return
 
   const segCount = closed ? n : n - 1
   if (segCount < 1) return
 
-  // How far the ribbon reaches along +normal and along -normal. Equal halves for a centred
-  // stroke; the whole width on one side for the other two, which is all "inside" and "outside"
-  // mean geometrically - every join, miter and cap below then falls out unchanged.
-  //
-  // Which side is which comes from the ring's own winding. perp() gives the RIGHT normal, so a
-  // counter-clockwise ring (positive shoelace area) encloses the -normal side and a clockwise
-  // one the +normal side. An open path has no enclosed side at all, so it stays centred.
-  let sPlus = half
-  let sMinus = half
-  if (align !== 'center' && closed) {
-    const enclosedOnMinus = signedArea(points) > 0
-    const onPlus = (align === 'outside') === enclosedOnMinus
-    sPlus = onPlus ? width : 0
-    sMinus = onPlus ? 0 : width
-  }
+  const { plus: sPlus, minus: sMinus } = sides ?? ribbonSides(points, closed, width, align)
 
   // Per-edge unit direction and its perpendicular normal.
   const dirs: [number, number][] = []
@@ -351,10 +415,12 @@ export function strokePolyline(points: readonly Vector2Like[], sink: MeshSink, o
 
   // --- caps (open paths only) -------------------------------------------------------
   if (!closed) {
-    // Start cap: outward = reverse of the first edge's direction, i.e. the negated normal.
-    strokeCap(sink, points[0], [-norms[0][0], -norms[0][1]], half, cap, roundSegments)
+    // Start cap: outward = reverse of the first edge's direction, i.e. the negated normal. The
+    // two reaches swap with the normal, so the cap sits on the same side of the path the ribbon
+    // does.
+    strokeCap(sink, points[0], [-norms[0][0], -norms[0][1]], sMinus, sPlus, cap, roundSegments)
     // End cap: outward = the last edge's own forward direction.
-    strokeCap(sink, points[n - 1], norms[segCount - 1], half, cap, roundSegments)
+    strokeCap(sink, points[n - 1], norms[segCount - 1], sPlus, sMinus, cap, roundSegments)
   }
 }
 

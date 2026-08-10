@@ -129,11 +129,16 @@ export interface SceneRendererHandle extends SceneResources {
   getShadowsEnabled: () => boolean
   /** The last frame's (margin-expanded) cull rectangle, world space, or null before the first draw. */
   getCullBounds: () => AABB | null
-  /** The topmost pickable shape/text under a canvas-relative CSS pixel, or null. */
+  /** The topmost reachable shape/text under a canvas-relative CSS pixel, or null. */
   pick: (screenX: number, screenY: number) => PickableNode | null
+  /**
+   * EVERY reachable shape/text under that pixel, topmost first - what `pick` returns is its
+   * first entry. For cycling through stacked shapes, or reaching the one underneath.
+   */
+  pickAll: (screenX: number, screenY: number) => PickableNode[]
   /** A picked node's own local-space bounds - for sizing a selection-highlight overlay. */
   localBoundsOf: (node: TransformableNode) => AABB
-  /** Every visible, pickable shape meeting a world-space rectangle - what a marquee selects. */
+  /** Every reachable shape meeting a world-space rectangle - what a marquee selects. */
   nodesInBox: (from: Vector2Like, to: Vector2Like, options?: MarqueeOptions) => Shape[]
   /**
    * Called every frame, before the draw - animate scene content here.
@@ -179,6 +184,13 @@ export interface SceneRendererHandle extends SceneResources {
   toBlob: (options?: EncodedCaptureOptions) => Promise<Blob>
   markGeometryDirty: () => void
   markTextGeometryDirty: () => void
+  /**
+   * Force an image-lane rebuild on the next draw - an escape hatch rather than routine
+   * bookkeeping. An Image's own packed properties (texture, crop, fit, tiling, flip, wrap,
+   * filter, size) announce themselves, and adding or removing one is caught by the visible-set
+   * comparison. This is for a change neither can see: a texture whose PIXELS were rewritten in
+   * place under the same object.
+   */
   markImageGeometryDirty: () => void
   destroy: () => void
 }

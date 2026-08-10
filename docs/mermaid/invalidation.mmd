@@ -2,9 +2,10 @@
 flowchart LR
 
   subgraph CHANGED["YOU CHANGED"]
-    C1["a transform field · zIndex · opacity<br/>fill · stroke · fillPriority<br/>any gradient parameter"]
-    C2["Circle.radius · Rect.cornerRadius<br/>Rect/Image width · height · Polyline.points<br/>Path.filled · CustomShape.tolerance<br/>strokeWidth · strokeAlign · lineJoin<br/>lineCap · miterLimit · strokeScaleEnabled"]
-    C3["a text node's runs, text<br/>or any layout option"]
+    C1["a transform field · zIndex · opacity<br/>fill · fillEnabled · stroke · fillPriority<br/>any gradient parameter · Image.tint"]
+    C2["Circle.radius · Rect.cornerRadius<br/>Rect/Image width · height · Polyline.points<br/>Path.contours · Path.filled · CustomShape.tolerance<br/>strokeWidth · strokeEnabled · strokeAlign<br/>dash · dashOffset · dashEnabled<br/>lineJoin · lineCap · miterLimit · strokeScaleEnabled"]
+    CI["Image.texture · crop · fit<br/>tileX · tileY · flipX · flipY<br/>wrapX · wrapY · filter · width · height"]
+    C3["a text node's runs or text<br/>align · maxWidth · lineHeight · direction<br/>orientation · padding · fontFamily · textPath"]
     C4["handle.setMSDFFonts(sources, family)"]
     C5["added or removed a node<br/>toggled visible<br/>moved the camera"]
     C6["reached THROUGH a property:<br/>gradientStartPoint.x = 4 · points.push(p)<br/>or a colour tuple through a cast"]
@@ -12,7 +13,8 @@ flowchart LR
 
   subgraph ROUTE["THE ROUTE — shapes/contentEpoch.ts"]
     R1["bumpObjectRecordEpoch()<br/>every setter that can change a record,<br/>guarded on the value actually differing"]
-    R2["the setter calls markGeometryDirty()<br/>→ bumpMeshGeometryEpoch()<br/>guarded on the value differing"]
+    R2["the setter calls markGeometryDirty()<br/>→ bumpMeshGeometryEpoch()<br/>guarded on the value differing<br/>hitStrokeWidth is the exception: pick cache only"]
+    RI["bumpImageGeometryEpoch()<br/>the setter announces it, guarded on the value differing<br/>width/height do this AND markGeometryDirty()"]
     R3["invalidateShaping()<br/>→ bumpTextShapingEpoch() + dropShapingCache()"]
     R4["bumpFontEpoch()"]
     R5["no counter at all"]
@@ -22,6 +24,7 @@ flowchart LR
   subgraph EFFECT["WHAT THE RENDERER DOES"]
     E1["updateObjects() rewrites that one slot, inside a merged dirty range<br/>NO rebuild, no geometry touched — this is the cheap path, and it is where<br/>moving, fading and recolouring a shape all land"]
     E2["drop the shape's tessellation and pick caches<br/>bump its geometryVersion, which the shadow atlas keys its baked silhouette on<br/>the mesh lane repacks: re-tessellate, repack the buffers, recreate the object buffer"]
+    EI["the image lane repacks: ImageBatcher.rebuild re-derives every quad and its uv rect<br/>the MESH geometry is separate — an Image is tessellated too, for its hit test,<br/>its bounds and its shadow silhouette, which is why a resize invalidates both<br/>tint is not here: updateObjects re-reads it every frame, like a transform"]
     E3["the text lane repacks<br/>a repack is NOT a re-shape: TextBatcher.rebuild calls shaped() per node<br/>and gets the memoized layout back for every node that did not change"]
     E4["EVERY MSDFText re-shapes<br/>shaped() memoizes and then ignores the provider it is handed, so a new atlas would<br/>otherwise leave right glyphs at wrong advances and wrong wrap points<br/>bumping the text epoch alone would repack from exactly those stale memos"]
     E5["the visible set is recomputed every frame and sameMembers() catches the difference,<br/>so nothing needs marking at all — EXCEPT on the gather's fast path, where culling AND<br/>the zIndex sort are both off and last frame's arrays are handed straight back<br/>in that state a structural change, or an alpha crossing 1, needs an explicit markGeometryDirty()"]
@@ -30,12 +33,14 @@ flowchart LR
 
   C1 --> R1
   C2 --> R2
+  CI --> RI
   C3 --> R3
   C4 --> R4
   C5 --> R5
   C6 --> R6
   R1 --> E1
   R2 --> E2
+  RI --> EI
   R3 --> E3
   R4 --> E4
   R5 --> E5
@@ -46,10 +51,10 @@ flowchart LR
   classDef effect fill:#eef6f6,stroke:#007a80,stroke-width:1.5px,color:#1b1e26
   classDef none fill:#f7f9fc,stroke:#c3cadb,stroke-width:1.5px,color:#1b1e26
 
-  class C1,C2,C3,C4,C5,C6 src
-  class R1,R2,R3,R4 route
+  class C1,C2,CI,C3,C4,C5,C6 src
+  class R1,R2,RI,R3,R4 route
   class R5,R6 none
-  class E1,E2,E3,E4,E5 effect
+  class E1,E2,EI,E3,E4,E5 effect
   class E6 none
 
   style CHANGED fill:#f7f9fc,stroke:#c3cadb,color:#5b6478

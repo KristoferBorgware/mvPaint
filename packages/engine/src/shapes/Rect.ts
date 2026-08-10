@@ -29,7 +29,7 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import { circleSegments } from './Circle'
-import { Shape, type ShapeOptions } from './Shape'
+import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
 import type { MeshSink } from '../render/meshFormat'
 import {strokePolyline} from '../render/stroke'
 
@@ -116,6 +116,25 @@ function roundedContour(width: number, height: number, r: Radii, segments?: numb
   return points
 }
 
+
+/** See Node.attrDefaults. Square corners, and a segment count derived from the radius. */
+let cachedRectAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
+ * module-level spread is evaluated in whatever order the bundler happened to link the two - so
+ * an import cycle, or a dev server reloading one module without the other, reads the imported
+ * name before it exists. Deferring it to the first call puts the read long after every module
+ * has finished evaluating.
+ */
+function rectAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedRectAttrDefaults ??= Object.freeze({
+    ...shapeAttrDefaults(),
+    cornerRadius: 0,
+    cornerSegments: undefined,
+  }))
+}
+
 export class Rect extends Shape {
   override readonly nodeName: string = 'Rect'
 
@@ -129,8 +148,10 @@ export class Rect extends Shape {
     // That is the right way round: the alternative is a per-corner comparison on every write
     // to catch the case where a caller rebuilt an identical array.
     if (value === this._cornerRadius) return
+    const previous = this._cornerRadius
     this._cornerRadius = value
     this.markGeometryDirty()
+    this.announce('cornerRadius', previous, value)
   }
 
   /** How many segments each rounded corner is drawn with. Assigning it re-tessellates. */
@@ -140,8 +161,10 @@ export class Rect extends Shape {
   }
   set cornerSegments(value: number | undefined) {
     if (value === this._cornerSegments) return
+    const previous = this._cornerSegments
     this._cornerSegments = value
     this.markGeometryDirty()
+    this.announce('cornerSegments', previous, value)
   }
 
   constructor(options: RectOptions = {}) {
@@ -170,6 +193,10 @@ export class Rect extends Shape {
 
   protected override attrKeys(): readonly string[] {
     return [...super.attrKeys(), 'cornerRadius', 'cornerSegments']
+  }
+
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return rectAttrDefaults()
   }
 
   protected override buildGeometry(sink: MeshSink): void {
@@ -209,7 +236,9 @@ export class Rect extends Shape {
 
     if (this.hasStroke()) {
       strokePolyline(outline, sink, {
-        width: this.strokeWidth,
+        width: this.strokeWidthForBuild(),
+        dash: this.dashForBuild(),
+        dashOffset: this.dashOffset,
         closed: true,
         align: this.strokeAlign,
         join: this.lineJoin,
