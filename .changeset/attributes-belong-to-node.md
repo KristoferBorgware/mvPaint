@@ -2,7 +2,7 @@
 "@mvpaint/engine": major
 ---
 
-**Breaking.** Every attribute Konva puts on its `Node` is on this `Node`, declared once.
+**Breaking.** Every attribute a node carries is declared once, on `Node`.
 
 Six of them were on `Shape`, and two of those were declared a second time on `Group` — two
 independent fields with the same name and the same meaning. `listening` was a real public field
@@ -70,9 +70,9 @@ hides what is in it exactly as a `Group` does. `closestGroup()`, `outermostGroup
 ### `zIndex`, `width` and `height` on a container
 
 Carried, and not read. Only a `Shape` occupies a slot in the render order or draws from a size,
-and a group's extent comes from `group.bounds()`, measured on demand from what it holds. This is
-Konva's position too — a Konva `Group`'s `width` is `0` unless assigned, and `getClientRect()`
-is the real answer there.
+and a group's extent comes from `group.bounds()`, measured on demand from what it holds. A
+container's `width` and `height` therefore stay at `0` unless something assigns them, and the
+value means nothing to the renderer when it does.
 
 A `Shape` still takes its `zIndex` from the running counter (`nextZIndex()`); a `Node` left at
 `0` unless given one.
@@ -88,24 +88,25 @@ node.preventDefault = false       // let the browser act on a press over this no
 `dragDistance` overrides the dispatcher's own threshold (default 6) for the node the press took
 hold of. It governs when a DRAG begins, not what counts as a click — a press that never travels
 far enough for either is still a click. `dragBoundFunc` is handed a world position and returns
-one, matching Konva; the dispatcher maps the result back through the parent. `preventDefault` is
-read off the node under the pointer; the canvas's own gestures — a transformer handle, a
-middle-button pan, a pinch, the wheel, the context menu — suppress the browser default whatever
-it says, since no node is their subject.
+one; the dispatcher maps the result back through the parent. `preventDefault` is read off the
+node under the pointer; the canvas's own gestures — a transformer handle, a middle-button pan, a
+pinch, the wheel, the context menu — suppress the browser default whatever it says, since no
+node is their subject.
 
 ### Not implemented, and why
 
-Three of Konva's `Node` attributes are deliberately absent rather than present as fields nothing
-consults:
+Three attributes a 2D scene graph might be expected to carry are deliberately absent rather than
+present as fields nothing consults, each for a reason about this renderer rather than about the
+attribute:
 
 - **`globalCompositeOperation`** — a canvas 2D blend mode. Here it needs a render pipeline per
   mode and a repack of the draw list by mode.
 - **`transformsEnabled`** — names an optimisation `Node.localMatrix()` already performs
   unconditionally: rotation, skew and scale are each skipped when they are the identity.
-- **`filters`** — Konva's filters run over a cached canvas, and there is no cache-to-texture
-  layer. (`Image.filter`, the texture sampling mode, is unrelated.)
+- **`filters`** — a filter runs over a cached raster, and there is no cache-to-texture layer.
+  (`Image.filter`, the texture sampling mode, is unrelated.)
 
-`shapes/konvaParity.test.ts` holds the whole attribute set as data and pins all three claims —
+`shapes/nodeAttributes.test.ts` holds the whole attribute set as data and pins all three claims —
 the full list present, those three absent, the compounds accessors and not attributes.
 
 ### Migrating

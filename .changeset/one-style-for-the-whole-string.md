@@ -20,7 +20,7 @@ Nothing is lost: they are ordinary `Text` nodes, so alignment, wrapping, curves,
 | attribute | goes to |
 | --- | --- |
 | `text` | the single run |
-| `fontSize` | default **12**, Konva's, not the engine's 32 |
+| `fontSize` | default **12**, not the 32 a `Text` starts at |
 | `fill` | the glyphs' colour — opaque black unless the constructor was told otherwise |
 | `stroke` / `strokeWidth` | the per-letter outline; a width with no colour draws nothing |
 | `fontStyle` | `'normal'` / `'bold'` / `'italic'` / the last two together, in either order and with either separator |
@@ -31,16 +31,16 @@ Writing any of them rebuilds the run and re-shapes, so this is a live surface an
 
 **These two classes paint by default**, which nothing else in the engine does. Text that renders invisibly is a worse default than text that renders in black, and it is the one place the deviation earns itself. `fill: null` still means paint nothing.
 
-`lineHeight` keeps the engine's meaning — a multiplier over the font's ascent plus descent, where Konva multiplies `fontSize`.
+`lineHeight` keeps the engine's meaning — a multiplier over the font's ascent plus descent, not over `fontSize`.
 
 ### Measuring
 
 ```ts
-label.getTextWidth(handle.fonts.resolveFamily(label.fontFamily))
+label.getTextWidth(handle.msdfFonts.resolveFamily(label.fontFamily))
 label.measureSize('a string it is not currently drawing', fonts)
 ```
 
-An MSDF node cannot measure itself: its glyphs live in atlases the renderer owns. `SceneResources.fonts` is where the provider comes from, and a scene builder now has it. `UniformVectorText` needs nothing passed in — its outlines are on the node.
+An MSDF node cannot measure itself: its glyphs live in atlases the renderer owns. `SceneResources.msdfFonts` is where the provider comes from, and a scene builder now has it. `UniformVectorText` needs nothing passed in — its outlines are on the node.
 
 ### `padding`, on every text node
 

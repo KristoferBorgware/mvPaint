@@ -24,7 +24,7 @@ To migrate: negate the `y` of everything you place, and every `offsetY`. Sizes (
 
 ### Rotation now reads the way every other 2D API's does
 
-A positive `rotation` turns a shape CLOCKWISE on screen. The rotation matrix is unchanged; a y-down frame is what reverses how it reads. Combined with degrees (see the angles changeset), `rotation: 45` means the same thing here as in Canvas2D, SVG and Konva.
+A positive `rotation` turns a shape CLOCKWISE on screen. The rotation matrix is unchanged; a y-down frame is what reverses how it reads. Combined with degrees (see the angles changeset), `rotation: 45` means the same thing here as in Canvas2D and SVG.
 
 `Camera2D.rotation` follows the same sense: positive turns the view clockwise, so its content appears to swing the other way.
 

@@ -28,7 +28,7 @@ A width with no colour is not a stroke, which is what stops the new default widt
 
 ### An unfilled shape is still clickable
 
-Picking runs against the same triangles the mesh lane draws, so a shape that stopped tessellating its fill would go unclickable in its middle while its outline stayed live — the interior of an outlined rectangle would fall through to whatever is behind it. Konva has no such hole, and neither does this.
+Picking runs against the same triangles the mesh lane draws, so a shape is hit across its whole area whether or not it paints any of it. An outlined rectangle is picked in its middle, not only on its edge.
 
 `FillPriority` therefore gains `'none'`: the fill triangles are tessellated and uploaded exactly as before, and the fragment shader returns a transparent fragment for them. It costs one branch in each of the two mesh shaders and nothing on the CPU.
 
