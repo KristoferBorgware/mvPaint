@@ -19,6 +19,7 @@ import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
 import { sharedAtlasBytes } from '../resources/fontSources'
 import {
   atlasLayerSize,
+  atlasMipLevels,
   resolveStyle,
   STYLE_ORDER,
   type FontStyle,
@@ -132,13 +133,25 @@ async function buildGlAtlas(
   // STYLE_ORDER.length layers whatever was supplied - a style's layer is its STYLE_ORDER
   // index, which is what a shaped quad names, so a partial set leaves gaps rather than
   // renumbering.
-  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, layerSize.width, layerSize.height, STYLE_ORDER.length)
+  // Mipped for the same reason the WebGPU path is - see atlasMipLevels - and by the same count,
+  // so a glyph minified on the fallback path is sampled exactly as it would have been on the
+  // other one. Every level below the first is filled by generateMipmap() once the uploads land.
+  gl.texStorage3D(
+    gl.TEXTURE_2D_ARRAY,
+    atlasMipLevels(layerSize),
+    gl.RGBA8,
+    layerSize.width,
+    layerSize.height,
+    STYLE_ORDER.length,
+  )
   // Every layer starts zeroed, and a layer's untouched remainder stays that way - which the
   // shader reads as "fully outside the glyph", the same answer the distance field's outer
   // plateau gives. Layers must be identically sized, so each style's tightly-packed image is
   // written into the top-left of a layer sized for the largest; uvs are measured against the
   // LAYER, not the image (see text/msdfMetrics.ts), so nothing downstream has to know.
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+  // Between levels as well as within them, so text crossing a level boundary as the camera zooms
+  // does it smoothly rather than snapping.
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
@@ -177,6 +190,10 @@ async function buildGlAtlas(
         }
       }),
     )
+    // After every layer's level 0 has landed, and never before: one call fills the chain of all
+    // four layers from what is in them, so a layer still empty would be mipped as empty.
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture)
+    gl.generateMipmap(gl.TEXTURE_2D_ARRAY)
   } catch (cause) {
     // A replacement that fails leaves the book on its old texture, so this one has no owner.
     gl.deleteTexture(texture)

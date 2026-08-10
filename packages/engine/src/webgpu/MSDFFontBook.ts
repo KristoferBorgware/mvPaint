@@ -33,11 +33,13 @@ import { normalizeMetrics, type FontMetrics } from '../text/msdfMetrics'
 import { sharedAtlasBytes } from '../resources/fontSources'
 import {
   atlasLayerSize,
+  atlasMipLevels,
   resolveStyle,
   STYLE_ORDER,
   type FontStyle,
   type MsdfAtlasSource,
 } from '../text/msdfProvider'
+import { fillAtlasMipmaps } from './atlasMipmaps'
 
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
 
@@ -172,11 +174,14 @@ export class MSDFFontBook {
   }
 }
 
-/** The sampler every atlas is read through - linear, clamped, one per library. */
+/** The sampler every atlas is read through - linear, mipped, clamped, one per library. */
 export function createMSDFAtlasSampler(device: GPUDevice): GPUSampler {
   return device.createSampler({
     magFilter: 'linear',
     minFilter: 'linear',
+    // Blending between levels as well as within them, so text crossing a level boundary as the
+    // camera zooms does it smoothly rather than snapping.
+    mipmapFilter: 'linear',
     addressModeU: 'clamp-to-edge',
     addressModeV: 'clamp-to-edge',
   })
@@ -208,8 +213,12 @@ async function buildAtlas(
     // cannot be packed tight against a partial set without renumbering that.
     size: [layerSize.width, layerSize.height, STYLE_ORDER.length],
     format: 'rgba8unorm',
-    // RENDER_ATTACHMENT is not optional here despite nothing ever rendering into the atlas:
-    // copyExternalImageToTexture requires COPY_DST | RENDER_ATTACHMENT on its destination.
+    // Minified text takes one tap per screen pixel out of a field that varies across the whole
+    // footprint, and shimmers as the camera moves. See atlasMipLevels.
+    mipLevelCount: atlasMipLevels(layerSize),
+    // RENDER_ATTACHMENT is what fills those levels - WebGPU has no generateMipmap, so the chain
+    // is drawn (see atlasMipmaps.ts). copyExternalImageToTexture requires it on its destination
+    // in any case.
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
   })
 
@@ -237,6 +246,9 @@ async function buildAtlas(
         bitmap.close()
       }),
     )
+    // After every layer's level 0 has landed, and never before: each level is drawn from the one
+    // above it, so a layer mipped early would carry the chain of an empty image.
+    fillAtlasMipmaps(device, texture, STYLE_ORDER.length)
   } catch (cause) {
     // A replacement that fails leaves the book on its old atlases, so this texture has no
     // owner and nothing would ever destroy it.

@@ -64,6 +64,26 @@ export function atlasLayerSize(styles: readonly StyleJson[]): AtlasLayerSize {
 }
 
 /**
+ * How many mip levels a layer of this size holds, down to the 1x1 one.
+ *
+ * The atlas is mipped because a glyph drawn smaller than the atlas packed it is a MINIFICATION,
+ * and one tap of a full-resolution distance field per screen pixel picks an arbitrary point out
+ * of a field that varies across the whole footprint - so a line of small text shimmers as the
+ * camera moves, each glyph landing on different texels frame to frame. A mip chain averages the
+ * footprint instead.
+ *
+ * Averaging a distance field is not the field of the averaged shape, so the deep levels are mush.
+ * They are never reached: the text shader fades a glyph out as it approaches one screen pixel per
+ * field width (see the text shaders), which is the first two or three levels of this chain.
+ *
+ * Both paths compute it here rather than each deriving its own, since a level count that differs
+ * from the number of levels actually filled leaves a sampler reading undefined texels.
+ */
+export function atlasMipLevels(size: AtlasLayerSize): number {
+  return Math.floor(Math.log2(Math.max(size.width, size.height))) + 1
+}
+
+/**
  * The style-fallback ladder shared by MSDFFontBook.resolve and msdfFontProvider: try the exact
  * style, then the nearest one that keeps whichever of bold/italic was asked for, then plain
  * regular - flagging whatever had to be synthesized along the way. `have` looks up a style's
