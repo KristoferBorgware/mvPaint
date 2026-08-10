@@ -14,9 +14,12 @@ import { Circle } from './Circle'
 import { Container } from './Container'
 import { CustomShape } from './CustomShape'
 import { Group } from './Group'
+import { Image } from './Image'
 import { Layer } from './Layer'
 import { MSDFText } from './MSDFText'
 import { Node } from './Node'
+import { SharedLifetime } from '../resources/SharedLifetime'
+import type { ImageTexture } from '../image/ImageTexture'
 import { Path } from './Path'
 import { Polyline } from './Polyline'
 import { Rect } from './Rect'
@@ -26,6 +29,11 @@ function assert(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true)
 }
 const near = (a: number, b: number, eps = 1e-4) => Math.abs(a - b) <= eps
+
+/** An Image needs a texture to be constructed; nothing here ever samples one. */
+function stubTexture(width: number, height: number): ImageTexture {
+  return { width, height, lifetime: new SharedLifetime(), destroy() {} }
+}
 
 /** Every attribute Node declares - see Node.attrKeys(). */
 const NODE_ATTRIBUTES = [
@@ -69,6 +77,37 @@ const NODE_ATTRIBUTES = [
  */
 const DELIBERATELY_ABSENT = ['globalCompositeOperation', 'transformsEnabled', 'filters'] as const
 
+/**
+ * The paint a painted shape carries and an Image does not - see UNPAINTED in Image.ts. Written
+ * out here rather than imported, so that a key quietly gaining or losing its place in that list
+ * fails as a change to a stated claim instead of as no change at all.
+ */
+const UNPAINTED_ON_AN_IMAGE = [
+  'fill',
+  'fillEnabled',
+  'fillPriority',
+  'fillLinearGradientStartPoint',
+  'fillLinearGradientEndPoint',
+  'fillLinearGradientColorStops',
+  'fillRadialGradientStartPoint',
+  'fillRadialGradientStartRadius',
+  'fillRadialGradientEndPoint',
+  'fillRadialGradientEndRadius',
+  'fillRadialGradientColorStops',
+  'stroke',
+  'strokeEnabled',
+  'strokeWidth',
+  'hitStrokeWidth',
+  'dash',
+  'dashOffset',
+  'dashEnabled',
+  'strokeAlign',
+  'lineJoin',
+  'lineCap',
+  'miterLimit',
+  'strokeScaleEnabled',
+] as const
+
 /** The compound accessors, and the pair of components each one reads and writes. */
 const COMPOUNDS = [
   { name: 'position', components: ['x', 'y'] },
@@ -103,6 +142,23 @@ it('the three unimplemented attributes are absent, not stubbed', () => {
     assert(!keys.includes(attribute), `'${attribute}' is not among the attributes`)
     assert(node[attribute] === undefined, `and there is no field called '${attribute}' either`)
   }
+})
+
+it('an Image reports no paint, because nothing paints it', () => {
+  // An Image's triangles go to the image lane, which reads a texture and a tint and nothing
+  // about a fill. Reporting the paint anyway put twenty-three attributes in front of every
+  // property inspector and into every saved document, each one settable and none of them read.
+  const image = new Image({ texture: stubTexture(4, 4) })
+  const keys = new Set(image.attributeNames())
+  const missing = new Rect().attributeNames().filter((key) => !keys.has(key))
+
+  // Both directions at once: nothing on the list is still there, and nothing else has gone
+  // missing with it. A Rect's own two are the other reason a key is absent from an Image.
+  expect([...missing].sort()).toEqual([...UNPAINTED_ON_AN_IMAGE, 'cornerRadius', 'cornerSegments'].sort())
+
+  assert(keys.has('shadowBlur') && keys.has('shadowColor'), 'the shadow settings stay, since an Image casts one')
+  assert(keys.has('texture') && keys.has('tint'), 'along with what only an Image has')
+  assert(keys.has('opacity') && keys.has('x'), 'and everything a Node carries')
 })
 
 it('attrs reports the components, never the compound that reads them', () => {
@@ -171,6 +227,7 @@ it('every attribute has a default, and every default is an attribute', () => {
     new Path(),
     new Blob(),
     new MSDFText(),
+    new Image({ texture: stubTexture(4, 4) }),
   ]
   for (const node of nodes) {
     const keys = node.attributeNames()

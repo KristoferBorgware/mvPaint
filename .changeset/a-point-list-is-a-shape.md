@@ -50,6 +50,15 @@ A size that was never given is the texture's own, and STAYS the texture's own: a
 
 Writing `width` or `height` pins that half; from then on the quad is that size whatever the texture says. A size that merely restates what the shape would measure anyway is not a pin, which is what lets a copy or a reloaded document go on following its texture as the original did. `Polyline` and `Path` size the same way.
 
+**An `Image` also carries no paint.** `fill`, `fillEnabled`, `fillPriority`, the nine gradient properties, `stroke`, `strokeEnabled`, `strokeWidth`, `hitStrokeWidth`, `dash`, `dashOffset`, `dashEnabled`, `strokeAlign`, `lineJoin`, `lineCap`, `miterLimit` and `strokeScaleEnabled` are gone from `ImageOptions` and from what `attributeNames()`, `attrs` and `toObject()` report. An `Image` goes to the image lane, which never reads a material, so all twenty-three were settable, reported, saved — and dead.
+
+```ts
+new Image({ texture, fill: 'red' })   // was accepted and did nothing; now a type error
+new Image({ texture, tint: 'red' })   // the colour an Image actually has
+```
+
+The shadow settings stay: the renderer does hand an `Image` to the shadow lane as a caster. Documents saved earlier still load — an attribute a class no longer lists is applied and ignored, as it always was.
+
 ### `loadSvgDocument` returns a `Group`
 
 It returned a `Container`, which is not a `TransformableNode`: a loaded document could not be attached to a `Transformer`, was not what a drag inside it moved, and was not what `outermostGroup()` returned from a click on any path in it. It is now a `Group`, and each `<g>` in the document is a nested `Group` — so `closestGroup()` steps inward from the whole drawing to the part that was clicked.

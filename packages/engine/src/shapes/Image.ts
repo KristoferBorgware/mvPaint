@@ -20,6 +20,12 @@
 // Its TOP-LEFT corner sits at (x, y) and it extends right and down from there, like a Rect -
 // see Shape's header for which shapes are cornered and which centred.
 //
+// AN IMAGE HAS NO PAINT. A fill, a stroke, a gradient and a dash all describe how the mesh lane
+// should colour a shape's triangles, and an Image's triangles never reach it. So the whole paint
+// half of a Shape is taken out here - out of the options it takes and out of the attributes it
+// reports - and `tint` is the one colour it has, multiplied into every sampled texel. See
+// UNPAINTED.
+//
 // Note the name shadows the DOM's `Image` inside any module that imports this one. Load
 // through ImageTexture.load() rather than `new Image()` and it will not come up.
 
@@ -30,7 +36,60 @@ import type { ColorInput, MeshSink, RGBA } from '../render/meshFormat'
 import type { ImageTexture, ImageFilter, ImageWrap } from '../image/ImageTexture'
 import { imageUvRect, type ImageCrop, type ImageFit, type ImageUvRect } from '../image/imageUv'
 
-export interface ImageOptions extends ShapeOptions {
+/**
+ * Every Shape attribute an Image carries and nothing reads.
+ *
+ * gather.ts buckets an Image into the image lane, so its triangles reach neither the mesh
+ * batcher nor the opacity split - the only two things that consult a shape's materials. The
+ * image lane reads the texture, the size, the uv rectangle, the sampling mode, the world matrix,
+ * the tint and the opacity. `hitStrokeWidth` is in the list for the same reason from the other
+ * end: it works by re-tessellating with a substituted stroke width, and buildGeometry() below
+ * emits the same quad whatever width it is handed.
+ *
+ * What stays is what still does something: the shadow settings, because the renderer hands an
+ * Image to the shadow lane as a caster, and everything a Node has.
+ */
+const UNPAINTED = [
+  'fill',
+  'fillEnabled',
+  'fillPriority',
+  'fillLinearGradientStartPoint',
+  'fillLinearGradientEndPoint',
+  'fillLinearGradientColorStops',
+  'fillRadialGradientStartPoint',
+  'fillRadialGradientStartRadius',
+  'fillRadialGradientEndPoint',
+  'fillRadialGradientEndRadius',
+  'fillRadialGradientColorStops',
+  'stroke',
+  'strokeEnabled',
+  'strokeWidth',
+  'hitStrokeWidth',
+  'dash',
+  'dashOffset',
+  'dashEnabled',
+  'strokeAlign',
+  'lineJoin',
+  'lineCap',
+  'miterLimit',
+  'strokeScaleEnabled',
+] as const
+
+/** The same list as a type, so the options and the attributes cannot drift apart. */
+export type UnpaintedKey = (typeof UNPAINTED)[number]
+
+const UNPAINTED_KEYS: ReadonlySet<string> = new Set<string>(UNPAINTED)
+
+/** Drop the paint from an attribute table - see UNPAINTED. */
+function withoutPaint(table: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(table)) {
+    if (!UNPAINTED_KEYS.has(key)) kept[key] = value
+  }
+  return kept
+}
+
+export interface ImageOptions extends Omit<ShapeOptions, UnpaintedKey> {
   texture: ImageTexture
   /** Source rectangle in texture pixels. Defaults to the whole image. */
   crop?: ImageCrop
@@ -66,7 +125,7 @@ let cachedImageAttrDefaults: Readonly<Record<string, unknown>> | undefined
  */
 function imageAttrDefaults(): Readonly<Record<string, unknown>> {
   return (cachedImageAttrDefaults ??= Object.freeze({
-    ...shapeAttrDefaults(),
+    ...withoutPaint(shapeAttrDefaults()),
     crop: undefined,
     fit: 'fill',
     tileX: 1,
@@ -330,7 +389,7 @@ export class Image extends Shape {
 
   protected override attrKeys(): readonly string[] {
     return [
-      ...super.attrKeys(),
+      ...super.attrKeys().filter((key) => !UNPAINTED_KEYS.has(key)),
       'texture',
       'crop',
       'fit',

@@ -627,6 +627,12 @@ else { meshShapes.push(shape); meshDepths.push(depth) }
 casts shadows with no special case. An `Image` has mesh geometry too, but the image lane paints
 its pixels, so it is bucketed out of the mesh draw.
 
+That is also why an `Image` carries no paint. The mesh batcher and the opacity split are the
+only two things that read a shape's materials, and an `Image` reaches neither — so `fill`,
+`stroke`, the gradients and the dash are taken out of `ImageOptions` and out of the attributes an
+`Image` reports (`UNPAINTED` in `shapes/Image.ts`). `tint` is its one colour. The shadow settings
+stay, because the renderer does hand an `Image` to the shadow lane as a caster.
+
 **Cull.** Drop anything whose world bounds miss the camera's view rectangle, expanded by a
 debug margin. Depths are filtered in step with their shapes by an explicit loop, since
 `.filter()` cannot keep a second array in sync.
