@@ -27,6 +27,10 @@ export * from './resources/FontRegistry'
 
 export * from './svg/flattenPath'
 
+// Measuring a flattened outline and walking along it. Points and arithmetic only, so a caller
+// laying text along a path, or stepping a marker down one, needs no device to do it.
+export * from './render/arcLength'
+
 // Contour is the shape @mvpaint/ttf hands its flattened glyph rings back in - the contract
 // between the two packages, not an internal.
 export type { LineJoin, LineCap, StrokeAlign, Contour } from './render/stroke'

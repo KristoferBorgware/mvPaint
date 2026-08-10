@@ -1,10 +1,18 @@
-// Path - a filled and/or stroked shape from arbitrary contours (typically flattened SVG
-// path data). Fill is triangulated with holes (earcut) and stroke is drawn by the shared
-// contour stroker; both reuse the mesh lane and the inherited Shape fill/gradient/stroke
-// API, so a Path fills with a solid color or a gradient exactly like Rect/Circle.
+// Path - a filled and/or stroked shape from arbitrary contours, usually SVG path data. Fill is
+// triangulated with holes (earcut) and stroke is drawn by the shared contour stroker; both reuse
+// the mesh lane and the inherited Shape fill/gradient/stroke API, so a Path fills with a solid
+// color or a gradient exactly like Rect/Circle.
+//
+// TWO WAYS TO SAY THE SAME SHAPE. `d` is path data, re-flattened whenever it is assigned;
+// `contours` is the flat point lists a flattener already produced, which is what the SVG loader
+// hands over rather than re-parsing a string it has just read. Whichever one was written last is
+// the one the shape describes itself by - see attrKeys() - so a Path built from data saves and
+// reloads as that data, not as ten thousand points.
 
 import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
+import type { Vector2Like } from '../math/Vector2'
 import type { MeshSink } from '../render/meshFormat'
+import { contoursLength, pointAtLength } from '../render/arcLength'
 import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
 import { classifyContours, type ContourGroup } from '../render/contours'
@@ -24,6 +32,7 @@ export interface PathOptions extends ShapeOptions {
 
 /** See Node.attrDefaults. An empty outline draws nothing. */
 let cachedPathAttrDefaults: Readonly<Record<string, unknown>> | undefined
+let cachedDataPathAttrDefaults: Readonly<Record<string, unknown>> | undefined
 
 /**
  * Built on FIRST USE rather than at module load. It spreads a table from another module, and a
@@ -40,11 +49,22 @@ function pathAttrDefaults(): Readonly<Record<string, unknown>> {
   }))
 }
 
+/** The same table for a Path that carries its data string - see attrKeys(). */
+function dataPathAttrDefaults(): Readonly<Record<string, unknown>> {
+  return (cachedDataPathAttrDefaults ??= Object.freeze({
+    ...shapeAttrDefaults(),
+    d: undefined,
+    tolerance: undefined,
+    filled: true,
+  }))
+}
+
 export class Path extends Shape {
   override readonly nodeName: string = 'Path'
 
   /**
-   * The outline, one entry per subpath. Assigning a list regroups it and re-tessellates.
+   * The outline, one entry per subpath. Assigning a list regroups it and re-tessellates, and
+   * drops any `d` this path was carrying - the string no longer describes these points.
    *
    * The fill is triangulated from a GROUPING of these - each outer ring with the holes that
    * fall inside it - which is derived here rather than at tessellation time, because a
@@ -62,12 +82,49 @@ export class Path extends Shape {
     return this._contours
   }
   set contours(value: Contour[]) {
+    this._d = undefined
+    this.applyContours(value)
+  }
+
+  private applyContours(value: Contour[]): void {
     if (value === this._contours) return
     const previous = this._contours
     this._contours = value
     this._groups = classifyContours(value)
+    this.extentCache = undefined
     this.markGeometryDirty()
     this.announce('contours', previous, value)
+  }
+
+  /**
+   * The path data this outline came from, or undefined for one given its contours directly.
+   * Assigning a string re-flattens it at the current tolerance, so an application animating a
+   * shape can write data and nothing else.
+   */
+  private _d?: string
+  get d(): string | undefined {
+    return this._d
+  }
+  set d(value: string | undefined) {
+    if (value === this._d) return
+    const previous = this._d
+    this._d = value
+    // applyContours rather than the contours setter, which is the one that drops `d`.
+    this.applyContours(value ? flattenPathData(value, { tolerance: this._tolerance }) : [])
+    this.announce('d', previous, value)
+  }
+
+  /** Curve flatness when `d` is flattened, in path units. Assigning it re-flattens. */
+  private _tolerance?: number
+  get tolerance(): number | undefined {
+    return this._tolerance
+  }
+  set tolerance(value: number | undefined) {
+    if (value === this._tolerance) return
+    const previous = this._tolerance
+    this._tolerance = value
+    if (this._d) this.applyContours(flattenPathData(this._d, { tolerance: value }))
+    this.announce('tolerance', previous, value)
   }
 
   /**
@@ -87,21 +144,100 @@ export class Path extends Shape {
 
   constructor(options: PathOptions = {}) {
     super(options)
-    // Through the setter, so the grouping is derived in the one place that derives it. The
+    // Through the setters, so the grouping is derived in the one place that derives it. The
     // earcut triangulation itself happens in buildGeometry(), which Shape's tessellate() only
     // calls on a cache miss - so it runs once per shape, lazily rather than eagerly.
-    this.contours =
-      options.contours ??
-      (options.d ? flattenPathData(options.d, { tolerance: options.tolerance }) : [])
+    this._tolerance = options.tolerance
+    if (options.contours) this.contours = options.contours
+    else this.d = options.d
     this.filled = options.filled ?? true
+    this.settleSize(options)
   }
 
+  /**
+   * Whichever of the two descriptions this path holds, and never both: `contours` alongside the
+   * `d` they were flattened from would write the same outline twice into every document, and
+   * reading them back would then depend on which of the two was applied last.
+   */
   protected override attrKeys(): readonly string[] {
-    return [...super.attrKeys(), 'contours', 'filled']
+    return this._d !== undefined
+      ? [...super.attrKeys(), 'd', 'tolerance', 'filled']
+      : [...super.attrKeys(), 'contours', 'filled']
   }
 
   protected override attrDefaults(): Readonly<Record<string, unknown>> {
-    return pathAttrDefaults()
+    return this._d !== undefined ? dataPathAttrDefaults() : pathAttrDefaults()
+  }
+
+  // --- size -------------------------------------------------------------------------------
+  //
+  // A path is not SIZED, it is MEASURED: width and height report the extent of its contour
+  // points rather than a stored pair. Assigning either one records a size for callers that ask
+  // and moves no point - the contours are the geometry, whatever the size says.
+
+  private extentCache?: { width: number; height: number }
+  private widthPinned = false
+  private heightPinned = false
+
+  private extent(): { width: number; height: number } {
+    if (!this.extentCache) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const contour of this._contours) {
+        for (const p of contour.points) {
+          if (p.x < minX) minX = p.x
+          if (p.x > maxX) maxX = p.x
+          if (p.y < minY) minY = p.y
+          if (p.y > maxY) maxY = p.y
+        }
+      }
+      this.extentCache = Number.isFinite(minX)
+        ? { width: maxX - minX, height: maxY - minY }
+        : { width: 0, height: 0 }
+    }
+    return this.extentCache
+  }
+
+  /**
+   * Node's constructor writes width and height through the setters, so every Path would arrive
+   * with both pinned. Only a size NAMED in the options is an override - and a size that merely
+   * restates the measurement is what a serialised copy carries, so that one is not an override
+   * either, and a reloaded path goes on tracking its outline as the original did.
+   */
+  private settleSize(options: PathOptions): void {
+    const measured = this.extent()
+    this.widthPinned = options.width !== undefined && options.width !== measured.width
+    this.heightPinned = options.height !== undefined && options.height !== measured.height
+  }
+
+  override get width(): number {
+    return this.widthPinned ? super.width : this.extent().width
+  }
+  override set width(value: number) {
+    this.widthPinned = true
+    super.width = value
+  }
+  override get height(): number {
+    return this.heightPinned ? super.height : this.extent().height
+  }
+  override set height(value: number) {
+    this.heightPinned = true
+    super.height = value
+  }
+
+  // --- distance along the outline ---------------------------------------------------------
+
+  /** How long the whole outline is - every subpath, each closing segment included. */
+  getLength(): number {
+    return contoursLength(this._contours)
+  }
+
+  /**
+   * The point that far along the outline, in local space, or null for an empty one. The subpaths
+   * are walked in order as one continuous ruler, and a distance past the end clamps to it - see
+   * render/arcLength.
+   */
+  getPointAtLength(distance: number): Vector2Like | null {
+    return pointAtLength(this._contours, distance)
   }
 
   protected override buildGeometry(sink: MeshSink): void {

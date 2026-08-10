@@ -194,7 +194,8 @@ Which point of a shape lands at `(x, y)` depends on the shape:
 - **`Rect`, `Image`, `Text`, `VectorText`** hang from their **top-left corner**. The scene is
   y-down, so such a shape spans `x ∈ [0, width]` and `y ∈ [0, height]` in local space.
 - **`Polyline` and `Path`** place their points as authored; the origin is wherever the author
-  put it.
+  put it. Neither is sized — `width`/`height` report the extent of the drawn outline, unless a
+  size was written, which pins that half.
 
 The practical consequence is the pivot. Rotation and scale are about the local origin, so a
 circle spins in place while a rect turns about its corner. To spin a rect about its middle, set
@@ -369,7 +370,7 @@ flat). `material` selects which of the shape's materials paints the vertex — u
 | --- | --- |
 | `Rect` | two fill triangles, or a fan over the rounded outline when `cornerRadius` is set; plus a closed stroke contour when `strokeWidth > 0` |
 | `Circle` | a triangle fan; segment count adapts to radius against a fixed chord-error tolerance |
-| `Polyline`, `Path` | contours through earcut for the fill, plus the shared stroker |
+| `Polyline`, `Path` | contours through earcut for the fill — a `Polyline` has one only when `closed` — plus the shared stroker |
 | `Image` | its quad — used for the silhouette, bounds and hit test only; the pixels come from the image lane |
 | `Text` | **nothing**; it inherits the no-op base, because it draws through the text lane |
 | `VectorText` | real glyph outlines, tessellated like any other path |
@@ -483,14 +484,22 @@ specification it leans on.
 
 #### Method 1 — polygons (`loadSvgDocument`)
 
-`loadSvgDocument()` (`svg/loadSvg.ts`) parses a document into `Path` nodes, flattening curves
-against a tolerance and carrying across fills, gradients, strokes and transforms. Shape elements
-are converted to path data first (`svg/shapeToPath.ts`), and fills go through the same contour
-classification and triangulation (`svg/triangulate.ts`) the rest of the engine uses.
+`loadSvgDocument()` (`svg/loadSvg.ts`) parses a document into `Path` nodes under a `Group`,
+flattening curves against a tolerance and carrying across fills, gradients, strokes and
+transforms. Shape elements are converted to path data first (`svg/shapeToPath.ts`), and fills go
+through the same contour classification and triangulation (`svg/triangulate.ts`) the rest of the
+engine uses.
 
 What comes out is ordinary scene content. The nodes are `Path`s like any other, so they pick,
 cull, z-sort, take shadows and can be transformed or restyled individually after the load — the
 document stops being a document the moment it is parsed.
+
+The wrapper is a `Group` rather than a bare `Container` because a `Group` is what the engine
+handles as one thing: it is what a `Transformer` attaches to, what a drag inside it moves, and
+what `outermostGroup()` returns from a click on any path in it. Each `<g>` becomes a nested
+`Group` for the same reason, so `closestGroup()` steps inward from the whole drawing to the part
+that was clicked. The nested groups carry no transform — each element's CTM is baked into its
+points on the way down, so they mark structure and place nothing.
 
 ```ts
 const svg = loadSvgDocument(text, { rootMatrix: flipY })
@@ -952,9 +961,9 @@ way assigning `x` always did:
 | `Shape` | `strokeWidth`, `strokeEnabled`, `strokeAlign`, `dash`, `dashOffset`, `dashEnabled`, `lineJoin`, `lineCap`, `miterLimit`, `strokeScaleEnabled` |
 | `Rect` | `width`, `height`, `cornerRadius`, `cornerSegments` |
 | `Circle` | `radius`, `segments` — and `width`/`height`, which are the radius under another name |
-| `Polyline` | `points`, `closed` |
-| `Path` | `contours`, `filled` |
-| `Image` | `width`, `height` |
+| `Polyline` | `points`, `closed`, `tension`, `bezier` |
+| `Path` | `d`, `tolerance`, `contours`, `filled` |
+| `Image` | `width`, `height`, `texture` — a size that was never given follows the texture into the new one |
 | `CustomShape` | `tolerance` |
 
 `stroke` is the one that does both. A colour swapped for another colour is a record rewrite and

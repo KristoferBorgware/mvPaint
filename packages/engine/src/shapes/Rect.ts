@@ -17,8 +17,13 @@
 // bottomRight, bottomLeft] to round them independently. A radius bigger than the
 // rectangle can hold is scaled down rather than clipped - all four shrink by one common
 // factor, so the corners stay in proportion to each other instead of the largest one
-// alone absorbing the whole correction. At radius 0 the geometry is exactly the four
-// vertices it always was: rounding is opt-in and costs the common case nothing.
+// alone absorbing the whole correction. That is the CSS rule, and it is worth knowing
+// where it parts from clamping each corner on its own: with equal radii the two agree
+// exactly, and they differ only when the four are not the same. On a 100x20 rectangle,
+// [50, 0, 0, 0] scales everything by 0.4 - the left edge is 20 units long and its two
+// radii ask for 50 - leaving a top-left radius of 20, where clamping each corner to
+// min(r, w/2, h/2) would leave 10. At radius 0 the geometry is exactly the four vertices
+// it always was: rounding is opt-in and adds nothing to the square case.
 //
 // A square corner is 90 degrees, so 'miter' - Shape's default join - lands exactly on the
 // diagonal bisector, and Rect keeps that default. On a rounded corner the arc is a

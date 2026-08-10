@@ -101,6 +101,7 @@ export class Image extends Shape {
     if (value === this._texture) return
     const previous = this._texture
     this._texture = value
+    this.resizeToTexture()
     bumpImageGeometryEpoch()
     this.announce('texture', previous, value)
   }
@@ -264,16 +265,53 @@ export class Image extends Shape {
     this._wrapY = options.wrapY ?? 'clamp'
     this._filter = options.filter ?? 'linear'
     this.tint = options.tint ?? [1, 1, 1, 1]
+    this.settleSize(options)
     bumpImageGeometryEpoch()
   }
 
   // Size is BOTH lanes. The silhouette that bounds, picking and the shadow bake read is
   // tessellated here, and the pixels are laid over exactly the same rectangle by the image
   // batcher from a buffer it packs itself - so a resize invalidates one of each.
+  //
+  // A SIZE NOT GIVEN FOLLOWS THE TEXTURE. An Image with no width of its own is its picture's
+  // width, and stays its picture's width when a different picture is put in it - otherwise
+  // swapping the texture would leave the quad at the old size, sampling the new image into it
+  // and stretching it, with stale bounds, picking and shadow silhouette to match. Writing a
+  // width is what pins one; from then on the quad is that wide whatever the texture says.
+
+  private widthPinned = false
+  private heightPinned = false
+
+  /**
+   * Node's constructor writes width and height through the setters, so every Image would arrive
+   * with both pinned. Only a size NAMED in the options is an override - and a size that merely
+   * restates the texture's own is what a serialised copy carries, so that one is not an override
+   * either, and a reloaded Image goes on following its texture as the original did.
+   */
+  private settleSize(options: ImageOptions): void {
+    this.widthPinned = options.width !== undefined && options.width !== options.texture.width
+    this.heightPinned = options.height !== undefined && options.height !== options.texture.height
+  }
+
+  /** Take the unpinned half of the size from the current texture. */
+  private resizeToTexture(): void {
+    let moved = false
+    if (!this.widthPinned && super.width !== this._texture.width) {
+      super.width = this._texture.width
+      moved = true
+    }
+    if (!this.heightPinned && super.height !== this._texture.height) {
+      super.height = this._texture.height
+      moved = true
+    }
+    if (moved) this.markGeometryDirty()
+  }
+
   override get width(): number {
     return super.width
   }
   override set width(value: number) {
+    this.widthPinned = true
     if (value === super.width) return
     super.width = value
     this.markGeometryDirty()
@@ -283,6 +321,7 @@ export class Image extends Shape {
     return super.height
   }
   override set height(value: number) {
+    this.heightPinned = true
     if (value === super.height) return
     super.height = value
     this.markGeometryDirty()

@@ -9,6 +9,7 @@ import { buildImageScene, prepareImageScene } from './imageScene'
 import { buildLayerScene } from './layerScene'
 import { buildMsdfStressScene } from './msdfStressScene'
 import { buildOpacityScene } from './opacityScene'
+import { buildPolylineScene } from './polylineScene'
 import { buildShadowScene } from './shadowScene'
 import { buildShapesScene } from './shapesScene'
 import { buildStrokeScaleScene } from './strokeScaleScene'
@@ -56,6 +57,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'dash/dashOffset/dashEnabled: the outline is cut into pieces before the ribbon is built, so every piece is an ordinary open path. Covers the pattern vocabulary (including a dotted line, which is a dash short enough that its two round caps meet), a pattern measured around a corner rather than restarting at it, strokeAlign surviving the cut, a dash carried through the gauge under strokeScaleEnabled: false, and dashOffset animated into marching ants. The bottom right is hitStrokeWidth: three hairlines drawn one unit wide, two of which are easy to grab, and the third scaled by six along with its hit ribbon.',
     build: buildDashScene,
+  },
+  {
+    id: 'polylines',
+    title: 'Polylines & curves',
+    description:
+      'Polyline: one list of points read four ways. tension fits a spline through the points and still lands on every one of them (four tensions over a single point set, including an overshooting one); bezier reads the same kind of list as a start point plus groups of three, drawn over its own control net; closed joins the ends and gives the ring an interior, so it fills and can be clicked in the middle rather than only on its outline. The bottom right is what a polyline knows about itself - width and height are the extent of the curve it draws rather than a size it was given, and getLength()/getPointAtLength() are what carry the disc along it. Points are written flat in the first section and as objects everywhere else.',
+    build: buildPolylineScene,
   },
   {
     id: 'groups',

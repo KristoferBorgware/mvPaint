@@ -1,10 +1,21 @@
-// Load an SVG document (browser DOMParser) into a Container of Path shapes. Walks the
-// tree accumulating each element's CTM and inherited paint, converts geometry elements to
-// path data, flattens them, bakes the CTM into the points, and maps fill/stroke/gradient
-// onto the reused Shape API. The pure helpers it composes (matrix, color, shapeToPath,
-// gradient) are unit-tested; this DOM glue is exercised in the browser.
+// Load an SVG document (browser DOMParser) into a Group of Path shapes. Walks the tree
+// accumulating each element's CTM and inherited paint, converts geometry elements to path
+// data, flattens them, bakes the CTM into the points, and maps fill/stroke/gradient onto
+// the reused Shape API. The pure helpers it composes (matrix, color, shapeToPath, gradient)
+// are unit-tested; this DOM glue is exercised in the browser.
+//
+// A GROUP, AND A GROUP PER <g>. A document is one assembly, and a Group is what the engine
+// treats as one: it is what a Transformer can be attached to, what a drag inside it moves, and
+// what outermostGroup() returns from a click on any path in it. A bare Container is none of
+// those, so a document loaded into one could only ever be handled a path at a time. The
+// document's own grouping is kept for the same reason - closestGroup() can then step inward
+// from the whole drawing to the part that was clicked.
+//
+// The nested groups carry no transform. Each element's CTM is baked into its points on the way
+// down, so they mark structure rather than place anything.
 
-import { Container } from '../shapes/Container'
+import type { Container } from '../shapes/Container'
+import { Group } from '../shapes/Group'
 import { Path } from '../shapes/Path'
 import type { GradientStop, RGBA } from '../render/meshFormat'
 import type { Contour, LineCap, LineJoin } from '../render/stroke'
@@ -175,11 +186,11 @@ export interface LoadSvgOptions {
   rootMatrix?: Mat2x3
 }
 
-/** Parse an SVG document string into a Container of Path shapes. */
-export function loadSvgDocument(svgText: string, options: LoadSvgOptions = {}): Container {
+/** Parse an SVG document string into a Group of Path shapes. */
+export function loadSvgDocument(svgText: string, options: LoadSvgOptions = {}): Group {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml')
   const svg = doc.documentElement
-  const root = new Container('svg')
+  const root = new Group('svg')
   if (!svg || svg.tagName.toLowerCase() !== 'svg') return root
 
   const gradients = collectGradients(svg)
@@ -220,13 +231,17 @@ export function loadSvgDocument(svgText: string, options: LoadSvgOptions = {}): 
     }
   }
 
-  const walk = (el: Element, parentCtm: Mat2x3, parentStyle: Style): void => {
+  const walk = (el: Element, parent: Container, parentCtm: Mat2x3, parentStyle: Style): void => {
     const tag = el.tagName.toLowerCase()
     const ctm = multiply(parentCtm, parseTransform(el.getAttribute('transform')))
     const style = inheritStyle(parentStyle, el)
 
     if (CONTAINER_TAGS.has(tag)) {
-      for (const child of Array.from(el.children)) walk(child, ctm, style)
+      // Built first and added only if it drew something, so a <g> holding nothing the loader
+      // understands - a <filter>, a <use> - leaves no empty node behind to measure or click.
+      const group = new Group({ name: el.getAttribute('id') ?? '' })
+      for (const child of Array.from(el.children)) walk(child, group, ctm, style)
+      if (group.hasChildren()) parent.addChild(group)
       return
     }
     if (!GEOMETRY_TAGS.has(tag)) return
@@ -246,10 +261,10 @@ export function loadSvgDocument(svgText: string, options: LoadSvgOptions = {}): 
       miterLimit: style.miterLimit,
     })
     applyFill(path, style, localContours, ctm)
-    root.addChild(path)
+    parent.addChild(path)
   }
 
   const rootMatrix = options.rootMatrix ?? IDENTITY
-  for (const child of Array.from(svg.children)) walk(child, rootMatrix, ROOT_STYLE)
+  for (const child of Array.from(svg.children)) walk(child, root, rootMatrix, ROOT_STYLE)
   return root
 }
