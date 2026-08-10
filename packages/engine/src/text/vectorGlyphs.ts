@@ -24,7 +24,7 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
-import { simpleLoops, windingGroups } from '../render/nonzero'
+import { simpleLoops, unionBoundary, windingGroups } from '../render/nonzero'
 import { triangulateGroup } from '../svg/triangulate'
 import type { FontStyle } from './msdfProvider'
 import type { FontMetrics } from './msdfMetrics'
@@ -77,27 +77,33 @@ export interface VectorFonts extends FontProvider {
 export const EMPTY_GLYPH_MESH: VectorGlyphMesh = { contours: [], vertices: [], indices: [] }
 
 /**
- * Fill geometry for a set of closed rings.
+ * A glyph's silhouette and the triangles that fill it, read with the NONZERO WINDING RULE - the
+ * rule a font is drawn with (see render/nonzero.ts).
  *
- * Read with the NONZERO WINDING RULE, which is the rule a font is drawn with (see
- * render/nonzero.ts). A letter is built from overlapping pieces wound the same way - the bar of
- * a 't' laid across its stem, the two strokes of a 'w' crossing at each V - and the fill is
- * their union. Rings are cut at their crossings so every piece reaching earcut is a simple
- * polygon, grouped into solids-with-holes by direction, then triangulated group by group with
- * the index spaces rebased into one flat mesh.
+ * A letter is built from overlapping pieces wound the same way: the bar of a 't' laid across its
+ * stem, the two strokes of a 'w' crossing at each V, the bowl of an 'e' running into its bar.
+ * What the letter IS, is their union. So the rings that come back are the union's OUTLINE, with
+ * every join between the pieces gone - which is what the per-letter outline follows, and the
+ * whole reason it is computed rather than the pieces being handed on: stroking those draws the
+ * scaffolding a 't' was assembled from straight through the middle of the letter.
  *
- * `contours` comes back untouched: it is the outline the stroker follows, and a per-letter
- * outline traces the letterform as the font drew it, crossings included.
+ * The fill is then cut from that same silhouette, so the outline and the ink are two readings of
+ * one set of rings and cannot disagree. Each ring goes to earcut as a simple polygon, grouped
+ * into solids-with-holes by direction, with the groups' index spaces rebased into one flat mesh.
  */
 export function meshFromContours(contours: Contour[]): VectorGlyphMesh {
   const vertices: Vector2Like[] = []
   const indices: number[] = []
-  const loops = contours.flatMap((contour) => simpleLoops(contour.points))
+  // The silhouette, or the rings themselves where there was no crossing to resolve and the two
+  // are the same thing anyway.
+  const silhouette = unionBoundary(contours)
+  const outline = silhouette.length > 0 ? silhouette : contours
+  const loops = outline.flatMap((contour) => simpleLoops(contour.points))
   for (const group of windingGroups(loops)) {
     const triangulated = triangulateGroup(group)
     const base = vertices.length
     for (const v of triangulated.vertices) vertices.push(v)
     for (const i of triangulated.indices) indices.push(base + i)
   }
-  return { contours, vertices, indices }
+  return { contours: outline, vertices, indices }
 }

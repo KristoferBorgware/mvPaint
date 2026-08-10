@@ -2,9 +2,10 @@
 //
 // Multi-channel signed distance fields: a glyph's coverage is the median of the sampled RGB,
 // thresholded against a range measured in SCREEN pixels rather than texels, which is what
-// keeps letterforms crisp at any camera zoom instead of blurring like a bitmap. Decorations -
-// underline, strikethrough, highlight - travel in the same buffers with the glyph flag clear
-// and take their flat colour with no sampling at all.
+// keeps letterforms crisp as the camera zooms in instead of blurring like a bitmap - and, at
+// the other end, fades them out once a screen pixel is wider than the whole field. Decorations
+// - underline, strikethrough, highlight - travel in the same buffers with the glyph flag clear
+// and take their flat colour with no sampling at all, so they keep drawing at any size.
 //
 // Same three departures from the WGSL as the mesh lane, plus one of its own:
 //
@@ -209,7 +210,8 @@ void main() {
     float sd = median(msd);
     vec2 unitRange = vec2(${field(TEXT_OBJECT_DISTANCE_RANGE_OFFSET)}) / vec2(textureSize(u_atlas, 0).xy);
     vec2 screenTexSize = vec2(1.0) / uvDeriv;
-    float screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    float fieldPxRange = 0.5 * dot(unitRange, screenTexSize);
+    float screenPxRange = max(fieldPxRange, 1.0);
     float screenPxDist = screenPxRange * (sd - 0.5) + ${field(TEXT_OBJECT_DILATE_OFFSET)} * screenPerWorld;
     float fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
 
@@ -224,6 +226,11 @@ void main() {
       float a = outlineAlpha * mix(strokeColor.a, base.a, fillAlpha);
       color = vec4(rgb, a);
     }
+
+    // See the WebGPU shader: below one field-width per screen pixel the ramp stops narrowing and
+    // the coverage becomes the raw distance, which is a soft fringe the full width of the field.
+    // Faded out over that last stretch rather than left as a smudge.
+    color.a *= clamp(fieldPxRange, 0.0, 1.0);
   }
 
   // The object's own transparency, applied last and to the alpha only - these lanes blend

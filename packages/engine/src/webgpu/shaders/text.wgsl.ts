@@ -1,9 +1,11 @@
 // text-lane shader (MSDF). Each vertex carries a local position, an atlas UV, a color, and a
 // packed id (object/material index + an "is glyph" flag). Glyph fragments recover coverage
 // from the multi-channel signed distance field (median of RGB) and anti-alias it in screen
-// space via the field's screen-pixel range (derived with fwidth, so it stays crisp at any
-// zoom); an optional per-letter outline widens that coverage. Non-glyph fragments (underline,
-// strikethrough, highlight) return their flat color or per-run gradient with no MSDF sampling.
+// space via the field's screen-pixel range (derived with fwidth, so it stays crisp as the
+// camera zooms in, and fades out once the text is smaller than the field can describe - see
+// fieldPxRange); an optional per-letter outline widens that coverage. Non-glyph fragments
+// (underline, strikethrough, highlight) return their flat color or per-run gradient with no
+// MSDF sampling, and so keep drawing at any size.
 export const textShaderCode = /* wgsl */ `
 const MAX_STOPS: u32 = 8u;
 const GLYPH_BIT: u32 = 0x80000000u;
@@ -194,7 +196,8 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
     // screen-pixel range below comes out unchanged.
     let unitRange = vec2<f32>(obj.distanceRange) / vec2<f32>(textureDimensions(atlasTex));
     let screenTexSize = vec2<f32>(1.0) / uvDeriv;
-    let screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
+    let fieldPxRange = 0.5 * dot(unitRange, screenTexSize);
+    let screenPxRange = max(fieldPxRange, 1.0);
     let screenPxDist = screenPxRange * (sd - 0.5) + obj.dilate * screenPerWorld;
     let fillAlpha = clamp(screenPxDist + 0.5, 0.0, 1.0);
 
@@ -208,6 +211,16 @@ fn fs_main(input : VertexOutput) -> @location(0) vec4<f32> {
       let a = outlineAlpha * mix(obj.strokeColor.a, base.a, fillAlpha);
       color = vec4<f32>(rgb, a);
     }
+
+    // SHRINKING PAST THE FIELD. The clamp above is what keeps the ramp from inverting once a
+    // screen pixel is wider than the whole distance field, and the price of it is that the ramp
+    // stops narrowing: at that size the coverage IS the raw distance, which fades from 1 at the
+    // glyph's centre to 0 at the far edge of the field, and the letters wear a soft fringe the
+    // full width of that field. Below one field-width per pixel the text is smaller than it can
+    // be drawn, so it is faded out over that last stretch rather than left as a smudge. On the
+    // atlases here (a 4-texel field on a 42-texel em) the fade begins at about ten screen pixels
+    // per em and reaches nothing at one.
+    color.a = color.a * clamp(fieldPxRange, 0.0, 1.0);
   }
 
   // The object's own transparency, applied last and to the alpha only - these lanes blend

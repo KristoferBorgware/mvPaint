@@ -27,6 +27,7 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import { pointInPolygon, signedArea, type ContourGroup } from './contours'
+import type { Contour } from './stroke'
 
 /**
  * How far along a segment two crossings must be from its ends to count. Parametric, so it is the
@@ -140,6 +141,231 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
   }
   if (open.length >= 3) loops.push(open)
   return loops
+}
+
+/** A piece of one edge, after every crossing on it has cut it up. */
+interface BoundarySegment {
+  from: Vector2Like
+  to: Vector2Like
+}
+
+/** Winding number of a point against a set of rings - the nonzero rule, computed straight. */
+function windingAt(px: number, py: number, rings: readonly (readonly Vector2Like[])[]): number {
+  let winding = 0
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[j]
+      const b = ring[i]
+      if (a.y <= py) {
+        if (b.y > py && (b.x - a.x) * (py - a.y) - (px - a.x) * (b.y - a.y) > 0) winding++
+      } else if (b.y <= py && (b.x - a.x) * (py - a.y) - (px - a.x) * (b.y - a.y) < 0) {
+        winding--
+      }
+    }
+  }
+  return winding
+}
+
+/**
+ * Which piece the walk leaves a junction on.
+ *
+ * Where the silhouette crosses itself, several pieces leave one point and picking the wrong one
+ * traverses the boundary inside-out - the counter of a 'D' comes out wound like an outer, and the
+ * letter fills solid. The one to take is the first going CLOCKWISE from the way the walk came in,
+ * which is the piece that hugs the material rather than cutting across it. Everywhere else there
+ * is one candidate and this is a lookup.
+ */
+function nextAround(
+  arriving: BoundarySegment,
+  candidates: BoundarySegment[] | undefined,
+  used: ReadonlySet<BoundarySegment>,
+): BoundarySegment | undefined {
+  if (!candidates) return undefined
+  const free = candidates.filter((segment) => !used.has(segment))
+  if (free.length <= 1) return free[0]
+
+  // Measured from the way back the walk came, so the sharpest turn is the smallest angle and
+  // carrying straight on is close to a half turn.
+  const bx = arriving.from.x - arriving.to.x
+  const by = arriving.from.y - arriving.to.y
+  let best: BoundarySegment | undefined
+  let bestAngle = -Infinity
+  for (const segment of free) {
+    const dx = segment.to.x - segment.from.x
+    const dy = segment.to.y - segment.from.y
+    let angle = Math.atan2(bx * dy - by * dx, bx * dx + by * dy)
+    if (angle <= 0) angle += Math.PI * 2
+    if (angle > bestAngle) {
+      bestAngle = angle
+      best = segment
+    }
+  }
+  return best
+}
+
+/**
+ * The outline of the UNION of a set of rings: the silhouette, with every internal seam gone.
+ *
+ * This is what a stroke has to follow. The rings themselves are the pieces a letter was BUILT
+ * from, and stroking those draws the joins between them - the bar of a 't' outlined as a
+ * rectangle running through the stem, an 'e' with a line out of the side of its bowl - which is
+ * scaffolding the letter was never meant to show.
+ *
+ * Every edge is cut at each crossing, and each piece is then asked one question: stepping a
+ * hair's breadth off it to either side, is the winding number zero on exactly one of them. A
+ * piece with filled material on both sides is a seam and goes; a piece with material on one side
+ * is boundary and stays. What survives is chained back into closed rings by its endpoints, which
+ * match exactly because the crossings that made them were computed once and shared.
+ *
+ * Winding decides it rather than containment, so a counter comes through as a hole in the
+ * silhouette (material on one side, none on the other) without being a special case.
+ */
+export function unionBoundary(contours: readonly Contour[]): Contour[] {
+  const rings = contours.map((contour) => contour.points).filter((points) => points.length >= 3)
+  if (rings.length === 0) return []
+
+  // One flat list of edges, so a crossing between two rings is found by the same pass as one
+  // within a ring. `crossing` rejects shared endpoints, which is every consecutive pair.
+  // Each edge carries its own box, so the two quadratic passes below reject almost every pair on
+  // four comparisons - a letter's edges are short and nearly all of them are nowhere near each
+  // other.
+  interface Edge {
+    a: Vector2Like
+    b: Vector2Like
+    loX: number
+    loY: number
+    hiX: number
+    hiY: number
+    cuts: { at: number; point: Vector2Like }[]
+  }
+  const edges: Edge[] = []
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      edges.push({
+        a,
+        b,
+        loX: Math.min(a.x, b.x),
+        loY: Math.min(a.y, b.y),
+        hiX: Math.max(a.x, b.x),
+        hiY: Math.max(a.y, b.y),
+        cuts: [],
+      })
+      if (a.x < minX) minX = a.x
+      if (a.x > maxX) maxX = a.x
+      if (a.y < minY) minY = a.y
+      if (a.y > maxY) maxY = a.y
+    }
+  }
+  // How far off an edge to stand when asking which side is filled, and how far a point may be
+  // from a line and still be called on it. Relative to the outline's own size, since this is
+  // asked of glyphs in font units and of paths in whatever the caller uses.
+  const step = Math.max((Math.max(maxX - minX, maxY - minY) || 1) * 1e-6, Number.MIN_VALUE)
+
+  for (let i = 0; i < edges.length; i++) {
+    for (let k = i + 1; k < edges.length; k++) {
+      const one = edges[i]
+      const two = edges[k]
+      if (one.hiX < two.loX || two.hiX < one.loX || one.hiY < two.loY || two.hiY < one.loY) continue
+      const hit = crossing(edges[i].a, edges[i].b, edges[k].a, edges[k].b)
+      if (!hit) continue
+      edges[i].cuts.push({ at: parameterOf(edges[i].a, edges[i].b, hit), point: hit })
+      edges[k].cuts.push({ at: parameterOf(edges[k].a, edges[k].b, hit), point: hit })
+    }
+  }
+
+  // Crossings alone are not enough. Pieces of a letter meet along shared lines as often as they
+  // cross - the stem of a 'D' stands on the same baseline as its bowl, and the two edges lie
+  // ALONG each other rather than through each other, which no crossing finds. So every edge is
+  // also cut wherever another edge's endpoint touches it. Without this the pieces of the
+  // silhouette never meet at a shared point and the walk below cannot get from one to the next.
+  const touchTolerance = step
+  for (const edge of edges) {
+    const dx = edge.b.x - edge.a.x
+    const dy = edge.b.y - edge.a.y
+    const lengthSquared = dx * dx + dy * dy
+    if (lengthSquared === 0) continue
+    const length = Math.sqrt(lengthSquared)
+    for (const ring of rings) {
+      for (const vertex of ring) {
+        if (vertex.x < edge.loX - touchTolerance || vertex.x > edge.hiX + touchTolerance) continue
+        if (vertex.y < edge.loY - touchTolerance || vertex.y > edge.hiY + touchTolerance) continue
+        const at = ((vertex.x - edge.a.x) * dx + (vertex.y - edge.a.y) * dy) / lengthSquared
+        if (at <= EDGE_EPSILON || at >= 1 - EDGE_EPSILON) continue
+        const offLine = Math.abs((vertex.x - edge.a.x) * dy - (vertex.y - edge.a.y) * dx) / length
+        if (offLine > touchTolerance) continue
+        edge.cuts.push({ at, point: vertex })
+      }
+    }
+  }
+
+  const kept: BoundarySegment[] = []
+  const already = new Set<string>()
+  const add = (segment: BoundarySegment): void => {
+    const key = `${pointKey(segment.from)}>${pointKey(segment.to)}`
+    if (already.has(key)) return
+    already.add(key)
+    kept.push(segment)
+  }
+  for (const edge of edges) {
+    edge.cuts.sort((x, y) => x.at - y.at)
+    let from = edge.a
+    for (const cut of [...edge.cuts, { at: 1, point: edge.b }]) {
+      const to = cut.point
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const length = Math.hypot(dx, dy)
+      if (length > 0) {
+        // The midpoint is the point on the piece furthest from whatever cut it, so it is where
+        // the two sides are least likely to be confused with each other.
+        const mx = (from.x + to.x) / 2
+        const my = (from.y + to.y) / 2
+        const nx = (-dy / length) * step
+        const ny = (dx / length) * step
+        const left = windingAt(mx + nx, my + ny, rings) !== 0
+        const right = windingAt(mx - nx, my - ny, rings) !== 0
+        // Every kept piece is turned so the material is on the same side of it as every other's,
+        // whichever piece it was cut from. That is what makes the rings come out of the walk
+        // below already wound correctly - an outer one way, a counter the other - rather than
+        // inheriting the direction of whichever piece of scaffolding happened to contribute it.
+        // Where two pieces lie ALONG each other, the same stretch of boundary is contributed
+        // twice. Kept once: two identical ways out of one point would send the walk round the
+        // same ring twice and leave the second copy to be closed on its own.
+        if (left && !right) add({ from, to })
+        else if (right && !left) add({ from: to, to: from })
+      }
+      from = to
+    }
+  }
+  if (kept.length === 0) return []
+
+  const leaving = new Map<string, BoundarySegment[]>()
+  for (const segment of kept) {
+    const key = pointKey(segment.from)
+    const list = leaving.get(key)
+    if (list) list.push(segment)
+    else leaving.set(key, [segment])
+  }
+
+  const out: Contour[] = []
+  const used = new Set<BoundarySegment>()
+  for (const start of kept) {
+    if (used.has(start)) continue
+    const points: Vector2Like[] = [start.from]
+    let segment: BoundarySegment | undefined = start
+    while (segment && !used.has(segment)) {
+      used.add(segment)
+      points.push(segment.to)
+      segment = nextAround(segment, leaving.get(pointKey(segment.to)), used)
+    }
+    // The walk arrives back where it began, so the repeated first point is dropped - `closed`
+    // already says the last vertex joins the first.
+    if (points.length > 1 && pointKey(points[0]) === pointKey(points[points.length - 1])) points.pop()
+    if (points.length >= 3) out.push({ points, closed: true })
+  }
+  return out
 }
 
 /**

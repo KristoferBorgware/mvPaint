@@ -19,7 +19,8 @@ import type { Vector2Like } from '../math/Vector2'
 import interRegular from '../../../example-app/public/fonts/polygons/inter-regular.polygons.json'
 import { PolygonFont, type PolygonFontJson } from '../text/PolygonFont'
 import { triangulateGroup } from '../svg/triangulate'
-import { simpleLoops, windingGroups } from './nonzero'
+import { signedArea } from './contours'
+import { simpleLoops, unionBoundary, windingGroups } from './nonzero'
 
 function assert(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true)
@@ -141,6 +142,70 @@ it('a ring that crosses itself is cut into loops that do not', () => {
   assert(filled(fill, 50, 5), 'the bottom of the V is solid')
   assert(filled(fill, 50, 14), 'including the sliver where the two strokes cross')
   assert(!filled(fill, 50, 60), 'while the gap between them stays open')
+})
+
+it('the silhouette of overlapping pieces has no seam in it', () => {
+  // Two squares crossing: the union is one ring, and the four stretches of edge buried inside
+  // the other square are gone. Stroking the pieces instead would draw both squares in full.
+  const cross = unionBoundary([
+    { points: square(40, 0, 20, 100), closed: true },
+    { points: square(0, 40, 100, 20), closed: true },
+  ])
+  assert(cross.length === 1, 'a plus sign is one ring')
+  assert(cross[0].points.length === 12, 'with a corner at each of its twelve turns')
+
+  // A counter survives as a hole in the silhouette, wound against it.
+  const ring = unionBoundary([
+    { points: square(0, 0, 100, 100), closed: true },
+    { points: reversed(square(30, 30, 40, 40)), closed: true },
+  ])
+  assert(ring.length === 2, 'an outline with a counter is two rings')
+  assert(Math.sign(signedArea(ring[0].points)) !== Math.sign(signedArea(ring[1].points)), 'wound against each other')
+
+  // A piece entirely swallowed by another leaves nothing of itself behind.
+  const swallowed = unionBoundary([
+    { points: square(0, 0, 100, 100), closed: true },
+    { points: square(20, 20, 10, 10), closed: true },
+  ])
+  assert(swallowed.length === 1 && swallowed[0].points.length === 4, 'the inner square is not part of the outline')
+})
+
+it('no glyph silhouette runs through the inside of its letter', () => {
+  // The post-condition, over the whole face: every stretch of the outline has material on
+  // exactly one side of it. A stretch with material on both is a join between two pieces - the
+  // bar of a 't' outlined as a rectangle through the stem - which is what a stroke would draw.
+  const json = interRegular as unknown as PolygonFontJson
+  const font = new PolygonFont(json)
+
+  let checked = 0
+  for (const glyph of json.glyphs) {
+    if (!glyph.rings || glyph.rings.length === 0) continue
+    const rings = glyph.rings.map((flat) => {
+      const points: Vector2Like[] = []
+      for (let i = 0; i + 1 < flat.length; i += 2) points.push({ x: flat[i], y: flat[i + 1] })
+      return points
+    })
+    for (const contour of font.mesh(glyph.codePoint)!.contours) {
+      const points = contour.points
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i]
+        const b = points[(i + 1) % points.length]
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const length = Math.hypot(dx, dy)
+        if (length === 0) continue
+        const off = 0.002
+        const mx = (a.x + b.x) / 2
+        const my = (a.y + b.y) / 2
+        const inside = (sx: number, sy: number) => windingNumber(mx + sx, my + sy, rings) !== 0
+        const one = inside((-dy / length) * off, (dx / length) * off)
+        const other = inside((dy / length) * off, (-dx / length) * off)
+        assert(one !== other, `'${String.fromCodePoint(glyph.codePoint)}' has a seam in its outline`)
+        checked++
+      }
+    }
+  }
+  assert(checked > 10000, 'and that is the whole face, not a handful of letters')
 })
 
 it('every glyph in the atlas fills the way its outline was drawn', () => {
