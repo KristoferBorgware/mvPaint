@@ -105,8 +105,10 @@ export interface TextLayoutOptions {
    * It moves the text, and it grows the block: the first baseline sits `padding` lower, every
    * line starts `padding` further along, and the reported width and height each gain twice it.
    * So the block still starts at the node's origin, with the text inset within it - which is
-   * what makes padding visible to everything measured from the block (bounds, hit-testing, a
-   * highlight drawn behind it) rather than only to the glyphs.
+   * what makes padding visible to everything measured from the block (a node's bounds, the frame
+   * a transformer fits, a plate drawn behind it, an MSDFText's hit box) rather than only to the
+   * glyphs. A VectorText is hit per glyph rather than per box, by design, so a click in its
+   * padding falls through it - see its header.
    *
    * Wrapping is unaffected: `maxWidth` is the width the TEXT wraps at, so a padded block that
    * wraps is `maxWidth + 2 x padding` across.
@@ -188,12 +190,43 @@ export interface ShapedText {
   materials: TextMaterial[]
   width: number
   height: number
+  /**
+   * The block's top-left corner in local space, which `width` and `height` measure from. Zero on
+   * both axes for horizontal text, since the block starts at the node's origin. Vertical text
+   * runs to negative x, so its corner is `-width` there; curved text is wherever the curve put
+   * it. This is what makes `padding` an extent rather than only an offset - see blockRect.
+   */
+  blockX: number
+  blockY: number
   lineCount: number
   /**
    * The y of the block's first baseline. Bending onto a curve lays this line on the curve
    * and keeps every other line's distance from it, so the leading survives the mapping.
    */
   referenceBaseline: number
+}
+
+/**
+ * The block the text was laid out in, as a rectangle in local space - what a text node measures,
+ * and what padding grows. Null when nothing was laid out: an empty text node is nowhere, not a
+ * point at its own origin, so it contributes no extent to the group holding it.
+ *
+ * Bigger than the glyphs on two counts. Padding is blank space inside it, and the block runs the
+ * full line height - from the top of the first line's leading to the bottom of the last's - so a
+ * word with no ascenders still measures as tall as its line.
+ */
+export function blockRect(shaped: TextBlock): { x: number; y: number; width: number; height: number } | null {
+  if (shaped.quads.length === 0) return null
+  return { x: shaped.blockX, y: shaped.blockY, width: shaped.width, height: shaped.height }
+}
+
+/** The part of a ShapedText blockRect reads - and all a caller has to supply to be measured. */
+export interface TextBlock {
+  quads: readonly unknown[]
+  width: number
+  height: number
+  blockX: number
+  blockY: number
 }
 
 const BLACK: RGBA = [0, 0, 0, 1]
@@ -542,6 +575,9 @@ function layoutHorizontal(
     width: blockWidth + padding * 2,
     // topY already carries the leading padding, having started there; this adds the trailing one.
     height: topY + padding,
+    // Lines run right and down from the node's origin, so the block's corner IS the origin.
+    blockX: 0,
+    blockY: 0,
     lineCount: lines.length,
     referenceBaseline,
   }
@@ -711,12 +747,17 @@ function layoutVertical(
     columnX -= columnWidth * lineHeightMult
   }
 
+  // Both already carry the leading padding, having started there; these add the trailing one.
+  const width = -columnX + padding
   return {
     quads: [...shadows, ...glows, ...glyphs],
     materials,
-    // Both already carry the leading padding, having started there; these add the trailing one.
-    width: -columnX + padding,
+    width,
     height: maxDepth + padding,
+    // Columns run LEFT from the origin, so the block's right edge is the origin and its corner
+    // is a full width before it. Down is the same as horizontal text: the origin is the top.
+    blockX: -width,
+    blockY: 0,
     lineCount: columns.length,
     referenceBaseline: 0,
   }

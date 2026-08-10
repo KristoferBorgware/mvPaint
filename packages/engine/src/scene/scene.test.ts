@@ -243,7 +243,7 @@ it('MSDFText is a Shape now (not a lane-specific special case): it inherits zInd
     assert(!sawVertex, "MSDFText inherits Shape's no-op tessellate() (it renders through the text lane, not the mesh lane)")
 })
 
-it('picking: textLocalBounds unions every quad\'s corners', () => {
+it('picking: textLocalBounds unions the block with every quad\'s corners', () => {
     // An upright, unsheared quad - what straight text produces.
     const box = (x0: number, y0: number, x1: number, y1: number) => ({
       x0,
@@ -256,21 +256,37 @@ it('picking: textLocalBounds unions every quad\'s corners', () => {
       rotationPivotX: 0,
       rotationPivotY: 0,
     })
+    // A shaped block with no block of its own, for the cases that are only about the quads.
+    const noBlock = (quads: ReturnType<typeof box>[]) => ({ quads, width: 0, height: 0, blockX: 0, blockY: 0 })
 
-    const bounds = textLocalBounds({ quads: [box(0, 0, 10, -5), box(8, -5, 20, -12)] })
+    const bounds = textLocalBounds(noBlock([box(0, 0, 10, -5), box(8, -5, 20, -12)]))
     assert(bounds.valid(), 'text bounds valid for a non-empty quad list')
     assert(bounds.min.x === 0 && bounds.max.x === 20, 'text bounds union x across all quads')
     assert(bounds.min.y === -12 && bounds.max.y === 0, 'text bounds union y across all quads')
-    assert(!textLocalBounds({ quads: [] }).valid(), 'text bounds invalid for no quads')
+    assert(!textLocalBounds(noBlock([])).valid(), 'text bounds invalid for no quads')
+
+    // The block goes in alongside them, which is what makes padding an extent: the glyphs sit
+    // inside it, so the box is the block's however far short of it they stop.
+    const padded = textLocalBounds({ quads: [box(20, 20, 40, 40)], width: 60, height: 60, blockX: 0, blockY: 0 })
+    assert(padded.min.x === 0 && padded.min.y === 0, 'the block reaches past the glyphs on the near side')
+    assert(padded.max.x === 60 && padded.max.y === 60, 'and on the far side')
+
+    // Neither contains the other: a quad hanging outside the block still counts.
+    const overhang = textLocalBounds({ quads: [box(-5, 0, 70, 10)], width: 60, height: 60, blockX: 0, blockY: 0 })
+    assert(overhang.min.x === -5 && overhang.max.x === 70, 'a glyph reaching past the block widens the box')
+
+    // An empty block is nowhere at all, not a point at the origin - so it adds no extent to a
+    // group holding it.
+    assert(!textLocalBounds({ quads: [], width: 60, height: 60, blockX: 0, blockY: 0 }).valid(), 'no quads, no bounds')
 
     // A quad turned by a curve is bounded by where it ended up, not by the box it started as:
     // a quarter turn about the origin takes a 10x2 box lying on +x onto +y.
-    const turned = textLocalBounds({ quads: [{ ...box(0, 0, 10, 2), rotation: Math.PI / 2 }] })
+    const turned = textLocalBounds(noBlock([{ ...box(0, 0, 10, 2), rotation: Math.PI / 2 }]))
     assert(Math.abs(turned.min.x - -2) < 1e-9 && Math.abs(turned.max.x - 0) < 1e-9, 'a turned quad bounds where its corners went in x')
     assert(Math.abs(turned.min.y - 0) < 1e-9 && Math.abs(turned.max.y - 10) < 1e-9, 'and in y')
 
     // The shear counts too - the reason italic text was ever bounded slightly short.
-    const sheared = textLocalBounds({ quads: [{ ...box(0, 0, 10, 4), skew: 0.5 }] })
+    const sheared = textLocalBounds(noBlock([{ ...box(0, 0, 10, 4), skew: 0.5 }]))
     assert(sheared.max.x === 12, 'a sheared quad reaches past its box by skew * height')
 })
 

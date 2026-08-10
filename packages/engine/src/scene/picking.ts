@@ -22,7 +22,7 @@ import { Shape } from '../shapes/Shape'
 import { Container } from '../shapes/Container'
 import { Group, type TransformableNode } from '../shapes/Group'
 import { MSDFText } from '../shapes/MSDFText'
-import type { MSDFFontFamilies } from '../text/layout'
+import { blockRect, type MSDFFontFamilies, type TextBlock } from '../text/layout'
 import { quadCorner, type QuadTransform } from '../text/textQuad'
 
 /** Anything pickNode()/collectZOrder() can return - every drawable is a Shape now. */
@@ -34,6 +34,11 @@ export interface QuadBounds extends QuadTransform {
   y0: number
   x1: number
   y1: number
+}
+
+/** What textLocalBounds measures - satisfied by ShapedText. */
+export interface BoundedText extends TextBlock {
+  quads: readonly QuadBounds[]
 }
 
 function worldToLocal(node: Node, worldX: number, worldY: number): Vector3 {
@@ -64,12 +69,25 @@ export function hitTestShape(shape: Shape, worldX: number, worldY: number): bool
 }
 
 /**
- * The union of a shaped text's glyph+decoration quads, in the MSDFText node's own local space.
- * All four corners go through the quad's own transform, so italic and curved text are
- * bounded by where their glyphs actually are rather than by the boxes they started as.
+ * A shaped text's extent in the node's own local space: the BLOCK it was laid out in, together
+ * with every glyph and decoration quad in it.
+ *
+ * Both, because neither contains the other. The block is what padding grows and what runs the
+ * full line height, so it reaches past the glyphs above the tallest ascender and below the
+ * deepest descender; the quads reach past the block wherever something overhangs it - a glow, an
+ * italic's overshoot, a run whose glyphs were bent onto a curve. All four corners of each quad go
+ * through the quad's own transform, so a sheared or turned glyph is bounded by where it actually
+ * is rather than by the box it started as.
+ *
+ * Empty text has no bounds at all rather than a point at its origin - see blockRect.
  */
-export function textLocalBounds(shaped: { quads: readonly QuadBounds[] }): AABB {
+export function textLocalBounds(shaped: BoundedText): AABB {
   const box = new AABB()
+  const block = blockRect(shaped)
+  if (block) {
+    box.encapsulate(new Vector3(block.x, block.y, 0))
+    box.encapsulate(new Vector3(block.x + block.width, block.y + block.height, 0))
+  }
   for (const q of shaped.quads) {
     for (const [x, y] of [
       [q.x0, q.y0],

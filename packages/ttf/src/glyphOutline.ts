@@ -12,12 +12,11 @@
 // convention (asking for the outline at `unitsPerEm` units per em keeps the scale at 1 but
 // still flips the sign), so the y of every point is negated on the way through.
 //
-// Fonts describe glyphs with the nonzero winding rule - an outer ring winds one way and the
-// counters ('o', 'B', '%') wind the other. Filling goes through classifyContours' even-odd
-// NESTING test instead, which agrees with nonzero for any outline whose rings don't overlap
-// each other; that covers ordinary text faces, and Inter in particular. A face that draws a
-// glyph as several overlapping strokes (some script and decorative faces do) would show the
-// overlaps punched out as holes.
+// Fonts describe glyphs with the nonzero winding rule - an outer ring winds one way, the
+// counters ('o', 'B', '%') wind the other, and a letter is built from pieces laid over one
+// another: the bar of a 't' across its stem, the two strokes of a 'w' crossing at each V. The
+// contours come out of here exactly as the font drew them, overlaps and self-crossings included,
+// and the engine reads them by that rule (see render/nonzero.ts).
 
 // From '@mvpaint/engine/core' for the reason given in TtfFont.ts: the engine's main entry point
 // carries bundler-only asset imports, and this package has to run under node too. flattenPath

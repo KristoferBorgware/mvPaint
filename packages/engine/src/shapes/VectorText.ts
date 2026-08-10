@@ -27,12 +27,14 @@
 // difference (see text/vectorGlyphs.ts).
 
 import type { Vector2Like } from '../math/Vector2'
+import { AABB } from '../math/AABB'
+import { Vector3 } from '../math/Vector3'
 import { Text, type TextOptions } from './Text'
 import type {MeshMaterial, MeshSink, RGBA} from '../render/meshFormat'
 import { strokeContours, type Contour } from '../render/stroke'
 import type { VectorFonts } from '../text/vectorGlyphs'
 import { vectorFontsFor, warnUnresolvedFamily } from '../resources/FontRegistry'
-import { layoutText, type ShapedText, type TextMaterial } from '../text/layout'
+import { blockRect, layoutText, type ShapedText, type TextMaterial } from '../text/layout'
 import { quadCorner, type TextQuad } from '../text/textQuad'
 
 /** VectorText adds nothing to Text's options; `fontFamily` names the outlines it tessellates. */
@@ -72,7 +74,7 @@ interface ShapingResult {
 
 /** What a node with no resolvable family shapes to: nothing, laid out at no size. */
 const NOTHING: ShapingResult = {
-  shaped: { quads: [], materials: [], width: 0, height: 0, lineCount: 0, referenceBaseline: 0 },
+  shaped: { quads: [], materials: [], width: 0, height: 0, blockX: 0, blockY: 0, lineCount: 0, referenceBaseline: 0 },
   materials: [],
   quadMaterials: [],
 }
@@ -116,6 +118,29 @@ export class VectorText extends Text {
    */
   override materials(): readonly MeshMaterial[] {
     return this.ensureShaping().materials
+  }
+
+  /**
+   * The block this text was laid out in, together with the glyph geometry in it.
+   *
+   * Every other Shape measures the triangles it emits, and for a text node that is the ink alone:
+   * the blank space `padding` puts around the letters is real layout with nothing in it to
+   * tessellate, and a line of x-height letters is shorter than the line it sits on. Both belong
+   * to the node, so the block goes in alongside the geometry - which is also what puts a
+   * VectorText and an MSDFText on the same footing, since textLocalBounds measures the other one
+   * the same way.
+   *
+   * Not cached here: the geometry half already is (see Shape.localBounds) and the shaping half is
+   * a cache hit, so what this adds per call is a union of two boxes.
+   */
+  override localBounds(): AABB {
+    const box = super.localBounds().clone()
+    const block = blockRect(this.ensureShaping().shaped)
+    if (block) {
+      box.encapsulate(new Vector3(block.x, block.y, 0))
+      box.encapsulate(new Vector3(block.x + block.width, block.y + block.height, 0))
+    }
+    return box
   }
 
   protected override dropShapingCache(): void {

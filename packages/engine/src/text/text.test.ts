@@ -34,6 +34,7 @@ import { VectorText } from '../shapes/VectorText'
 import { UniformMSDFText } from '../shapes/UniformMSDFText'
 import { UniformVectorText } from '../shapes/UniformVectorText'
 import { registerFontFamily } from '../resources/FontRegistry'
+import { textLocalBounds } from '../scene/picking'
 import { toDecorations, toFontStyle } from '../shapes/singleRun'
 import type { RGBA } from '../render/meshFormat'
 // NEITHER kind of atlas is the engine's - it ships no typeface - so both come from the example
@@ -676,7 +677,13 @@ it('decorations, highlights and outlines are separate materials and separate geo
     // sharp-cornered capitals for one that does, rather than naming a letter the font in the
     // folder happens to draw sharply today.
     const spiky = (text: string) => ({ text, style: { fontSize: 60, strokeColor: [0, 0, 0, 1] as RGBA, strokeWidth: 16 } })
-    const height = (shape: VectorText) => shape.localBounds().max.y - shape.localBounds().min.y
+    // The DRAWN triangles, not the node's bounds: a text node measures the block it was laid out
+    // in as well as its geometry (see VectorText.localBounds), and a line box tall enough to hold
+    // the spike would hide the very thing this is asking about.
+    const height = (shape: VectorText) => {
+      const ys = recordGeometry(shape).verts.map((v) => v.y)
+      return Math.max(...ys) - Math.min(...ys)
+    }
     const spikes = (text: string) =>
       height(new VectorText({ fontFamily: VECTOR_FAMILY, lineJoin: 'miter', ...spiky(text) })) >
       height(new VectorText({ fontFamily: VECTOR_FAMILY, ...spiky(text) })) * 1.15
@@ -1293,4 +1300,49 @@ it('registering a family afterwards reaches the nodes already naming it', () => 
     // Not cached while unresolved, so the next access picks the book up - which is what lets a
     // font fetched after the scene was built still draw.
     assert(late.shaped().quads.length > 0, 'and glyphs once it has')
+})
+
+// Padding is blank space INSIDE the block: the glyphs move in from the node's origin and the
+// block grows by twice it on each axis. That only means anything if the block is what the node
+// measures - a label whose selection frame stopped at its ink was padded in the layout and
+// nowhere else.
+it('padding is an extent, not only an offset', () => {
+    const measure = (padding: number) =>
+      new VectorText({ fontFamily: VECTOR_FAMILY, padding, runs: [{ text: 'Hi', style: { fontSize: 40 } }] })
+
+    const plain = measure(0)
+    const padded = measure(24)
+
+    const block = plain.localBounds()
+    assert(block.min.x === 0 && block.min.y === 0, 'an unpadded block starts at the node origin')
+    assert(
+      Math.abs(block.max.x - plain.shaped().width) < 1e-9 && Math.abs(block.max.y - plain.shaped().height) < 1e-9,
+      'and ends where the shaper says it does',
+    )
+
+    const grown = padded.localBounds()
+    assert(grown.min.x === 0 && grown.min.y === 0, 'a padded block starts there too - the text moves, not the block')
+    assert(
+      Math.abs(grown.max.x - (block.max.x + 48)) < 1e-9 && Math.abs(grown.max.y - (block.max.y + 48)) < 1e-9,
+      'and is twice the padding bigger on each axis',
+    )
+
+    // The same box a transformer frames and a marquee tests against.
+    const rect = padded.getClientRect()
+    assert(rect.x === 0 && rect.y === 0 && Math.abs(rect.width - grown.max.x) < 1e-9, 'getClientRect reports the block')
+
+    // The glyphs are inside it rather than at its corner, which is what padding is for.
+    const ink = recordGeometry(padded).verts
+    assert(Math.min(...ink.map((v) => v.x)) > 24, 'the letters sit in from the block on x')
+    assert(Math.min(...ink.map((v) => v.y)) > 24, 'and on y')
+
+    // An MSDFText measures the same way, through the same block - see textLocalBounds. It cannot
+    // shape itself without a font book, which is the only reason this goes through the shaper.
+    const shapedPad = layoutText([{ text: 'Hi', style: { fontSize: 40 } }], { padding: 24 }, msdfFontProvider(STYLES))
+    const msdfBounds = textLocalBounds(shapedPad)
+    assert(msdfBounds.min.x === 0 && msdfBounds.min.y === 0, 'an MSDF block starts at the origin as well')
+    assert(
+      Math.abs(msdfBounds.max.x - shapedPad.width) < 1e-9 && Math.abs(msdfBounds.max.y - shapedPad.height) < 1e-9,
+      'and ends where its shaper says',
+    )
 })

@@ -372,8 +372,8 @@ function bendQuad(
 }
 
 /** The block extent of a bent result, measured from the quads' actual turned corners. */
-function extentOf(quads: readonly TextQuad[]): { width: number; height: number } {
-  if (quads.length === 0) return { width: 0, height: 0 }
+function extentOf(quads: readonly TextQuad[]): { width: number; height: number; blockX: number; blockY: number } {
+  if (quads.length === 0) return { width: 0, height: 0, blockX: 0, blockY: 0 }
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -392,5 +392,7 @@ function extentOf(quads: readonly TextQuad[]): { width: number; height: number }
       if (p.y > maxY) maxY = p.y
     }
   }
-  return { width: maxX - minX, height: maxY - minY }
+  // Bent text has no block to speak of - the rectangle it was laid out in is not where any of it
+  // ended up - so what it reports is where the glyphs actually are.
+  return { width: maxX - minX, height: maxY - minY, blockX: minX, blockY: minY }
 }

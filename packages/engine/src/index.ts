@@ -55,6 +55,7 @@ export * from './shapes/singleRun'
 export * from './shapes/UniformMSDFText'
 export * from './shapes/UniformVectorText'
 
+export * from './render/nonzero'
 export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'
 export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './render/color'
 

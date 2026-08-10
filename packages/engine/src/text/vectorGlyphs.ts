@@ -24,7 +24,7 @@
 
 import type { Vector2Like } from '../math/Vector2'
 import type { Contour } from '../render/stroke'
-import { classifyContours } from '../render/contours'
+import { simpleLoops, windingGroups } from '../render/nonzero'
 import { triangulateGroup } from '../svg/triangulate'
 import type { FontStyle } from './msdfProvider'
 import type { FontMetrics } from './msdfMetrics'
@@ -79,17 +79,21 @@ export const EMPTY_GLYPH_MESH: VectorGlyphMesh = { contours: [], vertices: [], i
 /**
  * Fill geometry for a set of closed rings.
  *
- * Rings are grouped into solids-with-holes exactly as an SVG path's are, then earcut
- * triangulates each group and the groups' index spaces are rebased into one flat mesh. Fonts
- * describe glyphs with the nonzero winding rule, while classifyContours tests NESTING
- * (even-odd), and the two agree for any outline whose rings do not overlap each other - which
- * covers ordinary text faces. A face that draws a glyph as several overlapping strokes would
- * show the overlaps punched out as holes.
+ * Read with the NONZERO WINDING RULE, which is the rule a font is drawn with (see
+ * render/nonzero.ts). A letter is built from overlapping pieces wound the same way - the bar of
+ * a 't' laid across its stem, the two strokes of a 'w' crossing at each V - and the fill is
+ * their union. Rings are cut at their crossings so every piece reaching earcut is a simple
+ * polygon, grouped into solids-with-holes by direction, then triangulated group by group with
+ * the index spaces rebased into one flat mesh.
+ *
+ * `contours` comes back untouched: it is the outline the stroker follows, and a per-letter
+ * outline traces the letterform as the font drew it, crossings included.
  */
 export function meshFromContours(contours: Contour[]): VectorGlyphMesh {
   const vertices: Vector2Like[] = []
   const indices: number[] = []
-  for (const group of classifyContours(contours)) {
+  const loops = contours.flatMap((contour) => simpleLoops(contour.points))
+  for (const group of windingGroups(loops)) {
     const triangulated = triangulateGroup(group)
     const base = vertices.length
     for (const v of triangulated.vertices) vertices.push(v)
