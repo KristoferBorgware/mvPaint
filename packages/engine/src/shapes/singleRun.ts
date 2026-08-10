@@ -104,12 +104,47 @@ export function toDecorations(value: string): { underline: boolean; strikethroug
 type TextClass = abstract new (...args: any[]) => Text
 
 /**
+ * What withSingleRun() puts on the front of its base class - the flat style vocabulary, and the
+ * measurement both uniform nodes wrap.
+ *
+ * WRITTEN OUT RATHER THAN INFERRED, because a mixin returns a class expression and a class
+ * expression has no name. A declaration file cannot write down a type it cannot name, so an
+ * inferred return type left `withSingleRun`, `UniformMSDFText` and `UniformVectorText` with
+ * hundreds of emit errors between them and .d.ts files that described none of the three
+ * properly. Naming the added surface here is what the emitter writes instead.
+ *
+ * Only what a caller or a subclass reaches for. The overridden accessors (fill, stroke,
+ * strokeWidth, padding) and paintsFromShape are already on Text, so they arrive through `T` and
+ * keep the protection level they were declared with.
+ */
+export interface SingleRunText {
+  /** The string this node draws. */
+  text: string
+  /** Size in world px. */
+  fontSize: number
+  /** 'normal', 'bold', 'italic', or the last two together. See the accessor. */
+  fontStyle: string
+  /** 'underline', 'line-through', both, or '' for neither. */
+  textDecoration: string
+  /** Extra tracking between glyphs, world px. */
+  letterSpacing: number
+  /**
+   * Some other string in this node's style and layout, measured without disturbing it. Both
+   * uniform nodes wrap this as `measureSize`, which is the one to call - each has its own way of
+   * coming by a FontProvider.
+   */
+  measureWith(text: string, fonts: FontProvider): TextSize
+}
+
+/**
  * `Base` with a flat, per-node style vocabulary on the front of it, over exactly one run.
  *
- * Not exported from the package: what an application uses is UniformMSDFText or
- * UniformVectorText, which are this applied to each of the two glyph sources.
+ * What an application constructs is UniformMSDFText or UniformVectorText, which are this applied
+ * to each of the two glyph sources.
  */
-export function withSingleRun<T extends TextClass>(Base: T) {
+export function withSingleRun<T extends TextClass>(
+  Base: T,
+): T & (abstract new (...args: any[]) => SingleRunText) {
   abstract class SingleRun extends Base {
     private textValue = ''
     private fontSizeValue = UNIFORM_TEXT_FONT_SIZE
@@ -276,8 +311,8 @@ export function withSingleRun<T extends TextClass>(Base: T) {
       }
     }
 
-    /** Some other string in this node's style and layout, measured without disturbing it. */
-    protected measureWith(text: string, fonts: FontProvider): TextSize {
+    /** See SingleRunText.measureWith - public because that is the type this mixin declares. */
+    measureWith(text: string, fonts: FontProvider): TextSize {
       const shaped = layoutText([{ text, style: this.runStyle() }], this.layoutOptions(), fonts)
       return { width: shaped.width, height: shaped.height }
     }
