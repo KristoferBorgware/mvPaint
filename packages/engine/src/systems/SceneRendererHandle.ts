@@ -23,7 +23,6 @@ import type { ImageTextureFactory } from '../image/ImageTexture'
 import type { ColorInput } from '../render/color'
 import type { InputOptions } from '../input/inputOptions'
 import type { SceneInput } from '../input/sceneInput'
-import type { MsdfAtlasSource } from '../text/msdfProvider'
 import type { MSDFFontFamilies } from '../text/layout'
 import type { GpuPowerPreference, RendererAdapter } from './adapter'
 
@@ -50,8 +49,9 @@ export interface SceneResources {
    * label.getTextWidth(fonts.resolveFamily(label.fontFamily))
    * ```
    *
-   * Read-only. Loading and replacing atlases go through `handle.setMSDFFonts()`, which also
-   * re-shapes what is already on screen. `VectorText` needs none of this - its outlines are on
+   * Read-only, and there is no way in from here: atlases arrive by being registered under a name
+   * (registerFontFamily), which every renderer picks up and which re-shapes what is already on
+   * screen. `VectorText` needs none of this - its outlines are on
    * the node.
    */
   readonly msdfFonts: MSDFFontFamilies
@@ -79,36 +79,6 @@ export interface SceneRendererHandle extends SceneResources {
    * wholesale (see render/gather.ts) and needs markGeometryDirty() to notice.
    */
   scene: Scene
-  /**
-   * Replace the MSDF atlases `MSDFText` draws from, at any point - the runtime half of the `fonts`
-   * option, so an application whose fonts live on a CDN is not forced to have them in hand
-   * before the canvas exists.
-   *
-   * ```ts
-   * const handle = await createSceneRenderer(canvas)          // draws with the fallback
-   * await handle.setMSDFFonts(await fetchAtlasesFromCdn())        // ...then with yours
-   * ```
-   *
-   * Pass a `family` name to load a SECOND typeface rather than replace the default, which is
-   * what lets two `MSDFText` nodes draw in different faces: `setMSDFFonts(roboto, 'roboto')`, then
-   * `new MSDFText({ fontFamily: 'roboto' })`. Within one family it replaces rather than merges, so
-   * an application never silently ends up half its own typeface and half the fallback; to add a
-   * style, spread what is already loaded: `setMSDFFonts([...handle.getMSDFFonts(), extra])`.
-   *
-   * Every cached text layout is dropped and re-shaped against the new metrics, and the text
-   * lane repacks; nodes, transforms and the camera are untouched. Awaiting it means the atlases
-   * are uploaded and the next frame draws them. If a fetch fails it rejects and the renderer
-   * keeps the fonts it had, rather than being left with text it cannot draw.
-   *
-   * `VectorText` needs nothing like this - its outlines are supplied per node, so loading them
-   * late has always just been a matter of when you construct the node.
-   */
-  setMSDFFonts: (sources: readonly MsdfAtlasSource[], family?: string) => Promise<void>
-  /**
-   * The atlases a family currently holds - the default family unless named, and an empty list
-   * for a family that is not loaded.
-   */
-  getMSDFFonts: (family?: string) => readonly MsdfAtlasSource[]
   /** The view the scene is drawn through - the one supplied, or the default. */
   camera: Camera2D
   /** Draw through a different camera; null goes back to the default (0,0 top-left, zoom 1). */
@@ -271,25 +241,6 @@ export interface CreateSceneRendererOptions {
    * moving it is how an application pans and zooms.
    */
   camera?: Camera2D
-  /**
-   * The MSDF atlases `MSDFText` draws from - one entry per style, each a generated metrics JSON
-   * plus a URL for its PNG. Generate them with `packages/scripts` and keep them with your
-   * application's other assets.
-   *
-   * The engine ships NO typeface. Omit this and the renderer starts with no atlases: nothing
-   * is fetched, no texture is uploaded, and `MSDFText` draws nothing until `setMSDFFonts()` supplies a
-   * set. For a working set to copy, see
-   * packages/example-app: its Inter atlases are served from `public/`, the shape an
-   * application's own asset folder takes.
-   *
-   * A partial set is fine - give it bold alone and every run resolves to bold, with regular
-   * synthesized off it by the same ladder that synthesizes faux italic.
-   *
-   * Glyph OUTLINES, for `VectorText`, are supplied per node instead: see `VectorFonts`,
-   * `PolygonFontBook` and `@mvpaint/ttf`. The engine ships none of those at all.
-   */
-  fonts?: readonly MsdfAtlasSource[]
-
   /**
    * Which pointer and keyboard bindings the engine should set up for this canvas. Omitted
    * (the default) is a STATIC render: nothing is listened for and nothing is hit-tested,

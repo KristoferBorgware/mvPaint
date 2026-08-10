@@ -6,8 +6,8 @@
 //
 // THE ENGINE SHIPS NO FONT. Every function here works on whatever set it is handed and names
 // no typeface: an atlas is an application's asset, in the same way glyph outlines are (see
-// PolygonFont.ts). A renderer created without the `fonts` option has no atlases and draws no
-// text until setMSDFFonts() supplies some, so a consumer's bundle carries only the typeface that
+// PolygonFont.ts). A renderer starts with no atlases at all and draws no text until a family is
+// registered under the name a node asks for, so a consumer's bundle carries only the typeface that
 // consumer chose. This repository's Inter set lives with the example app, under
 // packages/example-app/public/fonts/, and reaches the engine through `fonts` like any other.
 

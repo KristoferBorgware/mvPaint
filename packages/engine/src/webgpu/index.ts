@@ -54,10 +54,10 @@ export async function createWebGpuSceneRenderer(
     options.onDeviceError?.(message)
   })
 
-  // Load the MSDF font atlases (fetch each PNG + upload to the GPU) before building the scene,
-  // so the text lane has its textures ready on the first frame. `options.fonts` is the
-  // application's set; without it the library comes up empty and no fetch happens here at all.
-  const fonts = await MSDFFontLibrary.load(gpu.device, options.fonts)
+  // The library takes its atlases from the font registry and keeps taking them - nothing about
+  // fonts reaches this function. A family registered before this device existed is uploaded here;
+  // one registered afterwards arrives on its own. See resources/FontRegistry.
+  const fonts = await MSDFFontLibrary.load(gpu.device)
 
   // Catch the most common startup failure - an invalid render pipeline built from a
   // shader/layout mismatch - which is created inside the SceneRenderer constructor.
@@ -188,12 +188,6 @@ export async function createWebGpuSceneRenderer(
     },
     images,
     scene: scene.scene,
-    async setMSDFFonts(sources, family) {
-      await fonts.setMSDFFonts(sources, family)
-    },
-    getMSDFFonts(family) {
-      return fonts.sourcesOf(family)
-    },
     msdfFonts: fonts,
     // A getter, not a captured reference: setCamera() below can replace it, and a handle
     // holding the camera from construction would keep handing back the old one.

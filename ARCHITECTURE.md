@@ -1143,18 +1143,33 @@ From there:
 
 | | Supplied as | Selected per node by | If not supplied |
 | --- | --- | --- | --- |
-| MSDF | `createSceneRenderer({ fonts })` or `handle.setMSDFFonts(sources, family)` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing and warns once |
+| MSDF | `loadFontFamily(name, { msdf })` or `registerFontFamily(name, { msdf })` | `Text.fontFamily`, a name | nothing — the engine ships no typeface, so `Text` draws nothing and warns once |
 | Outlines | `loadFontFamily(name, { vector })` or `registerFontFamily(name, { vector })` | `Text.fontFamily`, the same name | nothing — the engine ships no outline data, so `VectorText` draws nothing and warns once |
 
-Neither has to exist before the canvas does, which is what an atlas fetched from a CDN needs.
-The **scope** column is why they get there differently. Outlines own no GPU resource at all —
-`PolygonFontBook` hands `VectorText` contours, which are tessellated into the mesh lane's shared
-buffers like any other shape's triangles — so a node built after the fetch is the whole of it.
-An MSDF atlas is one array texture behind one bind group shared by every `Text` (that is what
-draws a paragraph of mixed styles in a single call), so it is replaced on the renderer rather
-than handed to a node, and `handle.setMSDFFonts()` is that.
+One door for both, and **creating a renderer never goes through it**: that is about a canvas and
+a device. The usual order is renderer, then fonts, then scene —
 
-Replacing it changes the metrics under every `Text` at once, which is what the **font epoch** in
+```ts
+const handle = await createSceneRenderer(canvas)
+await loadFontFamily('inter', { vector, msdf })
+buildScene(handle.scene)
+```
+
+— but neither has to exist before the other, which is what an atlas fetched from a CDN needs.
+
+What differs underneath is ownership. Outlines own no GPU resource at all — `PolygonFontBook`
+hands `VectorText` contours, tessellated into the mesh lane's shared buffers like any other
+shape's triangles — so the registry holds the book itself and answers for it synchronously,
+which is what a node shaping with no renderer in reach needs. An MSDF atlas is one array texture
+behind one bind group shared by every `Text` (that is what draws a paragraph of mixed styles in a
+single call), and a texture belongs to a device. So the registry holds the atlas **sources** —
+metrics and a URL, plain data — and every live renderer builds its own texture from them: a
+renderer subscribes when it is created (`onFontFamilyRegistered`), catches up on
+`registeredMsdfFamilies()`, and unsubscribes when it is destroyed. Two canvases each get a
+texture from one registration, and awaiting the registration means every one of them has it.
+
+Registering a family again replaces its atlases, which changes the metrics under every `Text` at
+once — and that is what the **font epoch** in
 `shapes/contentEpoch.ts` exists for. `Text.shaped()` memoizes its layout and ignores the
 `FontProvider` it is passed once cached — right for the usual case, wrong the moment the atlas
 changes, since the lane would repack from layouts measured against metrics that are gone.

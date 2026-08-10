@@ -338,26 +338,29 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
     stats.showPanel(0)
     containerRef.current?.appendChild(stats.dom)
 
-    // The atlases come FIRST, and the renderer is created with them in hand: the shaper
-    // measures with the metrics synchronously. Serving fonts from public/ puts this round trip
-    // before the first frame; see src/fonts/index.ts.
-    loadMsdfAtlases()
-      .then((fonts) => {
-        // Unmounted while the metrics were in flight - don't start a device nobody will destroy.
-        if (cancelled) return undefined
-        return createSceneRenderer(canvas, {
-          backend,
-          camera: cameraRef.current,
-          // This application's own MSDF atlases, fetched from public/fonts/msdf/. The engine
-          // ships no typeface, so `fonts` is where an application's comes from.
-          fonts,
-          // The whole of this application's input setup. 'editor' is pointer, keyboard,
-          // selection, dragging, the resize/rotate frame and marquee selection - the bindings
-          // every canvas editor writes identically, so the engine writes them once. A viewer
-          // would say 'view' (camera only, nothing ever picked); a thumbnail nothing at all.
-          input: 'editor',
-          onDeviceError: (message) => onErrorRef.current?.(message),
-        })
+    // THE RENDERER FIRST, then the fonts, then the scene. Creating a renderer is about a canvas
+    // and a device and knows nothing about typefaces; the atlases are registered under a name
+    // afterwards (src/fonts/index.ts) and this renderer picks them up because it is listening.
+    // Awaiting that registration is what puts the textures on the device before the first scene
+    // is built, which matters because a scene builder measures text synchronously.
+    createSceneRenderer(canvas, {
+      backend,
+      camera: cameraRef.current,
+      // The whole of this application's input setup. 'editor' is pointer, keyboard,
+      // selection, dragging, the resize/rotate frame and marquee selection - the bindings
+      // every canvas editor writes identically, so the engine writes them once. A viewer
+      // would say 'view' (camera only, nothing ever picked); a thumbnail nothing at all.
+      input: 'editor',
+      onDeviceError: (message) => onErrorRef.current?.(message),
+    })
+      .then(async (created) => {
+        // Unmounted while the device was starting - don't hold one nobody will destroy.
+        if (cancelled) {
+          created.destroy()
+          return undefined
+        }
+        await loadMsdfAtlases()
+        return cancelled ? (created.destroy(), undefined) : created
       })
       .then((handle) => {
         if (!handle) return

@@ -24,7 +24,7 @@ import { createAtlasBindGroupLayout } from './layouts'
 import { MSDFFontBook, createMSDFAtlasSampler } from './MSDFFontBook'
 import { DEFAULT_FONT_FAMILY, type MSDFFontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
-import { warnUnresolvedFamily } from '../resources/FontRegistry'
+import { onFontFamilyRegistered, registeredMsdfFamilies, warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
 export class MSDFFontLibrary implements MSDFFontFamilies {
@@ -56,12 +56,28 @@ export class MSDFFontLibrary implements MSDFFontFamilies {
    * were given. Either way the family exists, so nothing downstream has to test for its absence.
    * Further families arrive through setMSDFFonts() at any point afterwards.
    */
-  static async load(device: GPUDevice, sources?: readonly MsdfAtlasSource[]): Promise<MSDFFontLibrary> {
+  static async load(device: GPUDevice): Promise<MSDFFontLibrary> {
     const atlasLayout = createAtlasBindGroupLayout(device, '2d-array')
     const sampler = createMSDFAtlasSampler(device)
-    const initial = await MSDFFontBook.loadWith(device, atlasLayout, sampler, sources)
+    const initial = await MSDFFontBook.loadWith(device, atlasLayout, sampler)
     const unresolved = await MSDFFontBook.loadWith(device, atlasLayout, sampler)
-    return new MSDFFontLibrary(device, atlasLayout, sampler, initial, unresolved)
+    const library = new MSDFFontLibrary(device, atlasLayout, sampler, initial, unresolved)
+    await library.followRegistry()
+    return library
+  }
+
+  private unsubscribe: (() => void) | null = null
+
+  /**
+   * Take the atlases from the registry, and keep taking them.
+   *
+   * Both halves are needed because a renderer and a font load happen in either order: a family
+   * registered before this device existed is caught up on here, and one registered after arrives
+   * through the subscription. See resources/FontRegistry.
+   */
+  private async followRegistry(): Promise<void> {
+    this.unsubscribe = onFontFamilyRegistered((family, msdf) => this.setMSDFFonts(msdf, family))
+    await Promise.all(registeredMsdfFamilies().map(({ family, msdf }) => this.setMSDFFonts(msdf, family)))
   }
 
   /**
@@ -123,6 +139,10 @@ export class MSDFFontLibrary implements MSDFFontFamilies {
   }
 
   destroy(): void {
+    // Before the books, so a registration landing mid-teardown is not handed a device that is
+    // going away with them.
+    this.unsubscribe?.()
+    this.unsubscribe = null
     for (const book of this.books.values()) book.destroy()
     this.books.clear()
     this.unresolved.destroy()

@@ -61,21 +61,27 @@ const polygonUrl = (style: FontStyle) => `${BASE}fonts/polygons/inter-${style}.p
 let msdfLoaded: readonly MsdfAtlasSource[] | null = null
 
 /**
- * The MSDF atlases, handed to `createSceneRenderer({ fonts })` - see WebGPUCanvas.tsx.
+ * Fetch the atlas metrics and register them under `INTER`, so every `MSDFText` naming that family
+ * can draw. Nothing is handed back - a node names a font, it is not given one, and no renderer is
+ * told about this either. Whichever renderers exist take it up; one created later takes it up
+ * when it is created.
  *
- * Only the metrics are fetched. Each source carries a URL for its PNG and the engine fetches
- * those itself, straight into a texture, so the four images never pass through this module or
- * the JS heap.
+ * Only the metrics are fetched here. Each source carries a URL for its PNG and the engine fetches
+ * those itself, straight into a texture, so the four images never pass through this module or the
+ * JS heap. Awaiting this means those textures are uploaded.
  *
  * Never released: a typeface is loaded before the first frame of text and drawn from until the
  * page goes, so there is no moment at which letting go of it is the right thing.
  */
-export async function loadMsdfAtlases(): Promise<readonly MsdfAtlasSource[]> {
+export async function loadMsdfAtlases(): Promise<void> {
   const loaded = await loadMsdfAtlasesFrom(
     STYLES.map((style) => ({ style, metricsUrl: msdfUrl(style, 'json'), imageUrl: msdfUrl(style, 'png') })),
   )
   msdfLoaded = loaded.sources
-  return loaded.sources
+  // Under the default name as well, so a text node that names no family draws - the same two
+  // entries over one set that loadVectorFonts() makes for the outlines.
+  await registerFontFamily(INTER, { msdf: loaded.sources })
+  await registerFontFamily(DEFAULT_FONT_FAMILY, { msdf: loaded.sources })
 }
 
 /**

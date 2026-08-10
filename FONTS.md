@@ -211,11 +211,11 @@ a megabyte that belongs out of the JS bundle. Both fields accept absolute URLs, 
 atlas needs no special handling.
 
 ```ts
-const handle = await createSceneRenderer(canvas, { fonts: interAtlases })
+await loadFontFamily('inter', { msdf: interAtlases })
 ```
 
-Omitting `fonts` loads no atlases at all, and `MSDFText` draws nothing until `setMSDFFonts()`
-supplies some. A set may be **partial**: a style's index in
+Registering nothing loads no atlases at all, and `MSDFText` draws nothing until a family it names
+is registered. A set may be **partial**: a style's index in
 `STYLE_ORDER` *is* its texture array layer, so unsupplied styles leave their layers zeroed and
 the style ladder resolves through whatever is present.
 
@@ -363,16 +363,21 @@ A `fontFamily` naming a family nothing was registered under draws **nothing**, a
 writes one `console.warn` naming it — once per name, not once per frame. There is no fallback
 face, because the engine ships no typeface to fall back to.
 
-### Per renderer
+### Loading and replacing
 
 ```ts
-await handle.setMSDFFonts(sources)              // replace the default family
-await handle.setMSDFFonts(sources, 'roboto')    // load or replace a named family
-handle.getMSDFFonts('roboto')                   // what that family currently holds
+await registerFontFamily(DEFAULT_FONT_FAMILY, { msdf: sources })   // replace the default family
+await registerFontFamily('roboto', { msdf: sources })              // load or replace a named one
+msdfSourcesFor('roboto')                                           // what that family holds
 ```
 
-`setMSDFFonts` replaces within a family rather than merging, so an application never ends up half its
-own typeface and half the fallback; spread `getMSDFFonts()` to add a style. The atlas is rebuilt
+No renderer appears in any of those, and none has to exist yet: the registry holds the sources
+and every renderer builds its own texture from them, whether it was created before the
+registration or after it (see `onFontFamilyRegistered`). Awaiting the call means every renderer
+drawing at the time has the atlas uploaded.
+
+Registering replaces within a family rather than merging, so an application never ends up half its
+own typeface and half the fallback; spread `msdfSourcesFor()` to add a style. The atlas is rebuilt
 whole — a new set may want a different layer size, and a style dropped from the set has to stop
 resolving — and the swap is atomic: a failed fetch rejects and leaves the previous atlases
 drawing.

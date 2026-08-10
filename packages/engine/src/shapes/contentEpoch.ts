@@ -67,9 +67,9 @@ export function imageGeometryEpoch(): number {
 // --- fonts: "are the metrics a cached layout was shaped against still the current ones?" -----
 //
 // The fourth question, and the one the three counters above cannot answer. They say a node's own
-// content changed. This says the FONTS changed underneath every node at once - which happens
-// when an application loads an atlas at runtime (handle.setMSDFFonts) rather than handing one to
-// createSceneRenderer.
+// content changed. This says the FONTS changed underneath every node at once - which happens when
+// an application registers a family that was already registered, and every renderer rebuilds its
+// atlas from the new sources.
 //
 // A separate counter is needed because MSDFText.shaped() memoizes, and its cache is keyed on
 // nothing: it takes a FontProvider as an argument and then ignores it for the life of the

@@ -58,7 +58,7 @@ export class GlMSDFFontBook implements FontProvider {
    * Fetch each style's PNG and upload it to its STYLE_ORDER layer.
    *
    * A partial set is allowed, and so is none at all: `sources` omitted or empty gives a book
-   * with no atlases, which fetches nothing and draws no text until setMSDFFonts() supplies some.
+   * with no atlases, which fetches nothing and draws no text until a registration supplies some.
    * See webgpu/MSDFFontBook.ts - the contract is identical on both paths.
    */
   static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlMSDFFontBook> {

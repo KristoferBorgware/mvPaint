@@ -11,7 +11,7 @@
 import { GlMSDFFontBook } from './GlMSDFFontBook'
 import { DEFAULT_FONT_FAMILY, type MSDFFontFamilies, type FontProvider } from '../text/layout'
 import { bumpFontEpoch, bumpTextShapingEpoch } from '../shapes/contentEpoch'
-import { warnUnresolvedFamily } from '../resources/FontRegistry'
+import { onFontFamilyRegistered, registeredMsdfFamilies, warnUnresolvedFamily } from '../resources/FontRegistry'
 import type { MsdfAtlasSource } from '../text/msdfProvider'
 
 export class GlMSDFFontLibrary implements MSDFFontFamilies {
@@ -26,9 +26,19 @@ export class GlMSDFFontLibrary implements MSDFFontFamilies {
     this.books.set(DEFAULT_FONT_FAMILY, initial)
   }
 
-  /** Build a library holding one family - the default, from `sources`, or empty if none. */
-  static async load(gl: WebGL2RenderingContext, sources?: readonly MsdfAtlasSource[]): Promise<GlMSDFFontLibrary> {
-    return new GlMSDFFontLibrary(gl, await GlMSDFFontBook.load(gl, sources), await GlMSDFFontBook.load(gl))
+  /** Build a library holding the empty default family, then fill it from the registry. */
+  static async load(gl: WebGL2RenderingContext): Promise<GlMSDFFontLibrary> {
+    const library = new GlMSDFFontLibrary(gl, await GlMSDFFontBook.load(gl), await GlMSDFFontBook.load(gl))
+    await library.followRegistry()
+    return library
+  }
+
+  private unsubscribe: (() => void) | null = null
+
+  /** See MSDFFontLibrary.followRegistry - the same contract on the fallback path. */
+  private async followRegistry(): Promise<void> {
+    this.unsubscribe = onFontFamilyRegistered((family, msdf) => this.setMSDFFonts(msdf, family))
+    await Promise.all(registeredMsdfFamilies().map(({ family, msdf }) => this.setMSDFFonts(msdf, family)))
   }
 
   /**
@@ -77,6 +87,10 @@ export class GlMSDFFontLibrary implements MSDFFontFamilies {
   }
 
   destroy(): void {
+    // Before the books, so a registration landing mid-teardown is not handed a context that is
+    // going away with them.
+    this.unsubscribe?.()
+    this.unsubscribe = null
     for (const book of this.books.values()) book.destroy()
     this.books.clear()
     this.unresolved.destroy()

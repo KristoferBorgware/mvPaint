@@ -101,7 +101,7 @@ export function loadPolygonFonts(sources: readonly PolygonFontUrl[]): Promise<Po
 
 /** An MSDF set in hand, and the means to let go of the documents it was built from. */
 export interface LoadedMsdfAtlases {
-  /** What `createSceneRenderer({ fonts })` and `handle.setMSDFFonts()` take. */
+  /** What `registerFontFamily(name, { msdf })` takes. */
   sources: readonly MsdfAtlasSource[]
   /**
    * Lets go of the metrics documents.

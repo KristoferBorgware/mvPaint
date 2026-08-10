@@ -92,10 +92,9 @@ export async function createWebGl2SceneRenderer(
   }
   canvas.addEventListener('webglcontextlost', onContextLost)
 
-  // Load the MSDF atlases before building the renderer, so the text lane has its texture ready
-  // for the first frame rather than showing a page of nothing on the way to showing text.
-  // Same `fonts` option the WebGPU path takes, so a scene draws with the same faces either way.
-  const fonts = await GlMSDFFontLibrary.load(gl, options.fonts)
+  // From the font registry, exactly as the WebGPU path takes them - so a scene draws with the
+  // same faces either way, and neither path is told about fonts when it is created.
+  const fonts = await GlMSDFFontLibrary.load(gl)
 
   let scene: GlSceneRenderer
   try {
@@ -217,12 +216,6 @@ export async function createWebGl2SceneRenderer(
     },
     images,
     scene: scene.scene,
-    async setMSDFFonts(sources, family) {
-      await fonts.setMSDFFonts(sources, family)
-    },
-    getMSDFFonts(family) {
-      return fonts.sourcesOf(family)
-    },
     msdfFonts: fonts,
     // A getter, not a captured reference: setCamera can replace it, and a handle holding the
     // camera from construction would keep handing back the old one.

@@ -101,10 +101,12 @@ fallback.
 
 ### Nothing is prepared while drawing
 
-An atlas is fetched, decoded and uploaded when the family is **loaded** — inside
-`createSceneRenderer`, which awaits it before a frame loop exists, or inside `setMSDFFonts`,
-which the application awaits. `MSDFFontBook.buildAtlas` is reachable from those two places and
-nowhere else. By the time a frame runs, the text lane binds a bind group that already exists.
+An atlas is fetched, decoded and uploaded when the family is **registered** — the application
+awaits `loadFontFamily`/`registerFontFamily`, and every renderer listening builds its texture
+before that settles. A renderer created after the fact does the same work while it is being
+created, which the application awaits too. `MSDFFontBook.buildAtlas` is reachable from those two
+places and nowhere else. By the time a frame runs, the text lane binds a bind group that already
+exists.
 
 The same rule holds for pictures: `images.load()` is awaited by whoever wants the texture, and
 `ImageBatcher.rebuild()` makes every bind group its draw ranges will need — so `draw()`, which

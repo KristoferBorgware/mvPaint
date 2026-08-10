@@ -208,8 +208,7 @@ render path implements, and it mentions no graphics API.
 | --- | --- |
 | `scene` | The scene graph. Content is added after construction: `handle.scene.root.addChild(node)`. |
 | `images` | Build a texture — see [Shared resources](#shared-resources). |
-| `fonts` | The loaded families, for measuring text. |
-| `setMSDFFonts`, `getMSDFFonts` | Load or replace a family's MSDF atlases at any point. |
+| `msdfFonts` | The loaded families, for measuring text. Fonts get there by being registered under a name — the handle has no way in. |
 | `camera`, `setCamera`, `setZoom`, `getZoom` | The view. |
 | `path` | `'webgpu'` or `'webgl2'` — which path was taken. |
 | `adapter` | Which GPU is drawing, and whether it is a software renderer. |
@@ -432,13 +431,20 @@ Both read generated assets — a distance-field PNG for one, a polygon atlas of 
 for the other — so the engine ships no font parser. Its only dependency is `earcut`.
 
 **Fonts are the application's.** Generate atlases from your own font files with
-`packages/scripts`, keep them with your other assets, and hand them to the engine:
+`packages/scripts`, keep them with your other assets, and register them under a name. The
+renderer comes first, the fonts after it, the scene after those:
 
 ```ts
-createSceneRenderer(canvas, { fonts: MSDF_ATLASES })              // what MSDFText samples
-await loadFontFamily('inter', { vector: POLYGON_ATLAS_URLS })     // what VectorText tessellates
+const handle = await createSceneRenderer(canvas)      // knows nothing about fonts
+await loadFontFamily('inter', {
+  msdf: MSDF_ATLASES,                                 // what MSDFText samples
+  vector: POLYGON_ATLAS_URLS,                         // what VectorText tessellates
+})
 new VectorText({ text: 'Hello', fontFamily: 'inter' })
 ```
+
+Either order works — a family registered before any canvas exists is picked up by each renderer
+as it is created — and awaiting the load means the atlases are on the device.
 
 **A font reaches the engine by being registered under a name**, and both kinds of text name it
 the same way — `fontFamily`. Which kind a node is stays a choice made when it is written; the
@@ -450,8 +456,8 @@ family name only says *which typeface*. One parsed at runtime goes in the same p
 family nothing was registered under draws nothing, and says so once in the console. See
 [RESOURCES.md](RESOURCES.md).
 
-Two `Text` nodes can be different typefaces: load a named family with
-`handle.setMSDFFonts(sources, 'roboto')` and select it per node with `fontFamily`. The full pipeline —
+Two `Text` nodes can be different typefaces: load a second family with
+`loadFontFamily('roboto', { msdf })` and select it per node with `fontFamily`. The full pipeline —
 generation, loading, shaping, both render paths, and runtime font switching — is documented in
 [FONTS.md](FONTS.md).
 
