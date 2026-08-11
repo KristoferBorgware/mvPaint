@@ -12,10 +12,10 @@ npm test               # the polygon generator's self-test
 
 ## In and out
 
-**Input is the `fonts/` folder, enumerated.** Neither tool holds a list of typefaces. Drop a
-`.ttf`, `.otf` or `.woff2` in and the next run generates atlases for it; take one out and it
-stops. A `.woff2` is unpacked to the sfnt inside it in memory, so a face works the same whichever
-container it arrives in.
+**Input is a folder of font files, enumerated** — `fonts/`, or the one `--fonts` names. Neither
+tool holds a list of typefaces. Drop a `.ttf`, `.otf` or `.woff2` in and the next run generates
+atlases for it; take one out and it stops. A `.woff2` is unpacked to the sfnt inside it in
+memory, so a face works the same whichever container it arrives in.
 
 **A file says which face it is.** The family comes from the font's `name` table and the style
 from `head.macStyle`, so `Poppins-700-italic-latin.woff2` and `Poppins-BoldItalic.ttf` both come
@@ -34,10 +34,10 @@ with their licence beside them: the self-tests parse them and the example app's 
 generated from them, so a fresh clone can run the tests and the dev server. Everything else
 dropped in is gitignored — a local library to generate from, not part of the repository.
 
-**Output is `out/`, and it is gitignored.** Copying what you want from there into your
-application is a deliberate step, and that is the point: an atlas is the *application's* asset.
-It chooses the faces, the charset and when to pay for them, and regenerating never silently
-changes what ships.
+**Output is `out/`, or the folder `--out` names, and `out/` is gitignored.** Copying what you
+want from there into your application is a deliberate step, and that is the point: an atlas is
+the *application's* asset. It chooses the faces, the charset and when to generate them, and
+regenerating never silently changes what ships.
 
 ```
 out/msdf/      -> your app's font folder;  pass them to createSceneRenderer({ fonts })
@@ -106,3 +106,19 @@ tofu box, so widening the set can only add letters. What it costs is texture: an
 with the set, and it has to stay one page per style, because the layer a glyph samples from is
 its style and there is no second page to address. See
 [FONTS.md](../../FONTS.md#2-atlas-generation) for the ceiling and what it holds.
+
+## The folders
+
+`--fonts` and `--out` move either end of a run off the defaults. Both take a path relative to the
+working directory or an absolute one, and each generator adds its own subfolder to the out
+directory — `--out ./public/fonts` writes `./public/fonts/msdf/` and `./public/fonts/polygons/`.
+A run prints the folder it read and the one it wrote.
+
+```bash
+npm run gen:fonts -- --fonts ./my-fonts                  # generate from a folder of your own
+npm run gen:fonts -- --out ./public/fonts                # write where the app serves them from
+npm run gen:fonts -- --fonts=./my-fonts --out=./atlases  # `=` works too
+```
+
+This is how a project outside this repository generates its atlases: point both ends at its own
+folders and nothing here is read, written or emptied.

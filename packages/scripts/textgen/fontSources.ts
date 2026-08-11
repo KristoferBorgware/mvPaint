@@ -31,18 +31,48 @@
 // one already provides is left out and reported.
 
 import { readdir, readFile } from 'node:fs/promises'
-import { dirname, extname, join } from 'node:path'
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import opentype, { type Font } from 'opentype.js'
 import { decompress } from 'wawoff2'
 import type { FontStyle } from '@mvpaint/engine/core'
+import { flagFromArgv } from './argv'
 import { DEFAULT_CHARSET } from './charset'
 
-/** The folder both generators read. Everything in it that is a font file is generated. */
+/** The folder both generators read when a run names none. Every font file in it is generated. */
 export const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), 'fonts')
 
-/** Where both generators write. Committed nowhere - copy what you want into your app. */
+/**
+ * Where both generators write when a run names none. Committed nowhere - copy what you want
+ * into your app.
+ */
 export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'out')
+
+/**
+ * The folder to read, from `--fonts <dir>`, or FONT_SRC.
+ *
+ * A relative path is resolved against the working directory, the way it would be for any other
+ * command - so a run can point at a checkout's own font folder and leave this package's alone.
+ */
+export function fontSrcFromArgv(argv: readonly string[]): string {
+  const dir = flagFromArgv(argv, 'fonts')
+  return dir ? resolve(dir) : FONT_SRC
+}
+
+/** The folder to write to, from `--out <dir>`, or OUT_DIR. Each generator adds its own subfolder. */
+export function outDirFromArgv(argv: readonly string[]): string {
+  const dir = flagFromArgv(argv, 'out')
+  return dir ? resolve(dir) : OUT_DIR
+}
+
+/**
+ * A folder as a run reports it: relative to the working directory while it is inside it, and
+ * absolute once it is not, which is where a relative path stops being readable.
+ */
+export function displayPath(dir: string): string {
+  const rel = relative(process.cwd(), dir)
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) ? rel : dir
+}
 
 const FONT_EXTENSIONS = new Set(['.ttf', '.otf', '.woff2'])
 

@@ -7,11 +7,12 @@
 //
 //   npm run gen:polygons                        the default charset (see ../charset.ts)
 //   npm run gen:polygons -- --charset latin     a named set, code points, or @a file of characters
+//   npm run gen:polygons -- --fonts ./fonts --out ./atlases    read and write elsewhere
 //
-// Input is the fonts/ FOLDER, enumerated (see ../fontSources.ts) - this tool knows about no
-// particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to out/polygons/,
-// which is generated and gitignored: copying what you want into your application is a
-// deliberate step, because an outline atlas is the APPLICATION's asset. It hands it to
+// Input is a FOLDER of font files, enumerated (see ../fontSources.ts) - this tool knows about no
+// particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to polygons/ under the
+// out folder, which is generated and gitignored: copying what you want into your application is
+// a deliberate step, because an outline atlas is the APPLICATION's asset. It hands it to
 // VectorText through the VectorFonts interface, and the engine ships none of them.
 //
 // WHAT IS IN A FILE. Per glyph: the flattened outline as closed rings of whole font units, the
@@ -36,9 +37,7 @@ import { TtfFont, DEFAULT_CURVE_TOLERANCE_EM } from '@mvpaint/ttf'
 import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/core'
 import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
 import { DEFAULT_CHARSET, charsetText, charsetFromArgv, describeCharset, resolveCharset } from '../charset'
-import { OUT_DIR, describeSources, readFontFaces, reportSkipped } from '../fontSources'
-
-const OUT = join(OUT_DIR, 'polygons')
+import { displayPath, describeSources, fontSrcFromArgv, outDirFromArgv, readFontFaces, reportSkipped } from '../fontSources'
 
 /** One file a face is drawn from. A face spread over subset files has several. */
 export interface PolygonSource {
@@ -170,9 +169,12 @@ function round(value: number): number {
 export async function main(argv: readonly string[] = process.argv): Promise<void> {
   const spec = charsetFromArgv(argv)
   const charset = await resolveCharset(spec)
-  const { faces, skipped } = await readFontFaces(charset)
-  await mkdir(OUT, { recursive: true })
+  const src = fontSrcFromArgv(argv)
+  const out = join(outDirFromArgv(argv), 'polygons')
+  const { faces, skipped } = await readFontFaces(charset, src)
+  await mkdir(out, { recursive: true })
 
+  console.log(`Fonts: ${displayPath(src)}`)
   console.log(`Charset: ${describeCharset(spec, charset)}`)
 
   for (const face of faces) {
@@ -180,7 +182,7 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
 
     const atlas = await buildPolygonAtlas(face.base, face.sources, { charset })
     const text = `${JSON.stringify(atlas)}\n`
-    await writeFile(join(OUT, `${face.base}.polygons.json`), text)
+    await writeFile(join(out, `${face.base}.polygons.json`), text)
 
     const points = atlas.glyphs.reduce(
       (total, glyph) => total + (glyph.rings?.reduce((n, ring) => n + ring.length / 2, 0) ?? 0),
@@ -192,7 +194,7 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
   }
 
   reportSkipped(skipped)
-  console.log(`Wrote ${faces.length} polygon atlases to packages/scripts/textgen/out/polygons/`)
+  console.log(`Wrote ${faces.length} polygon atlases to ${displayPath(out)}`)
   console.log('Copy the ones your application draws with into its own font folder.')
 }
 

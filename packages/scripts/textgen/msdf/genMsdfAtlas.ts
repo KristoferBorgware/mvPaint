@@ -3,12 +3,13 @@
 // single atlas, so one atlas per face serves every font size the renderer draws. Run with:
 //   npm run gen:msdf                        the default charset (see ../charset.ts)
 //   npm run gen:msdf -- --charset latin     a named set, code points, or @a file of characters
+//   npm run gen:msdf -- --fonts ./fonts --out ./atlases    read and write elsewhere
 //
-// Input is the fonts/ FOLDER, enumerated (see ../fontSources.ts) - this tool knows about no
-// particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to out/msdf/, which is
-// generated and gitignored; copying what you want into your application is a deliberate step,
-// because an atlas is the APPLICATION's asset. It hands it to createSceneRenderer through the
-// `fonts` option.
+// Input is a FOLDER of font files, enumerated (see ../fontSources.ts) - this tool knows about no
+// particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to msdf/ under the out
+// folder, which is generated and gitignored; copying what you want into your application is a
+// deliberate step, because an atlas is the APPLICATION's asset. It hands it to
+// createSceneRenderer through the `fonts` option.
 //
 // The engine has no copy of its own and no fallback: an application that supplies no fonts
 // draws no text. The only Inter in this repository is the example app's, under
@@ -26,9 +27,15 @@ import { fileURLToPath } from 'node:url'
 import generateBMFont from 'msdf-bmfont-xml'
 import { TtfFont } from '@mvpaint/ttf'
 import { charsetFromArgv, charsetText, describeCharset, resolveCharset } from '../charset'
-import { OUT_DIR, describeSources, readFontFaces, reportSkipped, type FontFace } from '../fontSources'
-
-const OUT = join(OUT_DIR, 'msdf')
+import {
+  displayPath,
+  describeSources,
+  fontSrcFromArgv,
+  outDirFromArgv,
+  readFontFaces,
+  reportSkipped,
+  type FontFace,
+} from '../fontSources'
 
 const FONT_SIZE = 42 // SDF generation size in px; runtime scales freely from it.
 const DISTANCE_RANGE = 4 // SDF spread in px; the shader uses it for the screen-px conversion.
@@ -82,7 +89,7 @@ interface GeneratedPass {
 
 // Promise wrapper around the callback-style generator. `reuse` is a path to the state an
 // earlier call wrote: given one, the packer continues into the page that call left behind.
-function generate(data: ArrayBuffer, base: string, charset: string, reuse?: string): Promise<GeneratedPass> {
+function generate(data: ArrayBuffer, out: string, base: string, charset: string, reuse?: string): Promise<GeneratedPass> {
   return new Promise((resolve, reject) => {
     generateBMFont(
       Buffer.from(data),
@@ -91,7 +98,7 @@ function generate(data: ArrayBuffer, base: string, charset: string, reuse?: stri
         fieldType: 'msdf',
         // A path rather than a bare name: the folder the packer reads an earlier page from is
         // the one this names.
-        filename: join(OUT, base),
+        filename: join(out, base),
         charset,
         fontSize: FONT_SIZE,
         distanceRange: DISTANCE_RANGE,
@@ -119,14 +126,14 @@ function generate(data: ArrayBuffer, base: string, charset: string, reuse?: stri
  *
  * The PNG is written per pass because that is how the next pass receives it.
  */
-async function generateFace(face: FontFace): Promise<BmFontJson> {
+async function generateFace(face: FontFace, out: string): Promise<BmFontJson> {
   const state = join(tmpdir(), `mvpaint-msdf-${face.base}.json`)
-  const png = join(OUT, `${face.base}.png`)
+  const png = join(out, `${face.base}.png`)
   let merged: BmFontJson | undefined
 
   try {
     for (const [index, source] of face.sources.entries()) {
-      const pass = await generate(source.data, face.base, charsetText(source.provides), index === 0 ? undefined : state)
+      const pass = await generate(source.data, out, face.base, charsetText(source.provides), index === 0 ? undefined : state)
       // One page per style is what the engine can sample: the layer of the shared atlas array a
       // glyph reads from is its STYLE, so a second page has nowhere to live and its glyphs would
       // silently take the first page's texels. Stopping here is the guard against that.
@@ -177,9 +184,12 @@ async function readDecoration(data: ArrayBuffer): Promise<BmDecoration> {
 export async function main(argv: readonly string[] = process.argv): Promise<void> {
   const spec = charsetFromArgv(argv)
   const charset = await resolveCharset(spec)
-  const { faces, skipped } = await readFontFaces(charset)
-  await mkdir(OUT, { recursive: true })
+  const src = fontSrcFromArgv(argv)
+  const out = join(outDirFromArgv(argv), 'msdf')
+  const { faces, skipped } = await readFontFaces(charset, src)
+  await mkdir(out, { recursive: true })
 
+  console.log(`Fonts: ${displayPath(src)}`)
   console.log(`Charset: ${describeCharset(spec, charset)}`)
 
   let widest = 0
@@ -187,11 +197,11 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
   for (const face of faces) {
     process.stdout.write(`Generating ${face.base} ... `)
 
-    const json = await generateFace(face)
+    const json = await generateFace(face, out)
     // The face's metrics come from its primary file, the same one the packer sized the page to.
     const augmented = { ...json, decoration: await readDecoration(face.sources[0].data) }
 
-    await writeFile(join(OUT, `${face.base}.json`), `${JSON.stringify(augmented)}\n`)
+    await writeFile(join(out, `${face.base}.json`), `${JSON.stringify(augmented)}\n`)
     const { scaleW, scaleH } = json.common
     widest = Math.max(widest, scaleW)
     tallest = Math.max(tallest, scaleH)
@@ -200,7 +210,7 @@ export async function main(argv: readonly string[] = process.argv): Promise<void
   }
 
   reportSkipped(skipped)
-  console.log(`Wrote ${faces.length} MSDF atlases to packages/scripts/textgen/out/msdf/`)
+  console.log(`Wrote ${faces.length} MSDF atlases to ${displayPath(out)}`)
   // An application's layer size is the largest page across the styles of ONE family, so this is
   // the worst case rather than what any single family allocates. Four layers of it, at four
   // bytes a texel, is what a family costs in texture memory.

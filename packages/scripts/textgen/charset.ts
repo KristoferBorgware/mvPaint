@@ -17,6 +17,7 @@
 // second page to address. The vector path has no such ceiling; its atlas is JSON.
 
 import { readFile } from 'node:fs/promises'
+import { flagFromArgv } from './argv'
 
 const range = (lo: number, hi: number): number[] => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
 
@@ -120,16 +121,7 @@ export async function resolveCharset(spec?: string): Promise<readonly number[]> 
 
 /** The `--charset <spec>` / `--charset=<spec>` a run was started with, if any. */
 export function charsetFromArgv(argv: readonly string[]): string | undefined {
-  for (let index = 0; index < argv.length; index++) {
-    const arg = argv[index]
-    if (arg === '--charset') {
-      const value = argv[index + 1]
-      if (value === undefined) throw new Error('--charset needs a value.')
-      return value
-    }
-    if (arg.startsWith('--charset=')) return arg.slice('--charset='.length)
-  }
-  return undefined
+  return flagFromArgv(argv, 'charset')
 }
 
 /** The set as the string msdf-bmfont-xml's `charset` and TtfFont.ensure() take. */

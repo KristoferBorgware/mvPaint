@@ -44,8 +44,9 @@ parsing is opt-in through [`@mvpaint/ttf`](packages/ttf).
 
 ## 1. Source fonts
 
-Font files live in `packages/scripts/textgen/fonts/` as `.ttf`, `.otf` or `.woff2`. The directory is
-enumerated — no tool holds a list of typefaces — so adding a face means dropping a file in.
+Font files live in `packages/scripts/textgen/fonts/` as `.ttf`, `.otf` or `.woff2`, or in
+whatever directory `--fonts` names. The directory is enumerated — no tool holds a list of
+typefaces — so adding a face means dropping a file in.
 
 A `.woff2` is a brotli-compressed sfnt whose `glyf` and `loca` tables are stored re-encoded.
 Both generators are handed the TTF/OTF bytes inside it, unpacked in memory by `wawoff2`, so
@@ -102,7 +103,21 @@ npm run gen:fonts      # both, over one charset
 npm run gen:fonts -- --charset latin        # a named set
 npm run gen:fonts -- --charset U+0020-007E,U+00C0-00FF
 npm run gen:fonts -- --charset @chars.txt   # the characters in a UTF-8 file
+
+npm run gen:fonts -- --fonts ./my-fonts     # read that directory instead
+npm run gen:fonts -- --out ./public/fonts   # write msdf/ and polygons/ under that one
 ```
+
+### The directories
+
+`--fonts <dir>` and `--out <dir>` take a path relative to the working directory or an absolute
+one; given neither flag a run reads `textgen/fonts/` and writes `textgen/out/`. Each generator
+adds its own subfolder to the out directory, so `--out ./public/fonts` gives
+`./public/fonts/msdf/` and `./public/fonts/polygons/`. The run prints the directory it read and
+the one it wrote.
+
+This is what lets a project outside this repository generate its own atlases without a file of
+its own landing in `textgen/`.
 
 ### The charset
 
@@ -178,7 +193,8 @@ match what the tool produces today.
 
 `packages/scripts/textgen/out/` is gitignored. Copying the atlases you want into your application is a
 deliberate step: an atlas is the *application's* asset, and regenerating never silently changes
-what ships.
+what ships. `--out` pointed at an application's own font directory writes there instead, which
+is the same decision made once on the command line rather than once per file.
 
 ---
 
