@@ -36,10 +36,11 @@ export function createGl2Context(canvas: HTMLCanvasElement, options: Gl2ContextO
   const powerPreference = options.powerPreference ?? 'high-performance'
   const gl = canvas.getContext('webgl2', {
     alpha: true,
-    // Left at the default, deliberately. The renderer clears to opaque white and every lane's
-    // blend leaves the destination alpha at 1, so the drawing buffer is opaque either way and
-    // the two settings are indistinguishable - which makes the default, far better trodden
-    // through mobile compositors, the only sensible choice.
+    // Left at the default of true, which is what a translucent clear colour needs: every lane's
+    // blend (colour src-alpha / one-minus-src-alpha, alpha one / one-minus-src-alpha) accumulates
+    // premultiplied, so the buffer is already in the form the compositor then reads. It is also
+    // the far better trodden path through mobile compositors. The clear value is scaled to match
+    // in GlSceneRenderer.setClearColor.
     // premultipliedAlpha: true
     //
     // MSAA, through the browser's own multisampled drawing buffer rather than a multisampled

@@ -16,6 +16,7 @@ import { createAtlasBindGroupLayout } from './layouts'
 import { DEPTH_FORMAT } from './depthFormat'
 import { GpuCaptureTarget } from './CaptureTarget'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
+import { DEFAULT_CLEAR_COLOR, parseColor, type ColorInput } from '../render/color'
 import { MSDFFontLibrary } from './MSDFFontLibrary'
 import { createGpuContext } from './GpuContext'
 import { gpuImageFactory } from './ImageTexture'
@@ -26,13 +27,12 @@ import { SceneRenderer, SAMPLE_COUNT } from './SceneRenderer'
 
 export { SceneRenderer, SAMPLE_COUNT } from './SceneRenderer'
 
-const WHITE: GPUColor = { r: 1, g: 1, b: 1, a: 1 }
-
 /**
  * Composition root for the WebGPU path: wires the GPU context, resize observer and frame loop
  * (system components) to a SceneRenderer, loads the MSDF font atlases, and starts the render
- * loop on a white background through a 2D orthographic camera, MSAA 4x. Scene content is
- * added afterwards, through the returned handle's `scene`. Throws if WebGPU is unavailable.
+ * loop on the clear colour (white unless asked otherwise) through a 2D orthographic camera,
+ * MSAA 4x. Scene content is added afterwards, through the returned handle's `scene`. Throws if
+ * WebGPU is unavailable.
  *
  * Applications call createSceneRenderer() (systems/createSceneRenderer.ts) instead, which
  * comes here first and only falls back if this throws.
@@ -92,7 +92,7 @@ export async function createWebGpuSceneRenderer(
       scene.draw(pass, width, height)
     },
     {
-      clearColor: WHITE,
+      clearColor: options.clearColor ? parseColor(options.clearColor) : DEFAULT_CLEAR_COLOR,
       sampleCount: SAMPLE_COUNT,
       depthFormat: DEPTH_FORMAT,
       // Shadow rendering needs its own offscreen render passes on the same encoder,
@@ -202,6 +202,14 @@ export async function createWebGpuSceneRenderer(
     },
     getZoom() {
       return scene.getZoom()
+    },
+    // The frame loop's, not the SceneRenderer's: on this path the clear colour belongs to the
+    // render pass's colour attachment, which FrameRenderer builds.
+    setClearColor(color: ColorInput) {
+      frameRenderer.setClearColor(parseColor(color))
+    },
+    getClearColor() {
+      return frameRenderer.getClearColor()
     },
     setCullMargin(margin: number) {
       scene.setCullMargin(margin)

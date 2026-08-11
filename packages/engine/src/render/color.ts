@@ -69,6 +69,14 @@ export const MAX_GRADIENT_STOPS = 8
  */
 export const MV_GREEN: RGBA = [0x54 / 255, 0xb4 / 255, 0x35 / 255, 1]
 
+/**
+ * Opaque white - what a renderer clears its canvas to when no `clearColor` says otherwise.
+ *
+ * Here, beside MV_GREEN, for the same reason: two render paths that each spell their own
+ * default are two paths that come to disagree about it.
+ */
+export const DEFAULT_CLEAR_COLOR: RGBA = [1, 1, 1, 1]
+
 /** The colour keywords, as 0xRRGGBB. */
 const NAMED: Record<string, number> = {
   aliceblue: 0xf0f8ff, antiquewhite: 0xfaebd7, aqua: 0x00ffff, aquamarine: 0x7fffd4,
@@ -149,6 +157,25 @@ export function parseColor(input: ColorInput): RGBA {
   }
 
   throw new Error(`Unrecognised colour: ${JSON.stringify(input)}.`)
+}
+
+/**
+ * The same colour with its three channels scaled by its own alpha.
+ *
+ * Both drawing buffers hold premultiplied alpha - the WebGPU canvas is configured
+ * `alphaMode: 'premultiplied'`, the WebGL2 one takes the default `premultipliedAlpha: true` -
+ * and every lane's blend accumulates into that form (colour src-alpha / one-minus-src-alpha,
+ * alpha one / one-minus-src-alpha). A clear value is the one colour that reaches the buffer
+ * without passing through a blend, so it is the one that has to arrive already scaled: a
+ * straight `[1, 0, 0, 0.5]` composites as a full-strength red at half coverage rather than as
+ * half a red.
+ *
+ * An opaque colour is its own premultiplication and comes back unchanged, which is every colour
+ * on the ordinary path.
+ */
+export function premultiply(color: RGBA): RGBA {
+  const alpha = color[3]
+  return alpha === 1 ? color : [color[0] * alpha, color[1] * alpha, color[2] * alpha, alpha]
 }
 
 /**

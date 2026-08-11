@@ -20,7 +20,7 @@ import type { TransformableNode } from '../shapes/Group'
 import type { PickableNode } from '../scene/picking'
 import type { MarqueeOptions } from '../scene/selection'
 import type { ImageTextureFactory } from '../image/ImageTexture'
-import type { ColorInput } from '../render/color'
+import type { ColorInput, RGBA } from '../render/color'
 import type { InputOptions } from '../input/inputOptions'
 import type { SceneInput } from '../input/sceneInput'
 import type { MSDFFontFamilies } from '../text/layout'
@@ -85,6 +85,22 @@ export interface SceneRendererHandle extends SceneResources {
   setCamera: (camera: Camera2D | null) => void
   setZoom: (zoom: number) => void
   getZoom: () => number
+  /**
+   * What the canvas is cleared to at the start of every frame, in either form a colour can be
+   * written in. Takes effect on the next frame; there is nothing to redraw or invalidate.
+   *
+   * This is the background. It is not a rectangle in the scene: it is the value the drawing
+   * buffer starts each frame at, so nothing is picked, culled, sorted or drawn for it, and it
+   * is behind every node whatever their zIndex.
+   *
+   * An alpha below 1 leaves the canvas that much see-through and the page shows through it -
+   * `setClearColor('transparent')` is how an application puts its own backdrop (a CSS grid, a
+   * photograph, a checkerboard) behind the scene. Both contexts composite premultiplied and the
+   * engine scales the value to suit, so the colour written here is the straight-alpha one meant.
+   */
+  setClearColor: (color: ColorInput) => void
+  /** The clear colour as the engine's tuple, whichever form it was written in. */
+  getClearColor: () => RGBA
   /** Debug/testing knob: grows (or shrinks, if negative) the viewport-culling rectangle. */
   setCullMargin: (margin: number) => void
   getCullMargin: () => number
@@ -241,6 +257,12 @@ export interface CreateSceneRendererOptions {
    * moving it is how an application pans and zooms.
    */
   camera?: Camera2D
+  /**
+   * What the canvas is cleared to each frame. Default opaque white; `'transparent'` starts the
+   * renderer over whatever the page puts behind the element. Changeable at any time afterwards
+   * through `handle.setClearColor` - see it for what the clear colour is and is not.
+   */
+  clearColor?: ColorInput
   /**
    * Which pointer and keyboard bindings the engine should set up for this canvas. Omitted
    * (the default) is a STATIC render: nothing is listened for and nothing is hit-tested,

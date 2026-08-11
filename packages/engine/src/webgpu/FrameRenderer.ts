@@ -4,6 +4,7 @@
 // pass and hands it to an onFrame callback that records the scene's draw calls.
 
 import type { CanvasResizer } from '../systems/CanvasResizer'
+import { DEFAULT_CLEAR_COLOR, premultiply, type RGBA } from '../render/color'
 import type { GpuContext } from './GpuContext'
 
 /** What a scene receives each frame to update and record its draws. */
@@ -17,7 +18,8 @@ export interface FrameContext {
 }
 
 export interface FrameRendererOptions {
-  clearColor?: GPUColor
+  /** Straight-alpha RGBA in 0..1, premultiplied here. Default opaque white. */
+  clearColor?: RGBA
   /** Depth attachment format; omit for a color-only pass. Must match the pipeline's. */
   depthFormat?: GPUTextureFormat
   /** MSAA sample count (1 = no multisampling). Must match the pipeline's `multisample.count`. */
@@ -34,10 +36,15 @@ export class FrameRenderer {
   private readonly gpu: GpuContext
   private readonly resizer: CanvasResizer
   private readonly onFrame: (frame: FrameContext) => void
-  private readonly clearColor: GPUColor
   private readonly depthFormat?: GPUTextureFormat
   private readonly sampleCount: number
   private readonly onPrePass?: (encoder: GPUCommandEncoder, width: number, height: number, dt: number) => void
+
+  // The colour as it was handed in, and the same colour in the form the attachment takes. Kept
+  // apart so that reading it back gives the straight-alpha tuple that was set, whatever the
+  // premultiplication did to it.
+  private clearColor: RGBA
+  private clearValue: GPUColor
 
   private depthTexture: GPUTexture | null = null
   private msaaTexture: GPUTexture | null = null
@@ -54,10 +61,24 @@ export class FrameRenderer {
     this.gpu = gpu
     this.resizer = resizer
     this.onFrame = onFrame
-    this.clearColor = options.clearColor ?? { r: 0.07, g: 0.07, b: 0.07, a: 1 }
+    this.clearColor = options.clearColor ?? DEFAULT_CLEAR_COLOR
+    this.clearValue = toGpuColor(this.clearColor)
     this.depthFormat = options.depthFormat
     this.sampleCount = options.sampleCount ?? 1
     this.onPrePass = options.onPrePass
+  }
+
+  /**
+   * What the next frame clears to. Straight-alpha RGBA in 0..1; an alpha below 1 leaves the
+   * canvas that much see-through, since its context composites premultiplied.
+   */
+  setClearColor(color: RGBA): void {
+    this.clearColor = color
+    this.clearValue = toGpuColor(color)
+  }
+
+  getClearColor(): RGBA {
+    return this.clearColor
   }
 
   start(): void {
@@ -125,13 +146,13 @@ export class FrameRenderer {
       ? {
           view: this.msaaTexture.createView(),
           resolveTarget: swapchainView,
-          clearValue: this.clearColor,
+          clearValue: this.clearValue,
           loadOp: 'clear',
           storeOp: 'store',
         }
       : {
           view: swapchainView,
-          clearValue: this.clearColor,
+          clearValue: this.clearValue,
           loadOp: 'clear',
           storeOp: 'store',
         }
@@ -156,4 +177,9 @@ export class FrameRenderer {
     pass.end()
     this.gpu.device.queue.submit([encoder.finish()])
   }
+}
+
+function toGpuColor(color: RGBA): GPUColor {
+  const [r, g, b, a] = premultiply(color)
+  return { r, g, b, a }
 }

@@ -36,6 +36,7 @@ import { buildDrawRuns, type LaneName } from '../render/drawOrder'
 import { textShapingEpoch } from '../shapes/contentEpoch'
 import { MSDFText } from '../shapes/MSDFText'
 import type { Image } from '../shapes/Image'
+import { DEFAULT_CLEAR_COLOR, premultiply, type RGBA } from '../render/color'
 import type { Gl2Context } from './Gl2Context'
 import type { GlMSDFFontLibrary } from './GlMSDFFontLibrary'
 import { GlProgram, GlStateCache } from './GlProgram'
@@ -83,6 +84,10 @@ export class GlSceneRenderer {
   private readonly fonts: GlMSDFFontLibrary
 
   private readonly gather = new SceneGather()
+  // The colour as it was handed in, and the same colour scaled by its alpha for gl.clearColor.
+  // Kept apart so that reading it back gives the straight-alpha tuple that was set.
+  private clearColor: RGBA = DEFAULT_CLEAR_COLOR
+  private clearValue: RGBA = DEFAULT_CLEAR_COLOR
   private cullMargin = 0
   private cullingEnabled = true
   private zSortEnabled = true
@@ -173,6 +178,19 @@ export class GlSceneRenderer {
 
   getZoom(): number {
     return this.activeCamera.zoom
+  }
+
+  /**
+   * What the next frame clears to. Straight-alpha RGBA in 0..1; an alpha below 1 leaves the
+   * canvas that much see-through, since the drawing buffer composites premultiplied.
+   */
+  setClearColor(color: RGBA): void {
+    this.clearColor = color
+    this.clearValue = premultiply(color)
+  }
+
+  getClearColor(): RGBA {
+    return this.clearColor
   }
 
   setCullMargin(margin: number): void {
@@ -389,8 +407,10 @@ export class GlSceneRenderer {
     // Clearing depth needs the depth write ON, whatever the last program left behind.
     gl.depthMask(true)
     this.stateCache.invalidate()
-    const bg = view?.background
-    gl.clearColor(bg ? bg[0] : 1, bg ? bg[1] : 1, bg ? bg[2] : 1, bg ? bg[3] : 1)
+    // A capture fills its own offscreen target with the colour it was asked for. A live frame
+    // clears the drawing buffer, which holds premultiplied alpha, so it takes the scaled form.
+    const [clearR, clearG, clearB, clearA] = view?.background ?? this.clearValue
+    gl.clearColor(clearR, clearG, clearB, clearA)
     gl.clearDepth(1)
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 

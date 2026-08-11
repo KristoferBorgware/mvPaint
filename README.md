@@ -161,12 +161,30 @@ Both arguments are optional. The first is the render target, the second is the o
 | --- | --- | --- | --- |
 | `input` | preset, boolean, object or `null` | omitted | Which pointer and keyboard bindings to install. See below. |
 | `camera` | `Camera2D` | a default camera | The view the scene is drawn through. |
+| `clearColor` | any colour | opaque white | What the canvas is cleared to each frame. See below. |
 | `backend` | `'auto' \| 'webgpu' \| 'webgl2'` | `'auto'` | Render path. `'webgl2'` forces the fallback. |
 | `powerPreference` | `'high-performance' \| 'low-power'` | `'high-performance'` | Which GPU to request on a multi-GPU machine. |
 | `onDeviceError` | `(message: string) => void` | none | Called on asynchronous device errors, which otherwise render as a blank canvas. |
 
 The default camera puts world (0, 0) at the viewport's top-left corner at one world unit per
 CSS pixel.
+
+### The clear colour
+
+The background is the value the drawing buffer starts each frame at, not a rectangle in the
+scene: nothing is picked, culled, sorted or drawn for it, and it sits behind every node whatever
+their `zIndex`. `setClearColor` changes it live, and the next frame shows it.
+
+```ts
+handle.setClearColor('#1e1e1e')      // a dark board
+handle.setClearColor('transparent')  // the page shows through the canvas
+handle.getClearColor()               // [0, 0, 0, 0]
+```
+
+An alpha below 1 makes the canvas that much see-through, which is how an application puts its own
+backdrop — a CSS grid, a photograph, a checkerboard — behind the scene rather than drawing one.
+Both contexts composite premultiplied alpha and the engine scales the value to match, so what is
+written here is the straight-alpha colour meant.
 
 ### Input
 
@@ -210,6 +228,7 @@ render path implements, and it mentions no graphics API.
 | `images` | Build a texture — see [Shared resources](#shared-resources). |
 | `msdfFonts` | The loaded families, for measuring text. Fonts get there by being registered under a name — the handle has no way in. |
 | `camera`, `setCamera`, `setZoom`, `getZoom` | The view. |
+| `setClearColor`, `getClearColor` | The background, live. See [The clear colour](#the-clear-colour). |
 | `path` | `'webgpu'` or `'webgl2'` — which path was taken. |
 | `adapter` | Which GPU is drawing, and whether it is a software renderer. |
 | `input` | The installed `SceneInput`, or `null` for a static render. |

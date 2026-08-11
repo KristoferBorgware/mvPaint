@@ -571,6 +571,14 @@ requestAnimationFrame tick
   the pass ends, so edges are antialiased everywhere without a resolve step in the scene code.
 - **Depth.** `depth24plus`, cleared to 1.0 every frame, compared `less-equal` rather than
   `less`, so shapes sharing a depth still resolve by draw order.
+- **The clear colour.** The colour attachment's `clearValue`, settable at any time through
+  `handle.setClearColor` and read on the next frame. It is the background, and being a clear
+  rather than a node is what keeps it out of the gather, the cull, the sort and the draw. Both
+  canvas contexts composite premultiplied alpha — WebGPU by configuration, WebGL2 by its default
+  — and every lane's blend accumulates into that form, so the value is scaled by its own alpha
+  (`render/color.ts`'s `premultiply`) before it reaches the attachment. An alpha below 1 leaves
+  the canvas see-through and the page shows through it. On the WebGL2 path the same value is a
+  `gl.clearColor` inside `GlSceneRenderer.draw`, since that path has no separate frame renderer.
 - **Prepass.** Shadow baking needs its own render passes against different targets, which a
   single `beginRenderPass` cannot express, so it runs through a hook before the main pass on the
   same encoder.

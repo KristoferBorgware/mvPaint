@@ -36,6 +36,7 @@
 
 import { CanvasResizer } from '../systems/CanvasResizer'
 import { blobToDataURL, encodeCanvas, pixelsToCanvas, resolveCapture } from '../render/capture'
+import { parseColor, type ColorInput } from '../render/color'
 import type { CaptureOptions, CreateSceneRendererOptions, SceneRendererHandle } from '../systems/SceneRendererHandle'
 import { engineOwnsCanvas, resolveCanvas, type CanvasTarget } from '../systems/canvasTarget'
 import { createFrameListeners } from '../systems/frameListeners'
@@ -105,6 +106,7 @@ export async function createWebGl2SceneRenderer(
     options.onDeviceError?.(message)
     throw cause
   }
+  if (options.clearColor) scene.setClearColor(parseColor(options.clearColor))
 
   // Cached in front, so a picture two nodes want is fetched, decoded and uploaded once. The
   // cache belongs to this renderer because its textures belong to this context.
@@ -230,6 +232,12 @@ export async function createWebGl2SceneRenderer(
     },
     getZoom() {
       return scene.getZoom()
+    },
+    setClearColor(color: ColorInput) {
+      scene.setClearColor(parseColor(color))
+    },
+    getClearColor() {
+      return scene.getClearColor()
     },
     setCullMargin(margin: number) {
       scene.setCullMargin(margin)

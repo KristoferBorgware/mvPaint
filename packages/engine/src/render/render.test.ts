@@ -36,7 +36,7 @@ import {strokeContours, strokePolyline, type LineCap, type StrokeAlign} from './
 import { signedArea } from './contours'
 import { buildDrawRuns, type LaneName } from './drawOrder'
 import { isOpaqueShape, partitionByOpacity } from './opacity'
-import { parseColor, parseStops, type ColorInput, type ColorStopsInput } from './color'
+import { parseColor, parseStops, premultiply, type ColorInput, type ColorStopsInput } from './color'
 import { MAX_CAPTURE_PIXELS, flipRows, paddedBytesPerRow, resolveCapture, unpadRows } from './capture'
 import { IMAGE_OBJECT_DEPTH_OFFSET, IMAGE_OBJECT_OPACITY_OFFSET, IMAGE_OBJECT_STRIDE, IMAGE_OBJECT_TINT_OFFSET } from './imageFormat'
 import { TEXT_OBJECT_OPACITY_OFFSET, TEXT_OBJECT_STRIDE } from './textFormat'
@@ -1418,6 +1418,20 @@ it('parsing a colour', () => {
     rejects('rgb(1, 2)')
     rejects('hsl(1)')
     rejects('rgb(a, b, c)')
+})
+
+it('premultiplying a clear colour', () => {
+    // What both drawing buffers hold, and so the form a clear value has to arrive in. Written
+    // straight, a half-alpha red would clear to a full-strength red at half coverage.
+    const half = premultiply([1, 0, 0, 0.5])
+    assert(near(half[0], 0.5) && near(half[3], 0.5), 'the channels are scaled, the alpha is not')
+
+    // The two ends of the range, which are the two the clear colour actually spends its life at:
+    // an opaque background, and a canvas the page shows through.
+    const opaque: RGBA = [0.25, 0.5, 0.75, 1]
+    assert(premultiply(opaque) === opaque, 'an opaque colour is its own premultiplication')
+    const gone = premultiply(parseColor('transparent'))
+    assert(gone.every((c) => c === 0), 'and a transparent one scales to nothing')
 })
 
 it('the colour properties take either form', () => {
