@@ -3,8 +3,8 @@
 //
 // The main entry point reaches the render paths, which only a bundler resolves. That is right
 // for an application, and fatal for everything that is not one:
-// @mvpaint/ttf and its self-test, the offline atlas generators in packages/scripts (run under
-// tsx), and any application code that wants to shape or measure text before a device exists.
+// @mvpaint/ttf and its self-test, the offline atlas generators in @mvpaint/fontgen (which run
+// under node), and any application code that wants to shape or measure text before a device exists.
 // Those import this entry point instead - `@mvpaint/engine/core` - and get plain modules node
 // can load.
 //

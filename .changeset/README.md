@@ -29,21 +29,20 @@ it, which is how a release ends up covering a batch of changes rather than one.
 
 ## What does not need one
 
-`@mvpaint/example-app` and `@mvpaint/scripts` are private and never published, so a change that
-touches only those needs no changeset. Neither do CI config, tests or docs. If you skip one and
-later decide the change should ship, add the changeset in a follow-up commit - the versioning
-runs off these files, not off git history.
+`@mvpaint/example-app` is private and never published, so a change that touches only it needs no
+changeset. Neither do CI config, tests or docs. If you skip one and later decide the change
+should ship, add the changeset in a follow-up commit - the versioning runs off these files, not
+off git history.
 
 ## Choosing the bump
 
-Both published packages are pre-1.0, where the convention is that **minor** is the breaking one
-and **patch** is everything else. Use major only for a deliberate 1.0.
+Every published package is past 1.0, so the bumps mean what semver says they mean.
 
 - **patch** - a fix, or anything a consumer's existing code cannot notice.
-- **minor** - new public API, or a change that could make existing code stop compiling or
-  behave differently.
-- **major** - reserved for 1.0 and beyond.
+- **minor** - new public API that leaves existing code working.
+- **major** - a change that can make existing code stop compiling or behave differently.
 
-`@mvpaint/ttf` declares `@mvpaint/engine` as a peer dependency, so bumping the engine only drags
-ttf along when the new version falls outside ttf's range. A normal engine release leaves ttf
-alone.
+`@mvpaint/ttf` and `@mvpaint/fontgen` declare `@mvpaint/engine` as a peer dependency, so bumping
+the engine only drags them along when the new version falls outside their range. A normal engine
+release leaves both alone. `@mvpaint/fontgen` depends on `@mvpaint/ttf` outright, so a ttf
+release does bump it.

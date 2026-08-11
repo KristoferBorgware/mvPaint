@@ -1,7 +1,7 @@
 // What both generators take as input: a FOLDER of font files, enumerated and grouped into faces.
 //
-// Neither tool holds a list of typefaces. Drop a file into fonts/ and the next run generates an
-// atlas for it; take one out and it stops.
+// Neither generator holds a list of typefaces. Drop a file into the folder and the next run
+// generates an atlas for it; take one out and it stops.
 //
 // THE FILE SAYS WHICH FACE IT IS. A font names its own family in the `name` table and marks
 // bold and italic in `head.macStyle`, and that is what these tools read.
@@ -31,48 +31,11 @@
 // one already provides is left out and reported.
 
 import { readdir, readFile } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { extname, join } from 'node:path'
 import opentype, { type Font } from 'opentype.js'
 import { decompress } from 'wawoff2'
 import type { FontStyle } from '@mvpaint/engine/core'
-import { flagFromArgv } from './argv'
 import { DEFAULT_CHARSET } from './charset'
-
-/** The folder both generators read when a run names none. Every font file in it is generated. */
-export const FONT_SRC = join(dirname(fileURLToPath(import.meta.url)), 'fonts')
-
-/**
- * Where both generators write when a run names none. Committed nowhere - copy what you want
- * into your app.
- */
-export const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), 'out')
-
-/**
- * The folder to read, from `--fonts <dir>`, or FONT_SRC.
- *
- * A relative path is resolved against the working directory, the way it would be for any other
- * command - so a run can point at a checkout's own font folder and leave this package's alone.
- */
-export function fontSrcFromArgv(argv: readonly string[]): string {
-  const dir = flagFromArgv(argv, 'fonts')
-  return dir ? resolve(dir) : FONT_SRC
-}
-
-/** The folder to write to, from `--out <dir>`, or OUT_DIR. Each generator adds its own subfolder. */
-export function outDirFromArgv(argv: readonly string[]): string {
-  const dir = flagFromArgv(argv, 'out')
-  return dir ? resolve(dir) : OUT_DIR
-}
-
-/**
- * A folder as a run reports it: relative to the working directory while it is inside it, and
- * absolute once it is not, which is where a relative path stops being readable.
- */
-export function displayPath(dir: string): string {
-  const rel = relative(process.cwd(), dir)
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) ? rel : dir
-}
 
 const FONT_EXTENSIONS = new Set(['.ttf', '.otf', '.woff2'])
 
@@ -114,14 +77,35 @@ export interface FontFace {
   sources: readonly FaceSource[]
 }
 
-/** A file that is not part of any atlas, and the sentence a generator prints about it. */
+/**
+ * Why a font file is in no atlas.
+ *
+ * `no-charset-coverage`: it draws none of the characters asked for.
+ * `already-drawn`: another file of the same face draws everything it covers - the case a
+ * family of several weights competing for four style slots produces, where `drawnBy` names the
+ * file that took the slot.
+ */
+export type SkipReason = 'no-charset-coverage' | 'already-drawn'
+
+/** A file that is not part of any atlas. */
 export interface SkippedFile {
+  /** The file's name within the folder. */
   file: string
-  reason: string
+  /** Absolute path to it. */
+  path: string
+  /** The face it would have joined, `<family>-<style>`. */
+  face: string
+  reason: SkipReason
+  /** For `already-drawn`, the file of that face which draws everything this one covers. */
+  drawnBy?: string
+  /** The sentence a run prints about it. */
+  message: string
 }
 
 /** The folder, read. */
 export interface FontFolder {
+  /** Absolute path to the folder these faces were read from. */
+  dir: string
   faces: readonly FontFace[]
   skipped: readonly SkippedFile[]
 }
@@ -200,10 +184,7 @@ interface Candidate {
  * whatever else a developer leaves there. A font file that cannot be identified is an error,
  * because the alternative is a face that never gets an atlas and never says why.
  */
-export async function readFontFaces(
-  charset: readonly number[] = DEFAULT_CHARSET,
-  dir: string = FONT_SRC,
-): Promise<FontFolder> {
+export async function readFontFaces(dir: string, charset: readonly number[] = DEFAULT_CHARSET): Promise<FontFolder> {
   const entries = await readdir(dir, { withFileTypes: true })
   const candidates: Candidate[] = []
 
@@ -265,12 +246,17 @@ export async function readFontFaces(
     for (const candidate of group) {
       const provides = candidate.has.filter((codePoint) => !claimed.has(codePoint))
       if (provides.length === 0) {
+        const drawnBy = sources[0]?.file
         skipped.push({
           file: candidate.file,
-          reason:
-            sources.length === 0
-              ? 'it has none of the charset'
-              : `${base} already draws everything it covers, from ${sources[0].file}`,
+          path: candidate.path,
+          face: base,
+          reason: drawnBy === undefined ? 'no-charset-coverage' : 'already-drawn',
+          ...(drawnBy === undefined ? {} : { drawnBy }),
+          message:
+            drawnBy === undefined
+              ? `Skipped ${candidate.file}: it has none of the charset.`
+              : `Skipped ${candidate.file}: ${base} already draws everything it covers, from ${drawnBy}.`,
         })
         continue
       }
@@ -302,15 +288,10 @@ export async function readFontFaces(
   }
 
   if (faces.length === 0) throw new Error(`Nothing in ${dir} draws any of the charset - no atlas to generate.`)
-  return { faces, skipped }
+  return { dir, faces, skipped }
 }
 
-/** `poppins-regular <- Poppins-400-normal-latin.woff2 (95) + Poppins-400-normal-latin-ext.woff2 (30)`. */
+/** `Poppins-400-normal-latin.woff2 (95) + Poppins-400-normal-latin-ext.woff2 (30)`. */
 export function describeSources(face: FontFace): string {
   return face.sources.map((source) => `${source.file} (${source.provides.length})`).join(' + ')
-}
-
-/** The files that are in the folder but in no atlas, one line each. Prints nothing if none. */
-export function reportSkipped(skipped: readonly SkippedFile[]): void {
-  for (const { file, reason } of skipped) console.log(`Skipped ${file}: ${reason}.`)
 }

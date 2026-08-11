@@ -1,7 +1,7 @@
 // The polygon atlas: glyph outlines as data, and the runtime that draws from them.
 //
 // This is the vector text path's asset, and the exact counterpart of the MSDF PNG - one file
-// per style, generated offline (packages/scripts/textgen/polygon). What it holds is what a font
+// per style, generated offline (@mvpaint/fontgen). What it holds is what a font
 // parser would have produced and nothing else: each glyph's outline already flattened to line
 // segments in font units, its box and advance, the kerning pairs, and the four decoration
 // metrics.

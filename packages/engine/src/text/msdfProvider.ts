@@ -31,7 +31,7 @@ export interface StyleJson {
  * The JSON is a value rather than a URL because the shaper wants it synchronously - however
  * the application got hold of it, by bundling the document or by fetching it before creating
  * the renderer; the image is a URL because it is a quarter of a megabyte that should stay out
- * of the JS. `packages/scripts` writes exactly this pair per style.
+ * of the JS. `@mvpaint/fontgen` writes exactly this pair per style.
  */
 export interface MsdfAtlasSource extends StyleJson {
   /** Where the PNG is served from - a static path, a CDN, or a bundler's `?url` import. */

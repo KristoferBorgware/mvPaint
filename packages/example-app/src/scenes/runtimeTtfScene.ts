@@ -12,8 +12,8 @@
 // the parser.
 //
 // The font files come in as `?url`, so they are fetched when this scene opens rather than
-// bundled - the same treatment the polygon atlases get. They are borrowed from the generators'
-// input folder rather than copied into src/fonts/: this demo needs a real TTF at runtime, and a
+// bundled - the same treatment the polygon atlases get. They are borrowed from the repository's
+// font library rather than copied into src/fonts/: this demo needs a real TTF at runtime, and a
 // TTF is a generator INPUT, not one of the atlases a developer copies out.
 
 import { MSDFText, VectorText, registerFontFamily, type Scene } from '@mvpaint/engine'
@@ -23,8 +23,8 @@ import type { SceneContent } from './types'
 
 // Two files, not four: a `?url` import emits its file whether or not the binding is used, so
 // naming the italics here would put another 800 kB of typeface in the build for nothing.
-import interRegularTtf from '@mvpaint/scripts/textgen/fonts/Inter-400-normal.ttf?url'
-import interBoldTtf from '@mvpaint/scripts/textgen/fonts/Inter-700-normal.ttf?url'
+import interRegularTtf from '../../../fontgen/fonts/Inter-400-normal.ttf?url'
+import interBoldTtf from '../../../fontgen/fonts/Inter-700-normal.ttf?url'
 
 const LEFT = -430
 

@@ -1,6 +1,7 @@
 name: Release
 
-# Publishes @mvpaint/engine and @mvpaint/ttf to npm, in two steps that are both just merges.
+# Publishes @mvpaint/engine, @mvpaint/ttf and @mvpaint/fontgen to npm, in two steps that are
+# both just merges.
 #
 # On a push to master this looks for pending changesets (.changeset/*.md). If it finds any, it
 # opens or updates a PR titled "Version Packages" containing nothing but the bump: new version

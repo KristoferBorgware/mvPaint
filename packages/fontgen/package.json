@@ -1,0 +1,89 @@
+{
+  "name": "@mvpaint/fontgen",
+  "version": "1.0.0",
+  "description": "Font files in, glyph atlases out - the offline atlas generator for @mvpaint/engine's MSDF and vector text paths.",
+  "keywords": [
+    "msdf",
+    "font",
+    "atlas",
+    "bmfont",
+    "glyph",
+    "signed-distance-field",
+    "text-rendering",
+    "webgpu",
+    "mvpaint"
+  ],
+  "license": "MIT",
+  "author": "Kristofer Borgware",
+  "homepage": "https://github.com/KristoferBorgware/mvPaint/tree/master/packages/fontgen#readme",
+  "bugs": {
+    "url": "https://github.com/KristoferBorgware/mvPaint/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KristoferBorgware/mvPaint.git",
+    "directory": "packages/fontgen"
+  },
+  "type": "module",
+  "sideEffects": [
+    "./src/main.ts",
+    "./dist/main.js"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "mvpaint-fontgen": "./bin/mvpaint-fontgen.mjs"
+  },
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/fontgen",
+    "gen:fonts": "tsx --conditions=development src/main.ts",
+    "gen:msdf": "tsx --conditions=development src/main.ts msdf",
+    "gen:polygons": "tsx --conditions=development src/main.ts polygons",
+    "prepublishOnly": "node ../../scripts/strip-dev-condition.mjs assert"
+  },
+  "peerDependencies": {
+    "@mvpaint/engine": ">=1.0.0",
+    "msdf-bmfont-xml": "^2.8.0"
+  },
+  "peerDependenciesMeta": {
+    "msdf-bmfont-xml": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@mvpaint/ttf": "^1.0.0",
+    "opentype.js": "2.0.0",
+    "wawoff2": "^2.0.1"
+  },
+  "devDependencies": {
+    "@mvpaint/engine": ">=1.0.0",
+    "@types/node": "^26.1.1",
+    "msdf-bmfont-xml": "^2.8.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5",
+    "vite-plugin-dts": "^4.5.4"
+  }
+}

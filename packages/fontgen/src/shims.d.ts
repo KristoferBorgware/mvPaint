@@ -1,7 +1,15 @@
-// Ambient declarations for the font tools these generators call, none of which ship
-// TypeScript types. The generators run under tsx, which does not typecheck; these keep an
-// editor and `npm run typecheck` honest without pulling real type packages into an app build.
+// Ambient declarations for the font tools this package calls, none of which ship TypeScript
+// types. They keep an editor and `npm run typecheck` honest without pulling real type packages
+// into an app build.
+//
+// None of them appears in an exported signature, so nothing here is emitted into dist/ and a
+// consumer never needs it. msdfAtlas.ts states the packer's shape itself, in `Packer`, which is
+// the part that has to be right.
 
+/**
+ * The MSDF packer, an OPTIONAL peer: a project generating only outlines does not install it,
+ * and this declaration is what lets such a project still typecheck a file that imports it.
+ */
 declare module 'msdf-bmfont-xml'
 
 declare module 'wawoff2' {

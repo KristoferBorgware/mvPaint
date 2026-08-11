@@ -70,7 +70,7 @@ jobs:
           # npm pack writes into --pack-destination but will not create it.
           mkdir -p /tmp/packed
           node scripts/strip-dev-condition.mjs strip
-          npm pack -w @mvpaint/engine -w @mvpaint/ttf --pack-destination /tmp/packed
+          npm pack -w @mvpaint/engine -w @mvpaint/ttf -w @mvpaint/fontgen --pack-destination /tmp/packed
           node scripts/strip-dev-condition.mjs restore
           for t in /tmp/packed/*.tgz; do
             echo "--- $t"
@@ -105,9 +105,10 @@ jobs:
             '
           done
 
-      # Both packages ship code and nothing else. Fonts of every kind - MSDF atlases, glyph
-      # outlines, the TTFs @mvpaint/ttf parses - are an application's assets, so a font file in
-      # either tarball means something has been imported back into a package's module graph.
+      # Every package ships code and nothing else. Fonts of every kind - MSDF atlases, glyph
+      # outlines, the TTFs @mvpaint/ttf parses and the library @mvpaint/fontgen generates from -
+      # are an application's assets, so a font file in a tarball means something has been
+      # imported back into a package's module graph.
       #
       # Tests are excluded through a negated `files` pattern, and src/ IS shipped, so the two are
       # checked together: a pattern that stops excluding tests is otherwise invisible until
@@ -160,8 +161,8 @@ jobs:
           done
 
       # Vite injects its module-preload helper around dynamic imports as `const __vitePreload`,
-      # a fixed name, and inlines it into the emitting chunk. build.lib suppresses that - both
-      # packages set it - and this holds the line: a consumer bundling a dist that carries the
+      # a fixed name, and inlines it into the emitting chunk. build.lib suppresses that - every
+      # package sets it - and this holds the line: a consumer bundling a dist that carries the
       # helper declares a second one in the same scope, and on Vite 8 that is a hard parse error
       # in their build rather than in this one.
       - name: Check the packed packages carry no Vite internals

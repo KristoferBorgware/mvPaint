@@ -10,7 +10,7 @@
 // until someone remembers to re-run the tool AND re-copy. This turns "someone remembers" into a
 // failing test, for the one application this repository has.
 //
-//   npx vitest run packages/scripts/textgen/polygon/polygonAtlas.test.ts
+//   npx vitest run packages/fontgen/src/polygonAtlas.test.ts
 
 import { expect, it } from 'vitest'
 import { readdir, readFile } from 'node:fs/promises'
@@ -19,14 +19,18 @@ import { fileURLToPath } from 'node:url'
 import { compress } from 'wawoff2'
 import { TtfFont } from '@mvpaint/ttf'
 import { PolygonFont, POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
-import { buildPolygonAtlas } from './genPolygonAtlas'
-import { DEFAULT_CHARSET } from '../charset'
-import { FONT_SRC, readFontFaces, toSfnt } from '../fontSources'
+import { buildPolygonAtlas } from './polygonAtlas'
+import { DEFAULT_CHARSET } from './charset'
+import { readFontFaces, toSfnt } from './fontSources'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-// The example app's copy: the committed artifact, and the only one there is now that the
-// generator writes to a gitignored out/.
-const ATLAS_DIR = join(HERE, '..', '..', '..', 'example-app', 'public', 'fonts', 'polygons')
+// This repository's own font library, which is what the package's `npm run gen:*` scripts read
+// and what the example app's atlases were generated from. It is not part of the published
+// package - a consumer points --fonts at a folder of their own.
+const FONTS_DIR = join(HERE, '..', 'fonts')
+// The example app's copy: the committed artifact, and the only one there is, since a run writes
+// to a gitignored out/.
+const ATLAS_DIR = join(HERE, '..', '..', 'example-app', 'public', 'fonts', 'polygons')
 
 /**
  * Every check in this file goes through here, so each one reads as the sentence it is making
@@ -37,7 +41,7 @@ function assert(cond: boolean, msg: string): void {
 }
 
 const fontData = async (name: string): Promise<ArrayBuffer> => {
-  const bytes = await readFile(join(FONT_SRC, name))
+  const bytes = await readFile(join(FONTS_DIR, name))
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
@@ -178,14 +182,14 @@ it('a face drawn from several files draws the same glyphs as one file would', as
 // chosen. A copied atlas going stale is what this catches - the face it was generated from
 // changing, the charset widening, the tolerance moving.
 it('the atlases the app has copied in are the ones this tool produces', async () => {
-    const { faces } = await readFontFaces()
+    const { faces } = await readFontFaces(FONTS_DIR)
     const copied = (await readdir(ATLAS_DIR)).filter((name) => name.endsWith('.polygons.json'))
     assert(copied.length > 0, 'the app has atlases copied in')
 
     for (const name of copied) {
       const base = name.slice(0, -'.polygons.json'.length)
       const face = faces.find((candidate) => candidate.base === base)
-      assert(face !== undefined, `${name} has a face in ${FONT_SRC} to have been generated from`)
+      assert(face !== undefined, `${name} has a face in ${FONTS_DIR} to have been generated from`)
 
       const rebuilt = `${JSON.stringify(await buildPolygonAtlas(base, face!.sources))}\n`
       const committed = await readFile(join(ATLAS_DIR, name), 'utf8')

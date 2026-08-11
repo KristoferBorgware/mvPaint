@@ -1232,10 +1232,10 @@ and casts a blurred shadow baked from the letterforms.
 
 Both paths read **generated assets** and neither parses a font file. The engine's dependency
 list is `earcut` alone; turning a `.ttf` into something drawable happens offline in
-`packages/scripts`.
+`@mvpaint/fontgen`.
 
 **Both are the application's, and only one has a fallback.** Atlases are generated from font
-files by `packages/scripts`, which enumerates a folder of them and writes to an output folder of
+files by `@mvpaint/fontgen`, which enumerates a folder of them and writes to an output folder of
 its own; copying what an application draws with into its own asset folder is a deliberate step.
 From there:
 
@@ -1719,7 +1719,7 @@ unchanged; only step 4 runs again, and only for that one slot.
 | Text shaping | `text/layout.ts`, `text/textQuad.ts`, `text/textPath.ts` |
 | One style for a whole string | `shapes/singleRun.ts`, `shapes/UniformMSDFText.ts`, `shapes/UniformVectorText.ts` |
 | Where glyphs come from | `text/msdfMetrics.ts`, `text/msdfProvider.ts`, `text/PolygonFont.ts`, `text/vectorGlyphs.ts` |
-| Generating those assets | `packages/scripts/textgen/msdf/`, `packages/scripts/textgen/polygon/`, `textgen/fontSources.ts` |
+| Generating those assets | `packages/fontgen/src/msdfAtlas.ts`, `polygonAtlas.ts`, `fontSources.ts`, `generate.ts` |
 | An application supplying them | `webgpu/MSDFFontBook.ts`, `webgl/GlMSDFFontBook.ts`, `packages/example-app/src/fonts/` |
 | Parsing a font at runtime | `packages/ttf/` (opt-in; not a dependency of the engine) |
 | Buffer formats | `render/meshFormat.ts`, `textFormat.ts`, `imageFormat.ts`, `shadowFormat.ts` |

@@ -4,10 +4,10 @@ dist-ssr
 *.local
 .vite
 
-# What the font generators write. Deliberately not committed: an atlas is an application's
-# asset, and copying the ones you want out of here into your own font folder is the step that
-# makes that true. See packages/scripts/textgen/README.md.
-packages/scripts/textgen/out
+# What @mvpaint/fontgen writes. Deliberately not committed: an atlas is an application's asset,
+# and copying the ones you want out of here into your own font folder is the step that makes
+# that true. See packages/fontgen/README.md.
+packages/fontgen/out
 
 # Editor
 .vscode/*
@@ -24,16 +24,17 @@ vite.config.js
 # only exists if a pack died halfway - in which case package.json is still the stripped copy and
 # neither file should be committed.
 package.json.prepack-backup
-# The generators' input folder is a font library a developer fills, downloaded rather than
-# authored, so it stays out of the repository.
-packages/scripts/textgen/fonts/*.woff2
-packages/scripts/textgen/fonts/*.ttf
+# This repository's own font library, which @mvpaint/fontgen's npm scripts read. It is a folder
+# a developer fills, downloaded rather than authored, and it is not part of the published
+# package, so it stays out of the repository.
+packages/fontgen/fonts/*.woff2
+packages/fontgen/fonts/*.ttf
 
 # Except the four Inter faces the repository itself needs: packages/ttf's self-test and the
-# polygon atlas self-test parse them, the example app's Runtime TTF scene imports two of them,
-# and the atlases committed under packages/example-app/public/fonts/ are generated from them.
+# fontgen self-tests parse them, the example app's Runtime TTF scene imports two of them, and
+# the atlases committed under packages/example-app/public/fonts/ are generated from them.
 # Without these a fresh clone cannot run npm test or npm run dev.
-!packages/scripts/textgen/fonts/Inter-400-normal.ttf
-!packages/scripts/textgen/fonts/Inter-400-italic.ttf
-!packages/scripts/textgen/fonts/Inter-700-normal.ttf
-!packages/scripts/textgen/fonts/Inter-700-italic.ttf
+!packages/fontgen/fonts/Inter-400-normal.ttf
+!packages/fontgen/fonts/Inter-400-italic.ttf
+!packages/fontgen/fonts/Inter-700-normal.ttf
+!packages/fontgen/fonts/Inter-700-italic.ttf

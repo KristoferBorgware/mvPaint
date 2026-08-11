@@ -5,7 +5,7 @@
 // walk its contours. That answer was a quarter of a megabyte of parser in the bundle of every
 // application, whether or not it drew a single vector glyph - to do work that never changes
 // between runs. Flattening the letter 'A' of Inter Regular produces the same few hundred points
-// today as it will next year, so it is done ONCE, offline (see packages/scripts), and shipped
+// today as it will next year, so it is done ONCE, offline (see @mvpaint/fontgen), and shipped
 // as data: a polygon atlas, which is to this path what the MSDF PNG is to the other one.
 //
 // So the engine now reads glyph outlines from an atlas and nothing else. This module is the

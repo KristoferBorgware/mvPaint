@@ -49,8 +49,8 @@ font at runtime:
 - **Vector text** (`VectorText`) — real letterform geometry, tessellated from outlines. True
   blurred shadows and per-glyph picking, at the cost of triangles.
 
-**The fonts are yours.** Generate atlases from your own font files with `packages/scripts` in
-the repository, then supply them:
+**The fonts are yours.** Generate atlases from your own font files with `@mvpaint/fontgen`, then
+supply them:
 
 ```ts
 // MSDF: one entry per style, each a metrics JSON and a URL for its PNG.
@@ -99,7 +99,7 @@ nothing is fetched, no texture is uploaded, and `MSDFText` draws nothing until y
 partial: give it bold alone and the style ladder synthesizes the rest. Outlines work the same
 way — `VectorText` is always given its own.
 
-Generate atlases with [`@mvpaint/scripts`](https://github.com/KristoferBorgware/mvPaint/tree/master/packages/scripts)
+Generate atlases with [`@mvpaint/fontgen`](https://github.com/KristoferBorgware/mvPaint/tree/master/packages/fontgen)
 and serve them as your application's assets.
 [`packages/example-app`](https://github.com/KristoferBorgware/mvPaint/tree/master/packages/example-app)
 is a working example: its Inter set lives in `public/fonts/` and is fetched at runtime, so the

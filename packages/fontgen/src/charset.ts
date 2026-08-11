@@ -12,12 +12,11 @@
 //
 // WIDENING IT COSTS TEXTURE. The MSDF packer shrinks each page to the glyphs it was given, so
 // the page grows with the set: printable ASCII packs to around 300x300 and `latin` to around
-// 650x655. A page must stay under TEXTURE_SIZE in genMsdfAtlas.ts, and the engine samples one
+// 650x655. A page must stay under TEXTURE_SIZE in msdfAtlas.ts, and the engine samples one
 // page per style - the array layer of the shared atlas texture IS the style, so there is no
 // second page to address. The vector path has no such ceiling; its atlas is JSON.
 
 import { readFile } from 'node:fs/promises'
-import { flagFromArgv } from './argv'
 
 const range = (lo: number, hi: number): number[] => Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
 
@@ -47,7 +46,7 @@ const SYMBOLS = [0x2122, 0x2212]
 export const CHARSETS = {
   /** Printable ASCII and nothing else. */
   ascii: ASCII,
-  /** ASCII and Latin-1 Supplement. Every face in fonts/ draws all of it. */
+  /** ASCII and Latin-1 Supplement. Every face in this repository's fonts/ draws all of it. */
   latin1: [...ASCII, ...LATIN1_SUPPLEMENT],
   /**
    * Latin-1 plus Latin Extended-A, punctuation, currency and symbols. Coverage here is a
@@ -62,10 +61,10 @@ export type CharsetName = keyof typeof CHARSETS
 /**
  * What a run generates when it is told nothing.
  *
- * `latin1` rather than `ascii` because å, ä and ö are letters, not extras, and every face in
- * fonts/ draws the whole of it. It is also what the atlases committed under
- * packages/example-app/public/fonts/ were generated with, which the polygon self-test checks by
- * rebuilding them - so changing this constant means regenerating and re-copying them.
+ * `latin1` rather than `ascii` because å, ä and ö are letters, not extras. It is also what the
+ * atlases committed under packages/example-app/public/fonts/ were generated with, which the
+ * polygon self-test checks by rebuilding them - so changing this constant means regenerating
+ * and re-copying them.
  */
 export const DEFAULT_CHARSET_NAME: CharsetName = 'latin1'
 
@@ -117,11 +116,6 @@ export async function resolveCharset(spec?: string): Promise<readonly number[]> 
     codePoints.push(...range(lo, hi))
   }
   return normalize(codePoints)
-}
-
-/** The `--charset <spec>` / `--charset=<spec>` a run was started with, if any. */
-export function charsetFromArgv(argv: readonly string[]): string | undefined {
-  return flagFromArgv(argv, 'charset')
 }
 
 /** The set as the string msdf-bmfont-xml's `charset` and TtfFont.ensure() take. */

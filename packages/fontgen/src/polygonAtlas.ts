@@ -1,43 +1,30 @@
-// Offline generator: font files in, polygon atlas JSON out, one per face.
+// One face in, a polygon atlas out: its letterforms as flattened outlines.
 //
 // The vector text path draws real letterform geometry rather than sampling a distance field.
 // Flattening the 'A' of Inter Regular is a fixed computation with a fixed result, so this does
-// it once, here, and writes the result out as data the engine reads - no font parser and no
-// curve flattening in the browser.
+// it once, here, and hands back the result as data the engine reads - no font parser and no
+// curve flattening in the browser. An application gives the document to VectorText through the
+// VectorFonts interface, and the engine ships none of them.
 //
-//   npm run gen:polygons                        the default charset (see ../charset.ts)
-//   npm run gen:polygons -- --charset latin     a named set, code points, or @a file of characters
-//   npm run gen:polygons -- --fonts ./fonts --out ./atlases    read and write elsewhere
-//
-// Input is a FOLDER of font files, enumerated (see ../fontSources.ts) - this tool knows about no
-// particular typeface, and takes .ttf, .otf and .woff2 alike. Output goes to polygons/ under the
-// out folder, which is generated and gitignored: copying what you want into your application is
-// a deliberate step, because an outline atlas is the APPLICATION's asset. It hands it to
-// VectorText through the VectorFonts interface, and the engine ships none of them.
-//
-// WHAT IS IN A FILE. Per glyph: the flattened outline as closed rings of whole font units, the
-// box and advance the shaper needs, and nothing else. Per file: the em size, the vertical
+// WHAT IS IN A DOCUMENT. Per glyph: the flattened outline as closed rings of whole font units,
+// the box and advance the shaper needs, and nothing else. Per face: the em size, the vertical
 // metrics, the underline/strikethrough placement read from the font tables, and the non-zero
 // kerning pairs over the charset. The engine's PolygonFont reads exactly this and triangulates
 // each glyph the first time it is drawn.
 //
-// WHY IT IS NOT AN IMAGE. The MSDF tool next door packs glyph bitmaps into a texture; this one
-// has no texture to pack, because the point of the vector path is that there is no sampling
-// step at all. "Atlas" here means the same thing in the sense that matters: one file per face
-// holding every glyph the application can draw, generated ahead of time.
+// WHY IT IS NOT AN IMAGE. The MSDF generator next door packs glyph bitmaps into a texture; this
+// one has no texture to pack, because the point of the vector path is that there is no sampling
+// step at all. "Atlas" here means the same thing in the sense that matters: one document per
+// face holding every glyph the application can draw, built ahead of time.
 //
 // The extraction itself is @mvpaint/ttf's - the same code the runtime opt-in package uses - so
 // a glyph baked into an atlas and the same glyph parsed live are identical geometry, and the
 // self-test next to this file proves it rather than assuming it.
 
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { TtfFont, DEFAULT_CURVE_TOLERANCE_EM } from '@mvpaint/ttf'
 import type { PolygonFontJson, PolygonGlyphJson } from '@mvpaint/engine/core'
 import { POLYGON_ATLAS_FORMAT } from '@mvpaint/engine/core'
-import { DEFAULT_CHARSET, charsetText, charsetFromArgv, describeCharset, resolveCharset } from '../charset'
-import { displayPath, describeSources, fontSrcFromArgv, outDirFromArgv, readFontFaces, reportSkipped } from '../fontSources'
+import { DEFAULT_CHARSET, charsetText } from './charset'
 
 /** One file a face is drawn from. A face spread over subset files has several. */
 export interface PolygonSource {
@@ -166,42 +153,10 @@ function round(value: number): number {
   return rounded === 0 ? 0 : rounded
 }
 
-export async function main(argv: readonly string[] = process.argv): Promise<void> {
-  const spec = charsetFromArgv(argv)
-  const charset = await resolveCharset(spec)
-  const src = fontSrcFromArgv(argv)
-  const out = join(outDirFromArgv(argv), 'polygons')
-  const { faces, skipped } = await readFontFaces(charset, src)
-  await mkdir(out, { recursive: true })
-
-  console.log(`Fonts: ${displayPath(src)}`)
-  console.log(`Charset: ${describeCharset(spec, charset)}`)
-
-  for (const face of faces) {
-    process.stdout.write(`Generating ${face.base}.polygons.json ... `)
-
-    const atlas = await buildPolygonAtlas(face.base, face.sources, { charset })
-    const text = `${JSON.stringify(atlas)}\n`
-    await writeFile(join(out, `${face.base}.polygons.json`), text)
-
-    const points = atlas.glyphs.reduce(
-      (total, glyph) => total + (glyph.rings?.reduce((n, ring) => n + ring.length / 2, 0) ?? 0),
-      0,
-    )
-    const kb = (text.length / 1024).toFixed(0)
-    process.stdout.write(`ok (${atlas.glyphs.length} glyphs, ${points} points, ${atlas.kernings.length} kernings, ${kb} kB)\n`)
-    if (face.sources.length > 1) process.stdout.write(`  from ${describeSources(face)}\n`)
-  }
-
-  reportSkipped(skipped)
-  console.log(`Wrote ${faces.length} polygon atlases to ${displayPath(out)}`)
-  console.log('Copy the ones your application draws with into its own font folder.')
-}
-
-// Only when run as a tool: the self-test imports buildPolygonAtlas from here.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main().catch((err: unknown) => {
-    console.error(err)
-    process.exit(1)
-  })
+/** Points across every ring of every glyph: the size of the geometry an atlas carries. */
+export function countPoints(atlas: PolygonFontJson): number {
+  return atlas.glyphs.reduce(
+    (total, glyph) => total + (glyph.rings?.reduce((sum, ring) => sum + ring.length / 2, 0) ?? 0),
+    0,
+  )
 }

@@ -18,7 +18,7 @@ export default defineConfig({
     // window build a stub for exactly the handful of methods they drive, which is both faster
     // than a DOM implementation and honest about how little of one the engine needs.
     environment: 'node',
-    include: ['packages/*/src/**/*.test.ts', 'packages/scripts/textgen/**/*.test.ts'],
+    include: ['packages/*/src/**/*.test.ts'],
     // The suites are pure and share nothing, so they parallelise freely.
     isolate: true,
   },

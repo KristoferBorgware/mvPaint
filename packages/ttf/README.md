@@ -17,7 +17,7 @@ handle.scene.root.addChild(new VectorText({ fonts, text: 'Hello', style: { fontS
 ## When you want this, and when you do not
 
 `VectorText` normally draws from a **polygon atlas**: glyph outlines flattened once, offline
-(`@mvpaint/scripts`), and supplied by the application as data. That is the right default for any
+(`@mvpaint/fontgen`), and supplied by the application as data. That is the right default for any
 application whose fonts are known when it is built — it needs no parser at all, and the atlas is
 a fraction of the size of the font it came from. The engine ships neither, and no typeface of
 any kind.

@@ -102,7 +102,7 @@ npm test             # Vitest suite across all packages (no GPU required)
 npm run test:watch   # rerun affected tests on change
 npm run build        # build the packages, then the example app
 npm run typecheck    # tsc --noEmit across every package
-npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/assets
+npm run gen:fonts    # regenerate glyph atlases from the fonts in packages/fontgen/fonts
 npm run changeset    # describe a change for the next release (see Releasing)
 ```
 
@@ -450,7 +450,7 @@ Both read generated assets — a distance-field PNG for one, a polygon atlas of 
 for the other — so the engine ships no font parser. Its only dependency is `earcut`.
 
 **Fonts are the application's.** Generate atlases from your own font files with
-`packages/scripts`, keep them with your other assets, and register them under a name. The
+`@mvpaint/fontgen`, keep them with your other assets, and register them under a name. The
 renderer comes first, the fonts after it, the scene after those:
 
 ```ts
@@ -618,9 +618,9 @@ packages/engine        the renderer - no demo content, no framework, no font par
   src/systems/         render-path selection, canvas resolution, sizing, the handle interface
   src/webgpu/          SceneRenderer: the gather, the passes
   src/webgl/           the WebGL2 fallback
-packages/scripts       offline tools: font files in, glyph atlases out
-  fonts/               the input folder, enumerated - the Inter TTFs live here
-  out/                 what they write; gitignored, copied into an app by hand
+packages/fontgen       @mvpaint/fontgen: font files in, glyph atlases out, CLI and API
+  fonts/               this repository's font library - the Inter TTFs live here
+  out/                 what a run writes; gitignored, copied into an app by hand
 packages/ttf           opt-in: parse a TTF in the browser, for fonts unknown until runtime
 packages/example-app   a React host for the demo scenes; the engine depends on none of it
   src/fonts/           its own copy of the atlases, and the module that loads them

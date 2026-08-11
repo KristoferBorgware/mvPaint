@@ -1,4 +1,4 @@
-// MSDF glyph metrics: the raw BMFont/Hiero JSON shape (produced by scripts/genFontAtlas.ts)
+// MSDF glyph metrics: the raw BMFont/Hiero JSON shape (produced by @mvpaint/fontgen)
 // and its normalization into fast lookup structures. All metric values are in atlas pixels at
 // the generation em size (`size`); the layout scales them by (renderSize / size). Positions
 // follow BMFont's y-down convention (yoffset measured downward from the line top), which is
