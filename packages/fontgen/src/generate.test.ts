@@ -23,20 +23,35 @@ function assert(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true)
 }
 
+// Two copies of Inter Regular and one Bold. Every tie-break in the source ordering is a draw
+// between the two copies, so the last of them decides: the name. They differ at a letter rather
+// than at punctuation, whose order between two collations is not something a test should rest on.
+const PRIMARY = 'Inter-400-normal-a.ttf'
+const LOSER = 'Inter-400-normal-b.ttf'
+const BOLD = 'Inter-700-normal.ttf'
+
 /**
  * A three-file font folder in a temporary directory: two faces, and a third file that loses its
  * slot to one of them.
  *
- * Three rather than this repository's whole library, because every check here is about the
- * report rather than about the glyphs, and 33 faces of it would be the slowest test in the
- * suite by an order of magnitude. Space Grotesk ships several weights all naming themselves
- * Space Grotesk Regular, which is what makes the 300 a skipped file rather than a face.
+ * Three rather than the whole of fonts/, because every check here is about the report rather
+ * than about the glyphs, and 33 faces of it would be the slowest test in the suite by an order
+ * of magnitude.
+ *
+ * BUILT FROM THE FOUR INTER FACES ONLY - the ones a fresh clone has. The rest of fonts/ is
+ * gitignored, a library each developer fills for themselves, so a fixture naming any of it
+ * passes on the machine that downloaded it and fails everywhere else.
+ *
+ * The regular is copied twice under names that sort, which is the whole of what a file losing
+ * its slot is: two files claiming one family and style, the second drawing nothing the first
+ * does not already draw. A family shipping several weights that all name themselves Regular
+ * arrives at readFontFaces in exactly this shape.
  */
 async function fontFolder(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'mvpaint-fontgen-test-'))
-  for (const file of ['Inter-400-normal.ttf', 'Space-Grotesk-400-normal.ttf', 'Space-Grotesk-300-normal.ttf']) {
-    await copyFile(join(FONTS_DIR, file), join(dir, file))
-  }
+  await copyFile(join(FONTS_DIR, 'Inter-400-normal.ttf'), join(dir, PRIMARY))
+  await copyFile(join(FONTS_DIR, 'Inter-400-normal.ttf'), join(dir, LOSER))
+  await copyFile(join(FONTS_DIR, 'Inter-700-normal.ttf'), join(dir, BOLD))
   return dir
 }
 
@@ -56,14 +71,14 @@ it('a polygon run reports its faces, their files and where they were written', a
     assert(run.charset === ASCII, 'and which characters it covered')
 
     const faces = run.atlases.map((atlas) => atlas.face)
-    assert(faces.join() === 'inter-regular,space-grotesk-regular', 'both faces came out, in name order')
+    assert(faces.join() === 'inter-bold,inter-regular', 'both faces came out, in name order')
 
     const inter = run.atlases.find((atlas) => atlas.face === 'inter-regular')!
     assert(inter.family === 'inter' && inter.style === 'regular', 'the face is split into family and style')
     assert(inter.glyphs === ASCII.length, 'Inter draws all of ASCII')
     assert(inter.kernings > 0 && inter.points > 0 && inter.bytes > 0, 'the document is measured')
     assert(inter.atlas.face === 'inter-regular', 'the document itself comes back, not just numbers')
-    assert(inter.sources.length === 1 && inter.sources[0].file === 'Inter-400-normal.ttf', 'named by the file it was drawn from')
+    assert(inter.sources.length === 1 && inter.sources[0].file === PRIMARY, 'named by the file it was drawn from')
     assert(inter.sources[0].provides === ASCII.length, 'which draws the whole charset for it')
 
     // The path is the field a manifest is built from, so it has to name a file that is there.
@@ -81,8 +96,8 @@ it('a polygon run reports its faces, their files and where they were written', a
 })
 
 // The report a pipeline would otherwise have to scrape off stdout: which file lost a slot to
-// which. It is structured because "Space Grotesk 300 is not in your atlases" is a thing a build
-// wants to act on, not just print.
+// which. It is structured because "this face is not in your atlases" is a thing a build wants
+// to act on, not just print.
 it('a file that is in no atlas is reported with the file that took its place', async () => {
   const fontsDir = await fontFolder()
   try {
@@ -90,12 +105,12 @@ it('a file that is in no atlas is reported with the file that took its place', a
 
     assert(run.skipped.length === 1, 'one of the three files is in no atlas')
     const [skip] = run.skipped
-    assert(skip.file === 'Space-Grotesk-300-normal.ttf', 'the lighter weight is the one left out')
+    assert(skip.file === LOSER, 'the one that came second is the one left out')
     assert(skip.path === join(fontsDir, skip.file), 'named by full path as well')
-    assert(skip.face === 'space-grotesk-regular', 'and by the face it would have joined')
+    assert(skip.face === 'inter-regular', 'and by the face it would have joined')
     assert(skip.reason === 'already-drawn', 'because that face is already drawn')
-    assert(skip.drawnBy === 'Space-Grotesk-400-normal.ttf', 'by the weight nearest the style')
-    assert(skip.message.includes('Space-Grotesk-400-normal.ttf'), 'and the sentence a run prints says so too')
+    assert(skip.drawnBy === PRIMARY, 'by the file that took the slot')
+    assert(skip.message.includes(PRIMARY), 'and the sentence a run prints says so too')
   } finally {
     await rm(fontsDir, { recursive: true, force: true })
   }
