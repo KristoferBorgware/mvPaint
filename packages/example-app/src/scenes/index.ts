@@ -20,6 +20,7 @@ import { buildSvgLoadStressScene, prepareSvgLoadStressScene } from './svgLoadStr
 import { buildTextScene } from './textScene'
 import { buildUniformTextScene, prepareUniformTextScene } from './uniformTextScene'
 import { buildTransparencyScene } from './transparencyScene'
+import { buildTweenScene } from './tweenScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildTextPathScene, prepareTextPathScene } from './textPathScene'
 import { buildVectorTextStressScene, prepareVectorTextStressScene } from './vectorTextStressScene'
@@ -139,6 +140,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'Colour parsing, each accepted string form drawn next to the [r, g, b, a] tuple it should resolve to: hex in all four lengths, rgb()/rgba() and hsl()/hsla() in legacy and space-separated syntax, numbers or percentages, hue in deg/rad/turn, keywords, transparent. A parse error shows as a seam between two touching swatches rather than a number in a log. Below, the same strings in the other ColorInput positions - stroke, shadow, gradient stop, text fill and highlight.',
     build: buildColorScene,
+  },
+  {
+    id: 'tweens',
+    title: 'Tweening',
+    description:
+      "Attributes carried over time. Every curve plotted from the same function the tween reads, each with a runner tracing it - and each runner is two tweens on one node, since x runs linearly while y runs through the curve. Then eight kinds of attribute animated one per cell (rotation, scale, opacity, fill, strokeWidth, cornerRadius, radius, a dash marching by restarting itself on finish), the values that are not numbers (a gradient's stops and geometry, and a points list resampled from three points to eight so the new ones grow out of the line rather than fly in), and the ends: to() chaining into its next leg from its own onFinish, and a second tween taking x off the first while the first keeps y. The scene steps a ticker of its own from onFrame, so the speed control scales the whole thing and 0 holds it still.",
+    build: buildTweenScene,
   },
   {
     id: 'opacity',

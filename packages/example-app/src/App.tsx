@@ -27,6 +27,9 @@ import CloseIcon from '@mui/icons-material/Close'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import RestartAltIcon from '@mui/icons-material/RestartAlt'
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera'
+import FitScreenIcon from '@mui/icons-material/FitScreen'
+import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong'
+import HomeIcon from '@mui/icons-material/Home'
 import { describeAdapter, Shape, type RendererAdapter, type TransformableNode } from '@mvpaint/engine'
 import { WebGPUCanvas, type WebGPUCanvasHandle } from './components/WebGPUCanvas'
 import { ScenePicker } from './components/ScenePicker'
@@ -200,6 +203,50 @@ export default function App() {
                   it. It's a second render rather than a copy of the canvas, so the image can be
                   any size and any region - and the selection frame is left out of it, since
                   handles aren't part of the drawing.
+                </Typography>
+              </Stack>
+
+              {/* Camera flights. The view is animated as a VIEW - a centre and a zoom that
+                  travels geometrically - rather than through the camera's own x/y/zoom, which
+                  are the corner of the view rectangle and a scale factor. */}
+              <Stack spacing={0.5}>
+                <Typography variant="body2" color="text.secondary">
+                  Camera
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<FitScreenIcon />}
+                    onClick={() => canvasRef.current?.flyTo('scene')}
+                  >
+                    Fit scene
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={selected.length === 0}
+                    startIcon={<CenterFocusStrongIcon />}
+                    onClick={() => canvasRef.current?.flyTo('selection')}
+                  >
+                    Fit selection
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<HomeIcon />}
+                    onClick={() => canvasRef.current?.flyTo('home')}
+                  >
+                    Home
+                  </Button>
+                </Stack>
+                <Typography variant="caption" color="text.secondary">
+                  Flies the camera rather than jumping it. The zoom travels through its
+                  logarithm, so every moment of the flight magnifies by the same ratio - a
+                  straight line through a scale factor does almost all its visible work in the
+                  first half. Fitting also turns the view upright, and caps the magnification at
+                  8× so framing one small shape doesn't fly into it. Touching the canvas stops a
+                  flight; pressing another button redirects it from wherever it had got to.
                 </Typography>
               </Stack>
 

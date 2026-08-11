@@ -24,6 +24,7 @@ export * from './math/Vector3'
 export * from './math/Vector4'
 
 export * from './camera/Camera2D'
+export * from './camera/cameraTween'
 
 export * from './events/NodeEvent'
 export * from './events/eventNames'
@@ -54,6 +55,11 @@ export * from './shapes/VectorText'
 export * from './shapes/singleRun'
 export * from './shapes/UniformMSDFText'
 export * from './shapes/UniformVectorText'
+
+export * from './tween/Tween'
+export * from './tween/TweenTimeline'
+export * from './tween/easings'
+export * from './tween/ticker'
 
 export * from './render/nonzero'
 export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from './render/meshFormat'

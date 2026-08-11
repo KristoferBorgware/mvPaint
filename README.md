@@ -466,6 +466,93 @@ generation, loading, shaping, both render paths, and runtime font switching — 
 `loadSvg()` parses a document into `Path` nodes, flattening curves and carrying across fills,
 gradients and strokes.
 
+## Animation
+
+`node.to()` animates attributes and starts immediately:
+
+```ts
+import { Easings } from '@mvpaint/engine'
+
+box.to({ x: 400, rotation: 90, fill: 'tomato', duration: 0.6, easing: Easings.BackEaseOut })
+```
+
+Every key that is not a setting — `duration` (seconds, default 0.3), `easing`, `yoyo`, the
+handlers, `ticker` — is one of the node's own attributes, so anything `getAttr`/`setAttr` reaches
+can be animated: `x`, `rotation`, `opacity`, `strokeWidth`, `radius`, `dash`, `points`, the
+gradient geometry and stops. A key the node does not declare throws when the tween is built.
+
+`Tween` is the same thing kept: it can be paused, reversed, seeked and replayed, where `to()`
+destroys itself at the finish.
+
+```ts
+const pulse = new Tween({ node: dot, duration: 0.8, yoyo: true, scaleX: 1.4, scaleY: 1.4 })
+pulse.play()      // .pause() .reverse() .seek(0.4) .reset() .finish() .destroy()
+```
+
+**Attributes have one owner.** Starting a tween on an attribute takes it from whichever tween
+was writing it, and that tween carries on with the rest of its own — so fading a shape out while
+a half-finished move is running leaves the move running.
+
+**Colours mix in the engine's `[r, g, b, a]` tuple**, channel by channel, and a fill animated
+to or from `null` — no fill at all — travels through its own colour at zero alpha rather than
+through black. A `points` list growing or shrinking has its new points start on the outline they
+are joining, so a line looks like it is growing rather than exploding.
+
+**The frame drives itself.** Playing a tween starts an animation frame loop that stops when the
+last one does, so an application need not know the ticker exists. One that already has a frame
+can take it over, which puts the animation in the same frame as the draw that shows it:
+
+```ts
+driveTweens(handle)
+```
+
+### Animating the camera
+
+The camera is not a node, but it exposes the same attribute seam, so `camera.to()` animates its
+own fields — `x`, `y`, `zoom`, `rotation` — like any other attribute.
+
+For a pan-and-zoom, say it as a **view** instead:
+
+```ts
+const viewport = { width: canvas.clientWidth, height: canvas.clientHeight }
+
+cameraTween(camera, viewport, { center: { x: 400, y: 300 }, zoom: 4, duration: 0.8 }).play()
+```
+
+Three things separate that from tweening the fields, and none is about tweening. `x`/`y` are the
+view's **top-left corner**, so holding them still across a zoom slides the content sideways —
+`center` is what a caller means by where the camera is looking. `zoom` is a scale factor, where a
+straight line spends most of its time at the near end; the view tween moves through its logarithm,
+so every moment magnifies by the same ratio. It also cannot drive the zoom through zero, which a
+linear tween under an overshooting curve can.
+
+And the pan and the zoom are **not independent**. How fast content crosses the screen is its
+world-space speed times the zoom, so a centre moving in a straight line through world space
+crosses the screen at a rate that varies by the flight's whole zoom ratio — flying in eightfold,
+the pan is eight times faster at the end than at the start, which reads as *the zoom happening
+first and the pan tacked on after it*. So the centre is placed from the zoom rather than from the
+clock, holding the screen speed constant and making the two finish together:
+
+```
+c(t) = c0 + (c1 - c0) · (w(t) - w0) / (w1 - w0)      where w = 1 / zoom
+```
+
+`pan: 'world'` opts back into the straight line for a caller who wants a steady rate through the
+scene rather than across the view. No easing can substitute for either: one curve applied to both
+leaves their ratio exactly as it was.
+
+`viewForBounds()` turns a world box into that centre and zoom, and `zoomCameraAbout()` zooms while
+holding the world point under a viewport pixel exactly where it is — the pointer gestures' rule,
+animated:
+
+```ts
+cameraTween(camera, viewport, { ...viewForBounds(node.getClientRect(), viewport, 40) }).play()
+zoomCameraAbout(camera, viewport, event.offsetX, event.offsetY, camera.zoom * 2).play()
+```
+
+Every view tween on one camera shares a target, so interrupting a flight halfway starts the new
+one from where the camera actually got to rather than leaving two tweens writing it.
+
 ## Render paths
 
 `createSceneRenderer()` uses WebGPU and falls back to a separate WebGL2 implementation only when
@@ -506,6 +593,7 @@ packages/engine        the renderer - no demo content, no framework, no font par
   src/shapes/          Node, Container, Group, Layer, Shape and the concrete shapes
   src/render/          buffer formats, batchers, pipelines, WGSL, draw order
   src/text/            the shaper, the MSDF fallback atlas, and the polygon atlas reader
+  src/tween/           attribute animation: the curves, the timeline, the frame it steps on
   src/input/           the pointer dispatcher and the 'view'/'editor' bindings over it
   src/scene/           the scene graph, plus picking, culling and marquee selection
   src/systems/         render-path selection, canvas resolution, sizing, the handle interface

@@ -46,6 +46,7 @@ Sources are in `docs/mermaid/` — see [docs/README.md](docs/README.md).
 - [Scene graph](#scene-graph)
 - [Geometry](#geometry)
 - [The frame](#the-frame)
+- [Animation](#animation)
 - [The gather](#the-gather)
 - [Passes and draw order](#passes-and-draw-order)
 - [Buffers and records](#buffers-and-records)
@@ -578,6 +579,95 @@ Startup lives in `createSceneRenderer()` and `webgpu/index.ts`: resolve the canv
 device, subscribe to `uncapturederror` (an invalid pipeline does not throw — it poisons the
 command buffer and leaves the canvas blank), load the MSDF atlases, then build the renderer
 inside a validation error scope.
+
+---
+
+## Animation
+
+`src/tween/` writes attributes over time. It sits entirely above the render: a tween assigns
+`node.x`, and everything the renderer already does about a moved node — the epoch bump, the
+per-object record refresh — happens exactly as it would for an assignment made by hand. Nothing
+below the scene graph knows a tween exists.
+
+**Three layers.** `easings.ts` is arithmetic — `(elapsed, begin, change, duration) => value`,
+with no state. `TweenTimeline.ts` is the clock and the state machine: where in the duration it
+is, which way it is going, and the easing that turns that into a position between 0 and 1.
+`Tween.ts` is what binds a position to a node, holding one track per attribute.
+
+**Time is supplied, never sampled.** A timeline is stepped with a ticker's milliseconds
+(`ticker.ts`) rather than reading `Date.now()` itself, so every tween in a scene shares one
+notion of when *now* is, and a test advances the ticker by hand and gets exactly the frame a
+browser would have drawn. The ticker drives itself off `requestAnimationFrame` while anything is
+running and schedules nothing when nothing is; `driveTweens(handle)` hands that job to the
+renderer's own frame instead, which puts the write and the draw that shows it in the same frame.
+
+**A track per attribute, built once.** Both ends are read when the tween is constructed and held
+for its life, which is what makes `reset()`, `reverse()` and yoyo meaningful — the tween is not
+re-reading a node it has itself been changing. `interpolate.ts` decides what "half way" means
+from the shape of the value: a number is a subtraction, a colour is four channels of the engine's
+`[r, g, b, a]` tuple, a gradient is stops of offset plus colour, and a `points` list of a
+different length is resampled by projecting the longer list's points onto the shorter's outline,
+so new points slide out of the shape they are joining rather than flying in from the origin.
+
+**One tween owns an attribute.** Two tweens writing `x` each frame would resolve by whichever
+ran last, so starting a tween on an attribute takes it from the tween that had it, which carries
+on with the rest of its own. Ownership lives in a `WeakMap` keyed by node, so a discarded node
+leaves nothing behind.
+
+**The ends are crossed, not touched.** A frame landing exactly on the duration shows the finish
+value; the next one ends the timeline and fires `onFinish`. Stopping on the boundary would end a
+timeline the moment it was played, since `play()` applies its first value at elapsed zero — which
+for a reversed timeline is precisely the boundary at the other end.
+
+**The target is not necessarily a node.** A tween asks its target for four things (`TweenTarget`:
+a name, `attributeNames()`, `getAttr`, `setAttr`) and never for a transform, a parent or an event,
+so anything with that seam can be animated. `Camera2D` has it — as prototype members, so a
+camera's own properties are still only its six view parameters.
+
+### Animating a view
+
+`camera/cameraTween.ts` exists because the camera's fields are the wrong things to interpolate for
+a pan-and-zoom, for reasons that predate any tween. `x`/`y` are the view's **top-left corner**, so
+holding them still while the zoom changes slides the content sideways — the rectangle grows from
+that corner. And `zoom` is a scale factor: a straight line from 1 to 8 passes 4 after seven
+eighths of the animation, so almost all the visible approach happens in the first moments.
+
+The third reason is the one that decides whether a flight reads as one movement or as two. **The
+pan and the zoom are not independent**: screen-crossing speed is world-space speed times the zoom,
+so a centre travelling in a straight line through world space crosses the view at a rate varying
+by the flight's whole zoom ratio. Flying in eightfold, the pan is eight times faster at the end
+than at the start, and the eye reads the slow part as no pan at all — "it zoomed, then it panned".
+Holding the screen speed constant means the centre has to be an affine function of `1/zoom`
+rather than of time:
+
+```
+c(t) = c0 + (c1 - c0) · (w(t) - w0) / (w1 - w0)      where w = 1 / zoom
+```
+
+That cannot be had by easing the flight differently — the zoom and the centre need *different*
+curves, and one curve applied to both leaves their ratio untouched. So under `pan: 'screen'` (the
+default) the centre is not a tracked attribute at all: it is placed from wherever the zoom has got
+to, on each update. `pan: 'world'` tracks it normally and gives the straight line.
+
+So the module tweens a **view** — a centre, a zoom held as `log2`, and a rotation — through a
+target that adapts a camera and a viewport. Three things fall out of it:
+
+- **Order independence.** The camera stays the only state; each write reads it, changes one thing
+  and puts the rest back. Writing the zoom holds the centre, writing the centre uses whatever the
+  zoom now is, so the frame lands identically whichever order the tween happens to write in.
+- **A zoom that cannot degenerate.** Two raised to anything is positive, so an overshooting curve
+  cannot drive the zoom to zero and leave the projection dividing by it.
+- **Clean interruption.** The view target is memoized per camera, so ownership works across
+  separate calls: a second flight takes the centre and zoom off the first, which then has nothing
+  to write, and the new one starts from wherever the camera actually got to. A derived centre has
+  no tracked attribute for that to happen to, so the newest flight per camera is recorded and an
+  older one checks whether it is still the one before placing anything.
+
+`viewForBounds()` is a pure "zoom to fit" — a box and a viewport in, a centre and a zoom out — kept
+separate so framing composes with the tween rather than being a flag on it. `zoomCameraAbout()` is
+the one case a straight line between two views cannot express: it tweens the zoom alone and re-pins
+the anchor from `onUpdate`, holding a world point under a viewport pixel for the whole flight, by
+the same read-once rule the pointer gestures follow.
 
 ---
 
@@ -1610,6 +1700,8 @@ unchanged; only step 4 runs again, and only for that one slot.
 | --- | --- |
 | Nodes, transforms, events | `shapes/Node.ts`, `Shape.ts`, `Group.ts`, `Layer.ts`, `Container.ts`, `events/` |
 | The view: pan, zoom, rotate | `camera/Camera2D.ts`, `input/viewport.ts`, `input/cameraControls.ts` |
+| Animating attributes | `tween/Tween.ts`, `tween/TweenTimeline.ts`, `tween/easings.ts`, `tween/interpolate.ts`, `tween/ticker.ts` |
+| Animating the view | `camera/cameraTween.ts` |
 | Geometry per shape | `shapes/Rect.ts`, `Circle.ts`, `Polyline.ts`, `Path.ts`, `Image.ts` |
 | Shapes you write yourself | `shapes/CustomShape.ts`, `shapes/ShapeContext.ts` |
 | Stroking, contours, SVG flattening | `render/stroke.ts`, `render/contours.ts`, `svg/flattenPath.ts` |

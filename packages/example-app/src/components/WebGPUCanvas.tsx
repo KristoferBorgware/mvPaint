@@ -1,19 +1,27 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import Stats from 'stats.js'
 import {
+  cameraTween,
   createSceneRenderer,
   Camera2D,
+  Easings,
   Group,
+  MSDFText,
   Shape,
   Transformer,
+  type ClientRect,
+  type EasingFunction,
   type TransformableNode,
   type Node,
   type RendererAdapter,
   type Scene,
   type SceneRendererHandle,
   type SceneResources,
+  type Tween,
+  type TweenTarget,
 } from '@mvpaint/engine'
 import { CullBoundsOverlay } from '../webgpu/cullBoundsOverlay'
+import { fitPlan, sceneContent, unionBounds, type FlightPlan } from '../webgpu/cameraFlight'
 import { loadMsdfAtlases } from '../fonts'
 import type { ExampleScene, SceneContent } from '../scenes'
 
@@ -24,6 +32,9 @@ const ZOOM_REPORT_INTERVAL_MS = 100
 
 /** The zoom every scene is laid out to be seen at: one world unit per CSS pixel. */
 const DEFAULT_ZOOM = 1
+
+/** How long a camera flight takes, in seconds. What it aims at is in webgpu/cameraFlight.ts. */
+const FLIGHT_SECONDS = 0.7
 
 /**
  * Puts the view back where every example scene expects to be looked at from: the world origin
@@ -89,9 +100,30 @@ interface WebGPUCanvasProps {
   onSelectionChange?: (nodes: readonly TransformableNode[]) => void
 }
 
+/** Where a camera flight is aimed - see WebGPUCanvasHandle.flyTo. */
+export type FlightTarget = 'scene' | 'selection' | 'home'
+
 export interface WebGPUCanvasHandle {
   /** Clears the current selection (and its transformer) the same way Escape does. */
   clearSelection: () => void
+  /**
+   * Animates the camera to frame the whole scene, the current selection, or the origin at 1x.
+   *
+   * The view is tweened as a VIEW - a centre and a zoom that travels geometrically - rather than
+   * through the camera's own x/y/zoom, which are the corner and a scale factor (see
+   * cameraTween). Editor furniture is left out of what gets framed: fitting "the scene" to a
+   * box that included the selection frame would mean the fit depended on what was selected.
+   *
+   * Only a flight already running is stopped by the next one, and by the user touching the
+   * canvas - a view that keeps gliding while somebody is trying to pan it is a view fighting
+   * its owner.
+   *
+   * `duration` and `easing` are the two things worth tasting rather than arguing about; the
+   * defaults are 0.7 seconds and EaseInOut. What they do NOT decide is whether the pan and the
+   * zoom read as one movement - that is the pan space, and it is the engine's default (see
+   * cameraTween).
+   */
+  flyTo: (target: FlightTarget, settings?: { duration?: number; easing?: EasingFunction }) => void
   /**
    * Captures the current view offscreen and hands back the encoded PNG.
    *
@@ -149,6 +181,9 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
   // middle instead; a document editor would more likely keep the default and lay its page
   // out from (0, 0) downward.
   const cameraRef = useRef(new Camera2D())
+  // The flight currently in the air, so the next one - or the user grabbing the canvas - can
+  // stop it. A finished flight leaves this holding a destroyed tween, which is inert.
+  const flightRef = useRef<Tween<TweenTarget> | null>(null)
   const speedRef = useRef(speed)
   const uniformCornerScaleRef = useRef(uniformCornerScale)
   const onZoomChangeRef = useRef(onZoomChange)
@@ -203,6 +238,13 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       const sceneGraph = sceneGraphRef.current
       const handle = handleRef.current
       if (!sceneGraph || !resourcesRef.current) return
+
+      // A flight aimed at the outgoing scene has nothing left to frame, and would fly the view
+      // away from where the new scene expects to be looked at from a frame after it was put
+      // there. Written through the ref rather than through cancelFlight(), which is declared
+      // below this callback.
+      flightRef.current?.destroy()
+      flightRef.current = null
 
       if (replace && handle) {
         // Drop the selection first: the frame holds references to nodes that are about to
@@ -291,10 +333,64 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       })
   }, [])
 
+  /**
+   * The world box a flight should frame: the scene's own content, or the current selection.
+   *
+   * Furniture is excluded by the same rule a scene switch clears by - the engine's selection
+   * frame and marquee, plus this app's debug overlay, are the editor rather than the drawing.
+   * Text is measured through the renderer, since an MSDFText's glyphs live in an atlas the
+   * renderer owns and the node cannot reach one.
+   */
+  const boundsToFrame = useCallback((target: 'scene' | 'selection'): ClientRect | null => {
+    const handle = handleRef.current
+    const graph = sceneGraphRef.current
+    if (!handle || !graph) return null
+
+    const boundsOf = (node: Node) => (node instanceof MSDFText ? handle.localBoundsOf(node) : null)
+    if (target === 'selection') return unionBounds(handle.input?.selection ?? [], graph.root, boundsOf)
+
+    const furniture = new Set<Node>(
+      [...(handle.input?.nodes ?? []), cullBoundsOverlayRef.current].filter((n): n is Node => n !== null),
+    )
+    return unionBounds(sceneContent(graph.root.children, furniture), graph.root, boundsOf)
+  }, [])
+
+  /** Stops whatever flight is in the air. Safe at any time; a finished flight is already inert. */
+  const cancelFlight = useCallback(() => {
+    flightRef.current?.destroy()
+    flightRef.current = null
+  }, [])
+
   useImperativeHandle(
     ref,
     () => ({
       clearSelection: () => handleRef.current?.input?.clearSelection(),
+      flyTo: (target: FlightTarget, settings: { duration?: number; easing?: EasingFunction } = {}) => {
+        const handle = handleRef.current
+        const canvas = canvasRef.current
+        if (!handle || !canvas) return
+        // Read each frame rather than captured: a window resized mid-flight would otherwise
+        // aim the last part of it at a viewport that no longer exists.
+        const viewport = () => ({ width: canvas.clientWidth, height: canvas.clientHeight })
+
+        let destination: FlightPlan
+        if (target === 'home') {
+          destination = { center: { x: 0, y: 0 }, zoom: DEFAULT_ZOOM, rotation: 0 }
+        } else {
+          const box = boundsToFrame(target)
+          if (!box) return
+          destination = fitPlan(box, viewport())
+        }
+
+        cancelFlight()
+        const flight = cameraTween(handle.camera, viewport, {
+          ...destination,
+          duration: settings.duration ?? FLIGHT_SECONDS,
+          easing: settings.easing ?? Easings.EaseInOut,
+        })
+        flightRef.current = flight
+        flight.play()
+      },
       // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the body reports its
       // own failures through onError; nothing is left for a caller to catch.
       captureSnapshot: async (pixelRatio = 2) => {
@@ -316,8 +412,27 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
         }
       },
     }),
-    [],
+    [boundsToFrame, cancelFlight],
   )
+
+  /**
+   * Taking hold of the canvas ends any flight in progress.
+   *
+   * Capture phase, so it runs before the engine's own pointer handling rather than after
+   * whatever that does with the event - and on the element itself rather than through React,
+   * which delegates from the root and would hear about it too late to matter.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const stop = () => cancelFlight()
+    canvas.addEventListener('pointerdown', stop, { capture: true })
+    canvas.addEventListener('wheel', stop, { capture: true, passive: true })
+    return () => {
+      canvas.removeEventListener('pointerdown', stop, { capture: true })
+      canvas.removeEventListener('wheel', stop, { capture: true })
+    }
+  }, [backend, cancelFlight])
 
   // Initialize the renderer once, on mount.
   useEffect(() => {
@@ -438,6 +553,10 @@ export const WebGPUCanvas = forwardRef<WebGPUCanvasHandle, WebGPUCanvasProps>(fu
       cancelled = true
       transformerRef.current = null
       cullBoundsOverlayRef.current = null
+      // A flight outlives the renderer otherwise: it is driven by the tween ticker's own
+      // animation frame, not by this one, so nothing here would ever stop it.
+      flightRef.current?.destroy()
+      flightRef.current = null
       // Before the handle goes: the scene's textures are released through the device that is
       // about to be destroyed, so this has to happen while there still is one.
       contentRef.current.dispose?.()

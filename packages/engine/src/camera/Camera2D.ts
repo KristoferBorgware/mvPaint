@@ -40,6 +40,7 @@ import { Matrix4x4 } from '../math/Matrix4x4'
 import { Ray } from '../math/Ray'
 import { Vector3 } from '../math/Vector3'
 import { Vector4 } from '../math/Vector4'
+import { startTween, type Tween, type TweenSettings } from '../tween/Tween'
 
 export interface Camera2DOptions {
   /** World point at the viewport's top-left corner. Default (0, 0). */
@@ -76,6 +77,58 @@ export class Camera2D {
     this.y = options.y ?? 0
     this.zoom = options.zoom ?? 1
     this.rotation = options.rotation ?? 0
+  }
+
+  // --- the attribute seam ------------------------------------------------------------------
+  //
+  // The same four members a Node offers (see TweenTarget), so a camera can be animated,
+  // inspected or serialized by code that knows nothing about cameras. It is the four FIELDS and
+  // nothing derived: `nearZ`/`farZ` keep the projection well-formed rather than describing the
+  // view, and a centre is not a field at all - it depends on the viewport, which a camera
+  // deliberately does not know (see camera/cameraTween.ts, which is where a centre and a
+  // geometric zoom live).
+
+  /**
+   * What a camera is called in an error message. Named for the seam it satisfies.
+   *
+   * A getter rather than a field, so it lives on the prototype: a camera's own properties are
+   * its six view parameters and nothing else, which is a claim anything enumerating one relies
+   * on (see camera.test.ts).
+   */
+  get nodeName(): string {
+    return 'Camera2D'
+  }
+
+  attributeNames(): readonly string[] {
+    return ['x', 'y', 'zoom', 'rotation']
+  }
+
+  getAttr(key: string): unknown {
+    return (this as unknown as Record<string, unknown>)[key]
+  }
+
+  setAttr(key: string, value: unknown): this {
+    ;(this as unknown as Record<string, unknown>)[key] = value
+    return this
+  }
+
+  /**
+   * Animates the camera's own fields and starts immediately - the fire-and-forget form, the same
+   * as `Node.to()`.
+   *
+   * ```ts
+   * camera.to({ x: 120, y: -40, zoom: 2, duration: 0.6, easing: Easings.EaseInOut })
+   * ```
+   *
+   * The fields move LINEARLY, like any other attribute, which is right when a caller has already
+   * worked out where the corner should end up and wrong for the usual "fly to here and zoom in":
+   * x/y name the view's top-left corner rather than what it is looking at, so they slide sideways
+   * as the zoom changes, and zoom itself is a scale factor, where a straight line spends most of
+   * its time at the near end. `cameraTween()` is the same animation said the other way, and is
+   * what a pan-and-zoom should normally use.
+   */
+  to(settings: TweenSettings): Tween<this> {
+    return startTween(this, settings)
   }
 
   /** The world rectangle's size at the current zoom, for a viewport of this CSS size. */

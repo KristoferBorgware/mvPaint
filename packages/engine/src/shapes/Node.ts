@@ -44,6 +44,10 @@
 // node joins. Delegation is no substitute - the wrapped handler runs when the event reaches the
 // ancestor it was registered on, which for these is never.
 //
+// to() animates any of those attributes over time - `node.to({ x: 400, duration: 0.5 })` - and
+// is the fire-and-forget face of tween/Tween.ts, which is what a repeatable or reversible
+// animation is built from directly.
+//
 // The compound accessors - position, scale, skew, offset, size and absolutePosition - read and
 // write the components above in pairs. They are deliberately NOT in attrKeys(): attrs is a
 // snapshot of the backing fields, and a compound listed there would report every value twice
@@ -85,6 +89,7 @@ import {
 } from '../events/NodeEvent'
 import { countListenersAdded, countListenersRemoved, hasListener } from '../events/listenerCensus'
 import { attrChangeEventName } from '../events/sceneEvents'
+import { startTween, type Tween, type TweenSettings } from '../tween/Tween'
 // Type-only, and it has to stay that way: Container extends Node, so a value import here
 // would be a runtime cycle. Nothing below ever references the binding at runtime.
 import type { Container } from './Container'
@@ -1069,6 +1074,28 @@ export class Node {
     const local = this.parent.worldMatrix().inverse().transformPoint(new Vector3(value.x, value.y, 0))
     this.x = local.x
     this.y = local.y
+  }
+
+  // --- animation ---
+
+  /**
+   * Animates attributes to new values and starts immediately.
+   *
+   * ```ts
+   * box.to({ x: 400, rotation: 90, fill: 'tomato', duration: 0.6, easing: Easings.BackEaseOut })
+   * ```
+   *
+   * Every key that is not a tween setting - see TweenSettings - is one of this node's own
+   * attributes, animated from whatever it holds now. `duration` is in seconds and defaults to
+   * 0.3; the frame comes from the shared ticker, which drives itself until nothing is left
+   * animating (see tween/ticker.ts).
+   *
+   * The Tween is returned for the callers that want to pause or reverse it, and DESTROYS ITSELF
+   * when it finishes - which is what makes this the fire-and-forget form. Construct a Tween
+   * directly for one that is played more than once.
+   */
+  to(settings: TweenSettings): Tween<this> {
+    return startTween(this, settings)
   }
 
   // --- measurement ---
