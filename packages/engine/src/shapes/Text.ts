@@ -15,7 +15,7 @@
 import { shapeAttrDefaults, Shape, type ShapeOptions } from './Shape'
 import type { ColorInput, RGBA } from '../render/meshFormat'
 import { bumpTextShapingEpoch } from './contentEpoch'
-import type { TextAlign, TextDirection, TextLayoutOptions, TextOrientation, TextRun, TextRunStyle } from '../text/layout'
+import type { TextAlign, TextDirection, TextLayoutOptions, TextOrientation, TextRun, TextRunStyle, TextWrap } from '../text/layout'
 import type { TextPathOptions } from '../text/textPath'
 
 /** Constructor options shared by every text kind: styled content plus block layout. */
@@ -45,6 +45,7 @@ export function textAttrDefaults(): Readonly<Record<string, unknown>> {
     runs: Object.freeze([]),
     align: 'left',
     maxWidth: undefined,
+    wrap: 'word',
     lineHeight: 1,
     direction: 'ltr',
     orientation: 'horizontal',
@@ -87,6 +88,19 @@ export abstract class Text extends Shape {
     this._maxWidth = value
     this.invalidateShaping()
     this.announce('maxWidth', previous, value)
+  }
+
+  private _wrap: TextWrap = 'word'
+  /** How `maxWidth` is enforced - see TextLayoutOptions.wrap. */
+  get wrap(): TextWrap {
+    return this._wrap
+  }
+  set wrap(value: TextWrap) {
+    if (value === this._wrap) return
+    const previous = this._wrap
+    this._wrap = value
+    this.invalidateShaping()
+    this.announce('wrap', previous, value)
   }
 
   private _lineHeight = 1
@@ -252,6 +266,7 @@ export abstract class Text extends Shape {
     // nothing cached to invalidate anyway.
     this._align = options.align ?? 'left'
     this._maxWidth = options.maxWidth
+    this._wrap = options.wrap ?? 'word'
     this._lineHeight = options.lineHeight ?? 1
     this._direction = options.direction ?? 'ltr'
     this._orientation = options.orientation ?? 'horizontal'
@@ -267,6 +282,7 @@ export abstract class Text extends Shape {
       'runs',
       'align',
       'maxWidth',
+      'wrap',
       'lineHeight',
       'direction',
       'orientation',
@@ -320,6 +336,7 @@ export abstract class Text extends Shape {
     return {
       align: this.align,
       maxWidth: this.maxWidth,
+      wrap: this.wrap,
       lineHeight: this.lineHeight,
       direction: this.direction,
       orientation: this.orientation,

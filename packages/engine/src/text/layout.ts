@@ -88,11 +88,22 @@ export interface TextRun {
 export type TextAlign = 'left' | 'center' | 'right' | 'justify'
 export type TextDirection = 'ltr' | 'rtl'
 export type TextOrientation = 'horizontal' | 'vertical'
+export type TextWrap = 'word' | 'char' | 'none'
 
 export interface TextLayoutOptions {
   align?: TextAlign
   /** Wrap width in world px; undefined = no wrapping (breaks only on '\n'). */
   maxWidth?: number
+  /**
+   * How `maxWidth` is enforced; ignored when `maxWidth` is undefined. Default 'word'.
+   *
+   * 'word' breaks between words, falling back to a mid-word break (and, before that, a hyphen)
+   * when a single word is itself wider than `maxWidth`. 'char' breaks between every glyph,
+   * ignoring word boundaries. 'none' never breaks a line for width - `maxWidth` still sizes and
+   * aligns the block, which is how a caller measures a fixed-width label without letting an
+   * over-long string spill onto a second line.
+   */
+  wrap?: TextWrap
   /** Line-height multiplier over the font's line height; default 1. */
   lineHeight?: number
   /** Horizontal flow direction; ignored when orientation is vertical. Default 'ltr'. */
@@ -432,8 +443,11 @@ function layoutHorizontal(
   materials: TextMaterial[],
 ): ShapedText {
   const stream = buildStream(runs, resolved)
+  const wrap = options.wrap ?? 'word'
 
-  // Group into words (non-space runs) separated by spaces / hard breaks.
+  // Group into words (non-space runs) separated by spaces / hard breaks. Under 'char', every
+  // glyph is its own word token, so the greedy assembly below wraps between them the same way
+  // it wraps between words - there is no separate char-mode assembly to keep in sync with it.
   type Token = { kind: 'word'; entries: Entry[]; width: number } | { kind: 'space'; advance: number } | { kind: 'break' }
   const tokens: Token[] = []
   let word: Entry[] = []
@@ -451,12 +465,22 @@ function layoutHorizontal(
       tokens.push({ kind: 'space', advance: e.advance })
     } else {
       word.push(e)
+      if (wrap === 'char') {
+        flushWord()
+      } else if (wrap === 'word' && e.cp === 45 /* '-' */) {
+        // A hyphen is a break opportunity that keeps the character on the line before it,
+        // unlike a space: the next token starts right after with no gap between them.
+        flushWord()
+      }
     }
   }
   flushWord()
 
   // Greedy line assembly; a line records why it ended (wrap vs break vs end) for justification.
+  // 'none' skips every width-triggered flush below (both branches stay gated on `canWrap`), so
+  // maxWidth still sizes and aligns the block - see blockWidth - without ever breaking a line.
   const maxWidth = options.maxWidth
+  const canWrap = maxWidth !== undefined && wrap !== 'none'
   const lines: Line[] = []
   let line: Entry[] = []
   let lineWidth = 0
@@ -474,7 +498,29 @@ function layoutHorizontal(
       pendingSpace = token.advance
     } else {
       const gap = line.length > 0 ? pendingSpace : 0
-      if (maxWidth !== undefined && line.length > 0 && lineWidth + gap + token.width > maxWidth) {
+      if (canWrap && maxWidth !== undefined && token.width > maxWidth) {
+        // No space (or hyphen) inside this token brought it under maxWidth on its own, so
+        // there is no whole-token wrap point left: split its entries at the glyph they'd
+        // otherwise overflow on, the same fallback CSS calls overflow-wrap: break-word.
+        if (line.length > 0) flush('wrap')
+        let chunk: Entry[] = []
+        let chunkWidth = 0
+        for (const e of token.entries) {
+          const kern = chunk.length > 0 ? kernBetween(chunk[chunk.length - 1], e, resolved) : 0
+          const withEntry = chunkWidth + kern + e.advance
+          if (chunk.length > 0 && withEntry > maxWidth) {
+            line = chunk
+            flush('wrap')
+            chunk = [e]
+            chunkWidth = e.advance
+          } else {
+            chunk.push(e)
+            chunkWidth = withEntry
+          }
+        }
+        line = chunk
+        lineWidth = chunkWidth
+      } else if (canWrap && maxWidth !== undefined && line.length > 0 && lineWidth + gap + token.width > maxWidth) {
         flush('wrap')
         line.push(...token.entries)
         lineWidth = token.width
@@ -509,8 +555,10 @@ function layoutHorizontal(
   const widths = lines.map((l) => lineExtent(l.entries, resolved))
   // The width the TEXT occupies, which is what alignment measures against. Padding is added to
   // the reported block width at the end and deliberately not here: aligning against a padded
-  // width would centre the text on the padding rather than within it.
-  const blockWidth = maxWidth ?? Math.max(0, ...widths)
+  // width would centre the text on the padding rather than within it. A single glyph wider than
+  // maxWidth has no further break point and still overflows it - Math.max reports that true
+  // ink extent instead of the maxWidth it failed to fit.
+  const blockWidth = maxWidth !== undefined ? Math.max(maxWidth, ...widths) : Math.max(0, ...widths)
   const padding = options.padding ?? 0
 
   let topY = padding

@@ -19,7 +19,7 @@
 
 import { expect, it } from 'vitest'
 import type { Vector2Like } from '../math/Vector2'
-import { kerningFor, normalizeMetrics, type FontMetrics, type MsdfFontJson } from './msdfMetrics'
+import { kerningFor, normalizeMetrics, type FontMetrics, type Glyph, type MsdfFontJson } from './msdfMetrics'
 import { layoutText, type FontProvider, type TextRun } from './layout'
 import { arcPath, circlePath, TextPathGeometry } from './textPath'
 import { quadCorner } from './textQuad'
@@ -96,6 +96,27 @@ const regularOnly: FontProvider = {
 
 const run = (text: string, style: TextRun['style'] = {}): TextRun => ({ text, style })
 const finite = (n: number) => Number.isFinite(n)
+
+// A fixed 10px-advance face (a-z, hyphen, space), no kerning - so a wrapped line's width is an
+// exact multiple of its glyph count and the wrap-overflow assertions below check round numbers
+// instead of Inter's real, irregular ones.
+function monoGlyph(): Glyph {
+  return { u0: 0, v0: 0, u1: 1, v1: 1, width: 10, height: 10, xoffset: 0, yoffset: 0, xadvance: 10 }
+}
+const MONO_METRICS: FontMetrics = {
+  size: 10,
+  lineHeight: 12,
+  base: 10,
+  atlasWidth: 1,
+  atlasHeight: 1,
+  distanceRange: 1,
+  decoration: { underlineOffset: 0, underlineThickness: 0, strikeOffset: 0, strikeThickness: 0 },
+  glyphs: new Map([...'abcdefghijklmnopqrstuvwxyz- '].map((ch) => [ch.codePointAt(0)!, monoGlyph()])),
+  kernings: new Map(),
+}
+const mono: FontProvider = {
+  resolve: () => ({ metrics: MONO_METRICS, atlasIndex: 0, fauxBold: false, fauxItalic: false }),
+}
 
 // MSDFFontBook/device involved (see FontAtlas.ts) - built off the SAME JSON as `fonts` above, so
 // the two must resolve identically. ---
@@ -323,6 +344,74 @@ it('word wrap: a narrow maxWidth splits into multiple lines; wider fits on one',
     assert(narrow.lineCount > 1, 'a narrow max width wraps to multiple lines')
     assert(wide.lineCount === 1, 'a very wide max width stays on one line')
     assert(narrow.height > wide.height, 'more lines means a taller block')
+})
+
+it('word wrap: a word wider than maxWidth breaks mid-word instead of overflowing it', () => {
+    const maxWidth = 100
+    const rightEdge = (s: ReturnType<typeof layoutText>) => Math.max(0, ...s.quads.filter((q) => q.isGlyph).map((q) => q.x1))
+
+    // Controls: space-separated wrapping and a short line both still work exactly as before.
+    const control = layoutText([run('aaaa aaaa aaaa aaaa aaaa', { fontSize: 10 })], { maxWidth }, mono)
+    assert(control.lineCount === 3 && rightEdge(control) <= maxWidth + 1e-6, 'space-separated words wrap without ever exceeding maxWidth')
+    const short = layoutText([run('aaaa', { fontSize: 10 })], { maxWidth }, mono)
+    assert(short.lineCount === 1 && rightEdge(short) <= maxWidth + 1e-6, 'a line that already fits is not split')
+
+    // A single token with no space in it has no whole-word wrap point; it must still stay inside maxWidth.
+    const oneWord = layoutText([run('a'.repeat(30), { fontSize: 10 })], { maxWidth }, mono)
+    assert(rightEdge(oneWord) <= maxWidth + 1e-6, 'a lone over-wide word breaks instead of running past maxWidth')
+    assert(oneWord.lineCount > 1, 'and lands on more than one line to do it')
+
+    // The same word preceded by text that did fit on the first line - the fallback must trigger
+    // whether or not the over-wide token starts a fresh line.
+    const afterShort = layoutText([run('hi ' + 'a'.repeat(30), { fontSize: 10 })], { maxWidth }, mono)
+    assert(rightEdge(afterShort) <= maxWidth + 1e-6, 'an over-wide word after a short one also stays inside maxWidth')
+
+    // A hyphen is a break opportunity even with no surrounding spaces, matching overflow-wrap.
+    const dashed = layoutText([run('aaaaaaaa-aaaaaaaa-aaaaaaaa', { fontSize: 10 })], { maxWidth }, mono)
+    assert(rightEdge(dashed) <= maxWidth + 1e-6, 'a hyphenated run stays inside maxWidth')
+    assert(dashed.lineCount === 3, 'each hyphen is a break point, so the three segments become three lines')
+
+    assert(oneWord.width <= maxWidth + 1e-6, 'width reports the wrapped extent, not a maxWidth the ink never reached this far past')
+
+    // A single glyph bigger than maxWidth has no break point at all - width must report that
+    // true overflow rather than silently claiming it fits.
+    const unbreakable = layoutText([run('a', { fontSize: 1000 })], { maxWidth }, mono)
+    assert(unbreakable.width > maxWidth, 'a glyph wider than maxWidth on its own reports its real, overflowing width')
+})
+
+it("wrap: 'char' breaks between every glyph; 'none' never breaks a line for width", () => {
+    const maxWidth = 70
+    const rightEdge = (s: ReturnType<typeof layoutText>) => Math.max(0, ...s.quads.filter((q) => q.isGlyph).map((q) => q.x1))
+    // The first (topmost) line's own right edge - where 'word' leaves unused room that 'char'
+    // can still fill, since y1 groups by line (later lines sit lower - see the hard-break test).
+    const firstLineRight = (s: ReturnType<typeof layoutText>) => {
+      const g = s.quads.filter((q) => q.isGlyph)
+      const minY = Math.min(...g.map((q) => q.y1))
+      return Math.max(...g.filter((q) => q.y1 === minY).map((q) => q.x1))
+    }
+
+    // "aaaaa bbbbb" at maxWidth 70: the second word (50 wide) does not fit after the first (50
+    // wide) plus the space between them, so 'word' moves it whole to a new line, leaving the
+    // first line 20px short of maxWidth - room for exactly one more glyph plus the space before
+    // it. 'char' is not bound to that whole-word decision and packs the first line all the way in.
+    const text = 'aaaaa bbbbb'
+    const byWord = layoutText([run(text, { fontSize: 10 })], { maxWidth, wrap: 'word' }, mono)
+    const byChar = layoutText([run(text, { fontSize: 10 })], { maxWidth, wrap: 'char' }, mono)
+    assert(rightEdge(byWord) <= maxWidth + 1e-6 && rightEdge(byChar) <= maxWidth + 1e-6, "both keep every line inside maxWidth")
+    assert(firstLineRight(byChar) > firstLineRight(byWord), "'char' fills the first line further than 'word' can, breaking inside the second word")
+
+    const unbroken = layoutText([run('aaaa aaaa aaaa aaaa aaaa', { fontSize: 10 })], { maxWidth, wrap: 'none' }, mono)
+    assert(unbroken.lineCount === 1, "'none' never wraps, however far the text runs past maxWidth")
+    assert(rightEdge(unbroken) > maxWidth, "'none' really did let the line run past maxWidth rather than happening to fit")
+    assert(unbroken.width > maxWidth, 'and width reports that true overflow')
+
+    // 'none' still uses maxWidth to size and align a block whose text turns out to fit within it.
+    const short = layoutText([run('aaaa', { fontSize: 10 })], { maxWidth, wrap: 'none' }, mono)
+    assert(short.width === maxWidth, "'none' sizes the block to maxWidth even when the text itself is narrower")
+    const centered = layoutText([run('aaaa', { fontSize: 10 })], { maxWidth, wrap: 'none', align: 'center' }, mono)
+    const centeredX0 = centered.quads.filter((q) => q.isGlyph)[0].x0
+    const leftX0 = short.quads.filter((q) => q.isGlyph)[0].x0
+    assert(centeredX0 > leftX0, "'none' still aligns within that maxWidth-sized block")
 })
 
 it('hard breaks: \'\\n\' forces a new line, and later lines sit lower (smaller y)', () => {

@@ -23,6 +23,7 @@ import { buildTransparencyScene } from './transparencyScene'
 import { buildTweenScene } from './tweenScene'
 import { buildVectorTextScene, prepareVectorTextScene } from './vectorTextScene'
 import { buildTextPathScene, prepareTextPathScene } from './textPathScene'
+import { buildWordWrapScene } from './wordWrapScene'
 import { buildVectorTextStressScene, prepareVectorTextStressScene } from './vectorTextStressScene'
 import { buildRuntimeTtfScene, prepareRuntimeTtfScene } from './runtimeTtfScene'
 import { buildZIndexScene } from './zIndexScene'
@@ -86,6 +87,13 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     description:
       'text lane: four vertices per glyph sampling a shared MSDF atlas. Four Inter styles from one atlas array, per-run styling within a single node (size, colour, gradient, outline, highlight, decorations, baseline shift), wrapping, alignment and justification, RTL and vertical flow.',
     build: buildTextScene,
+  },
+  {
+    id: 'word-wrap',
+    title: 'Word wrap overflow',
+    description:
+      "layoutHorizontal's mid-word and hyphen break fallbacks: a word wider than maxWidth breaks instead of running past the block, every plate below is drawn at exactly maxWidth so an overflow is visible as ink outside it. Also the wrap option this shipped with - 'word' (default), 'char' (breaks between every glyph, so it fills a short line's leftover room that a whole-word decision would waste), and 'none' (never wraps; maxWidth still sizes and aligns the block).",
+    build: buildWordWrapScene,
   },
   {
     id: 'uniform-text',
