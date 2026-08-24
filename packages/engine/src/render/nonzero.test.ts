@@ -19,8 +19,9 @@ import type { Vector2Like } from '../math/Vector2'
 import interRegular from '../../../example-app/public/fonts/polygons/inter-regular.polygons.json'
 import { PolygonFont, type PolygonFontJson } from '../text/PolygonFont'
 import { triangulateGroup } from '../svg/triangulate'
+import type { ContourGroup } from './contours'
 import { signedArea } from './contours'
-import { simpleLoops, unionBoundary, windingGroups } from './nonzero'
+import { evenOddGroups, nonzeroGroups, simpleLoops, unionBoundary, windingGroups } from './nonzero'
 
 function assert(cond: boolean, msg: string): void {
   expect(cond, msg).toBe(true)
@@ -49,6 +50,19 @@ function windingNumber(px: number, py: number, rings: readonly (readonly Vector2
     }
   }
   return winding
+}
+
+/** Inside an odd number of the rings - the even-odd rule, computed straight. */
+function insideOddNumber(px: number, py: number, rings: readonly (readonly Vector2Like[])[]): boolean {
+  let inside = false
+  for (const ring of rings) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i].x, yi = ring[i].y
+      const xj = ring[j].x, yj = ring[j].y
+      if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside
+    }
+  }
+  return inside
 }
 
 function inTriangle(px: number, py: number, a: Vector2Like, b: Vector2Like, c: Vector2Like): boolean {
@@ -114,8 +128,9 @@ it('a ring wound the other way inside a solid is still a hole', () => {
 
 it('a ring that crosses itself is cut into loops that do not', () => {
   // A bowtie: the classic self-crossing ring, and what earcut cannot take. Its two lobes are
-  // wound opposite ways, so one is a solid and the other is a hole of nothing and is dropped -
-  // which is the nonzero reading of a bowtie.
+  // wound opposite ways, so windingGroups - which reads direction - calls one a solid and the
+  // other a hole of nothing and drops it. The RULE fills both, each lobe being wound once, and
+  // that is what nonzeroGroups gets by going through the silhouette first (see the case table).
   const bowtie: Vector2Like[] = [
     { x: 0, y: 0 },
     { x: 100, y: 0 },
@@ -142,6 +157,139 @@ it('a ring that crosses itself is cut into loops that do not', () => {
   assert(filled(fill, 50, 5), 'the bottom of the V is solid')
   assert(filled(fill, 50, 14), 'including the sliver where the two strokes cross')
   assert(!filled(fill, 50, 60), 'while the gap between them stays open')
+})
+
+/** The fill a Path builds from a set of subpaths under one rule, triangulated as one mesh. */
+function pathFill(
+  rings: readonly Vector2Like[][],
+  group: (contours: { points: Vector2Like[]; closed: boolean }[]) => ContourGroup[] = nonzeroGroups,
+): { vertices: Vector2Like[]; indices: number[] } {
+  const vertices: Vector2Like[] = []
+  const indices: number[] = []
+  for (const group_ of group(rings.map((points) => ({ points, closed: true })))) {
+    const piece = triangulateGroup(group_)
+    const base = vertices.length
+    for (const v of piece.vertices) vertices.push(v)
+    for (const i of piece.indices) indices.push(base + i)
+  }
+  return { vertices, indices }
+}
+
+function meshArea(fill: { vertices: Vector2Like[]; indices: number[] }): number {
+  let area = 0
+  for (let i = 0; i < fill.indices.length; i += 3) {
+    const a = fill.vertices[fill.indices[i]]
+    const b = fill.vertices[fill.indices[i + 1]]
+    const c = fill.vertices[fill.indices[i + 2]]
+    area += Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
+  }
+  return area
+}
+
+/**
+ * Two 10x10 squares, arranged every way two subpaths of one `d` can be arranged, and wound each
+ * way round. The two areas are what each rule fills for that arrangement, worked out from the
+ * rules rather than from the code: nonzero fills where the winding number is not zero, even-odd
+ * where the point is inside an odd number of the rings.
+ *
+ * A GLYPH IS NEVER LIKE THIS. Every outer boundary of a letter runs the same way and its counters
+ * run the other, which is what lets windingGroups decide a whole ring at a time from the
+ * direction it runs in. Two subpaths of a drawing carry no such promise - an editor emits each
+ * one however the pen went round it - and the rows below are arrangements where the direction of
+ * a ring says nothing about whether it is a solid, a hole, or part of a bigger region that no
+ * single ring bounds.
+ *
+ * The two rules AGREE on all but two rows. They part company exactly where a point is inside two
+ * rings at once: nonzero asks whether the two cancel, even-odd counts them.
+ *
+ * The table also covers both ways the fill is worked out. Rings that never meet - apart, nested -
+ * are read from what contains what; rings that touch, overlap or cross are read from the
+ * silhouette walk. Which one runs is decided by the geometry rather than by the caller, so both
+ * are checked here against the same rules and the same answers.
+ */
+const ARRANGEMENTS: readonly { name: string; rings: Vector2Like[][]; nonzero: number; evenodd: number }[] = [
+  // The two that share the edge x=10. Both squares fill under either rule - each is wound once
+  // and each is inside exactly one ring - and the shared edge is inside the pair rather than on
+  // the outside of either.
+  { name: 'touching, wound against each other', rings: [square(0, 0, 10, 10), reversed(square(10, 0, 10, 10))], nonzero: 200, evenodd: 200 },
+  { name: 'touching, wound the same way', rings: [square(0, 0, 10, 10), square(10, 0, 10, 10)], nonzero: 200, evenodd: 200 },
+  { name: 'apart, wound against each other', rings: [square(0, 0, 10, 10), reversed(square(14, 0, 10, 10))], nonzero: 200, evenodd: 200 },
+  // The overlap is inside both rings. Wound against each other the winding cancels there, and
+  // even-odd counts two, so both rules leave the lens empty and fill the crescents: 100 + 100,
+  // less the 50 of overlap taken out of each.
+  { name: 'overlapping, wound against each other', rings: [square(0, 0, 10, 10), reversed(square(5, 0, 10, 10))], nonzero: 100, evenodd: 100 },
+  // Wound the same way, nonzero reads the overlap as more solid and fills the union - once, not
+  // twice - where even-odd still counts two rings and cuts the lens out.
+  { name: 'overlapping, wound the same way', rings: [square(0, 0, 10, 10), square(5, 0, 10, 10)], nonzero: 150, evenodd: 100 },
+  // Nested the same way is winding 2 inside, which nonzero fills and even-odd does not.
+  { name: 'nested, wound the same way', rings: [square(0, 0, 20, 20), square(5, 5, 10, 10)], nonzero: 400, evenodd: 300 },
+  // Nested against, both rules agree it is a hole - which is the shape of an 'o'.
+  { name: 'nested, wound against each other', rings: [square(0, 0, 20, 20), reversed(square(5, 5, 10, 10))], nonzero: 300, evenodd: 300 },
+  // One ring meeting only ITSELF. The bowtie's lobes are wound against each other and each is
+  // crossed once, so both rules fill both of them - 25 a lobe.
+  {
+    name: 'one ring that crosses itself',
+    rings: [[{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }, { x: 10, y: 10 }]],
+    nonzero: 50,
+    evenodd: 50,
+  },
+]
+
+const RULES = [
+  { name: 'nonzero', group: nonzeroGroups, inside: (x: number, y: number, rings: Vector2Like[][]) => windingNumber(x, y, rings) !== 0 },
+  { name: 'evenodd', group: evenOddGroups, inside: (x: number, y: number, rings: Vector2Like[][]) => insideOddNumber(x, y, rings) },
+] as const
+
+it('a path fills what its rule says it fills, however its subpaths run', () => {
+  for (const rule of RULES) {
+    for (const arrangement of ARRANGEMENTS) {
+      const rings = arrangement.rings
+      const expected = rule.name === 'nonzero' ? arrangement.nonzero : arrangement.evenodd
+      const where = `${rule.name}, ${arrangement.name}`
+
+      const fill = pathFill(rings, rule.group)
+      const area = meshArea(fill)
+      assert(Math.abs(area - expected) < 1e-6, `${where}: fills ${expected}, and fills it once (got ${area})`)
+
+      // And in the right PLACE, not merely to the right total. The grid is offset off the halfway
+      // lines so a sample never lands on one of the axis-aligned edges these are made of, where
+      // "inside a triangle" and "inside the region" are each entitled to their own answer.
+      const steps = 47
+      let wrong = 0
+      for (let r = 0; r < steps; r++) {
+        for (let c = 0; c < steps; c++) {
+          const x = -2 + ((c + 0.317) / steps) * 28
+          const y = -2 + ((r + 0.211) / steps) * 28
+          if (filled(fill, x, y) !== rule.inside(x, y, rings)) wrong++
+        }
+      }
+      assert(wrong === 0, `${where}: every sample agrees with the rule (${wrong} did not)`)
+    }
+  }
+})
+
+it('a subpath is not dropped for sharing a boundary with the one beside it', () => {
+  // The narrow case the row above generalises, kept on its own because it is the one that was
+  // wrong and the one an asset library trips over: a fish whose two fins meet the body along an
+  // edge, drawn as subpaths wound against each other, lost the fins - and a path that is only
+  // those two subpaths tessellated to nothing at all.
+  const left = square(0, 0, 10, 10)
+  const right = reversed(square(10, 0, 10, 10))
+
+  const groups = nonzeroGroups([left, right].map((points) => ({ points, closed: true })))
+  assert(groups.length >= 1, 'the pair is a region')
+  assert(groups.every((g) => g.outer.length >= 3), 'made of rings a triangulator can take')
+
+  const fill = pathFill([left, right])
+  assert(filled(fill, 5, 5), 'the first subpath is drawn')
+  assert(filled(fill, 15, 5), 'and so is the one that shares its edge')
+  assert(!filled(fill, 25, 5), 'and nothing beyond them')
+
+  // Neither rule is in any doubt about this shape, so the two must land in the same place.
+  assert(
+    Math.abs(meshArea(fill) - meshArea(pathFill([left, right], evenOddGroups))) < 1e-6,
+    'and even-odd fills the same region, as it must where each point is inside exactly one ring',
+  )
 })
 
 it('the silhouette of overlapping pieces has no seam in it', () => {

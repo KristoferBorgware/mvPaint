@@ -10,7 +10,7 @@ import type { Vector2Like } from '../math/Vector2'
 import { flattenPathData } from './flattenPath'
 import type { ContourGroup } from '../render/contours'
 import { classifyContours, signedArea, pointInPolygon } from '../render/contours'
-import { nonzeroGroups } from '../render/nonzero'
+import { evenOddGroups, nonzeroGroups } from '../render/nonzero'
 import { triangulateGroup } from './triangulate'
 import { applyPoint, multiply, parseTransform, scaleFactor, transformContours, IDENTITY } from './matrix'
 import { parseColor } from './color'
@@ -84,6 +84,19 @@ it('triangulate: covers (outer - hole) area, no triangle centroid inside the hol
     assert(!anyInHole, 'no triangle centroid falls inside the hole')
 })
 
+/** The area a shape's FILL triangles cover - the stroke's are marked and left out. */
+function fillArea(shape: Path): number {
+    const { sink, verts, tris } = capturingSink()
+    shape.tessellate(sink)
+    let area = 0
+    for (const [i, j, k] of tris) {
+      const a = verts[i], b = verts[j], c = verts[k]
+      if (!a.isFill) continue
+      area += Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
+    }
+    return area
+}
+
 // The area a group of rings fills, triangulated.
 function groupArea(group: ContourGroup): number {
     const { vertices, indices } = triangulateGroup(group)
@@ -121,7 +134,7 @@ it('fill rules: the same two rings, read two ways', () => {
     // which of them is being applied.
     const contours = flattenPathData('M0 0 L100 0 L100 100 L0 100 Z M25 25 L75 25 L75 75 L25 75 Z')
 
-    const nested = classifyContours(contours)
+    const nested = evenOddGroups(contours)
     assert(nested.length === 1 && nested[0].holes.length === 1, 'even-odd: a ring inside another is a hole')
     assert(near(groupArea(nested[0]), 7500, 1e-3), 'so the fill is the outer less the inner')
 
@@ -132,11 +145,44 @@ it('fill rules: the same two rings, read two ways', () => {
     // Where the two DO agree - a hole wound against its outer - they agree exactly.
     const donut = nonzeroGroups(flattenPathData(SQUARE_WITH_HOLE))
     assert(donut.length === 1 && donut[0].holes.length === 1, 'a hole wound the other way is a hole under either rule')
+    assert(near(groupArea(donut[0]), groupArea(evenOddGroups(flattenPathData(SQUARE_WITH_HOLE))[0]), 1e-6), 'to the same area')
 
     // Two rings wound against each other but nested in nothing are two solids. Reading the
     // second as a hole of nothing is what makes half a drawing disappear.
     const apart = nonzeroGroups(flattenPathData('M0 0 L10 0 L10 10 L0 10 Z M20 0 L20 10 L30 10 L30 0 Z'))
     assert(apart.length === 2, 'nonzero: both are solid, whichever way each one runs')
+})
+
+it('fill rules: two subpaths that share an edge, on the shape a caller builds', () => {
+    // Both squares fill under EITHER rule - each is wound once, and neither is inside the other -
+    // so the two rules must agree here, and what they agree on is the pair. An emoji draws a fin
+    // this way, meeting the body along a line, and a fin dropped for sharing that line is gone
+    // from the picture with nothing to say it went.
+    const touching = 'M0 0h10v10H0z M10 0v10h10V0z'
+
+    const nonzero = new Path({ d: touching, fill: [1, 0, 0, 1] })
+    const evenodd = new Path({ d: touching, fill: [1, 0, 0, 1], fillRule: 'evenodd' })
+    assert(near(fillArea(nonzero), 200, 1e-6), 'nonzero fills both squares')
+    assert(near(fillArea(evenodd), 200, 1e-6), 'and so does even-odd, which is what agreeing means')
+
+    // The shape also MEASURES, which a shape with no fill triangles does not.
+    const box = nonzero.localBounds()
+    assert(near(box.max.x - box.min.x, 20) && near(box.max.y - box.min.y, 10), 'and it spans the pair')
+
+    // The same pair with the shared edge the LONGEST edge of both, which is the arrangement a
+    // fin or a leaf meeting a body makes: two tall bars, sharing the tall side.
+    const bars = new Path({ d: 'M0 0h2v20H0z M2 0v20h2V0z', fill: [1, 0, 0, 1] })
+    assert(near(fillArea(bars), 80, 1e-6), 'a pair sharing its longest edge fills both halves')
+
+    // Two subpaths that OVERLAP rather than touch. The lens is inside both rings, so both rules
+    // leave it empty - the winding cancels, and two is even - and what fills is the crescents
+    // around it. A region with a boundary, rather than a ring with a hole in it.
+    const lens = 'M0 0h10v10H0z M5 0v10h10V0z'
+    assert(near(fillArea(new Path({ d: lens, fillRule: 'evenodd' })), 100, 1e-6), 'even-odd fills the crescents')
+    assert(near(fillArea(new Path({ d: lens })), 100, 1e-6), 'and so does nonzero, the two rings running against each other')
+
+    // Nonzero is the default, so this is what a `d` saying nothing about the rule draws.
+    assert(new Path({ d: touching }).fillRule === 'nonzero', "a path fills by SVG's own default rule")
 })
 
 it('matrix: parseTransform and CTM baking (matrix baked at flatten time)', () => {

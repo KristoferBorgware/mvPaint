@@ -11,25 +11,31 @@
 // worse, because earcut takes a simple polygon and a self-crossing one is not one, so the fill
 // comes back as an arbitrary mess of triangles.
 //
-// Three steps here answer the question the way the outline was drawn:
+// Three pieces here answer the question the way the outline was drawn:
 //
-//   simpleLoops    cut a ring at its self-crossings into loops that cross nothing, so what
-//                  reaches the triangulator is always a simple polygon;
-//   windingGroups  decide solid from hole by DIRECTION rather than by nesting, so a piece laid
-//                  over another is a second solid and only a ring wound the other way is a hole;
-//   nonzeroGroups  the same decision made by the winding number itself, for an outline whose
-//                  rings share no one direction - which a glyph's do and an SVG path's do not.
+//   simpleLoops     cut a ring at its self-crossings into loops that cross nothing, so what
+//                   reaches the triangulator is always a simple polygon;
+//   windingGroups   decide solid from hole by DIRECTION rather than by nesting, so a piece laid
+//                   over another is a second solid and only a ring wound the other way is a hole;
+//   unionBoundary   the silhouette of what a set of rings fills, every internal seam gone.
 //
-// Overlapping solids are left overlapping. Two triangulations painting the same pixel twice in
-// the same colour is the union, which is what the nonzero rule asks for, and finding the true
-// outline of that union is polygon-boolean work this does not need to do.
+// nonzeroGroups and evenOddGroups are what a shape asks for, and are the three composed: the
+// silhouette, cut into loops, grouped. The EVEN-ODD one is here rather than beside the nesting
+// test in contours.ts because the walk is the same and only the question asked at each side of a
+// piece differs - is the winding non-zero, or is the crossing count odd. Two walks would be two
+// chances to disagree about a shape neither rule is in doubt about.
+//
+// windingGroups on its own leaves overlapping solids overlapping: two triangulations painting one
+// pixel twice in the same colour is the union at full alpha, which is all a glyph needs. A path
+// goes through the silhouette first, so an overlap is one region with one boundary and is filled
+// once - which is what an alpha below 1 needs.
 //
 // The limit is winding numbers beyond ±1: a ring wound the other way INSIDE an overlap is a hole
-// in windingGroups and is filled under a strict nonzero reading. No text face does that, and
-// nonzeroGroups reads the number rather than the direction, so it holds there too.
+// in windingGroups and is filled under a strict nonzero reading. No text face does that, and the
+// groupings below read the number rather than the direction, so it holds there too.
 
 import type { Vector2Like } from '../math/Vector2'
-import { pointInPolygon, signedArea, type ContourGroup } from './contours'
+import { pointInPolygon, signedArea, type ContourGroup, type FillRule } from './contours'
 import type { Contour } from './stroke'
 
 /**
@@ -238,10 +244,15 @@ function nextAround(
  * is boundary and stays. What survives is chained back into closed rings by its endpoints, which
  * match exactly because the crossings that made them were computed once and shared.
  *
- * Winding decides it rather than containment, so a counter comes through as a hole in the
+ * WHICH SIDE HAS MATERIAL is the only place the fill rule enters: under 'nonzero' a point is
+ * material where its winding number is not zero, under 'evenodd' where it sits inside an odd
+ * number of the rings. Everything else - the cutting, the keeping, the chaining - is one walk,
+ * so the two rules cannot differ about anything except the thing they are.
+ *
+ * The rule decides it rather than containment, so a counter comes through as a hole in the
  * silhouette (material on one side, none on the other) without being a special case.
  */
-export function unionBoundary(contours: readonly Contour[]): Contour[] {
+export function unionBoundary(contours: readonly Contour[], rule: FillRule = 'nonzero'): Contour[] {
   const rings = contours.map((contour) => contour.points).filter((points) => points.length >= 3)
   if (rings.length === 0) return []
 
@@ -322,6 +333,17 @@ export function unionBoundary(contours: readonly Contour[]): Contour[] {
     }
   }
 
+  // Inside, by the rule being read. Even-odd toggles once per ring the point is within, which
+  // is the ray-casting test contours.ts already does one ring at a time.
+  const material =
+    rule === 'evenodd'
+      ? (px: number, py: number): boolean => {
+          let inside = false
+          for (const ring of rings) if (pointInPolygon(px, py, ring)) inside = !inside
+          return inside
+        }
+      : (px: number, py: number): boolean => windingAt(px, py, rings) !== 0
+
   const kept: BoundarySegment[] = []
   const already = new Set<string>()
   const add = (segment: BoundarySegment): void => {
@@ -345,8 +367,8 @@ export function unionBoundary(contours: readonly Contour[]): Contour[] {
         const my = (from.y + to.y) / 2
         const nx = (-dy / length) * step
         const ny = (dx / length) * step
-        const left = windingAt(mx + nx, my + ny, rings) !== 0
-        const right = windingAt(mx - nx, my - ny, rings) !== 0
+        const left = material(mx + nx, my + ny)
+        const right = material(mx - nx, my - ny)
         // Every kept piece is turned so the material is on the same side of it as every other's,
         // whichever piece it was cut from. That is what makes the rings come out of the walk
         // below already wound correctly - an outer one way, a counter the other - rather than
@@ -441,116 +463,212 @@ export function windingGroups(rings: readonly (readonly Vector2Like[])[]): Conto
 }
 
 /**
- * The nonzero grouping of a set of contours: each solid region with the holes inside it, decided
- * by the WINDING NUMBER rather than by the direction the rings happen to run in.
+ * The regions a set of contours fills, under either rule: each solid with the holes inside it,
+ * ready for a triangulator.
  *
- * windingGroups above answers the same question for a glyph, where every outer boundary is wound
- * the same way and the largest ring says which way that is. An SVG path carries no such promise -
- * two unrelated subpaths of one `d` are often wound against each other, and reading the second as
- * a hole of nothing makes it vanish - so this asks the rule directly instead.
+ * windingGroups above answers this for a glyph, where every outer boundary is wound the same way
+ * and the largest ring says which way that is. A drawing carries no such promise - two subpaths
+ * of one `d` are often wound against each other, and neither rule cares which way either runs -
+ * so the rings go through unionBoundary first. What comes back is the SILHOUETTE of the filled
+ * region: every stretch of edge with material on both sides is gone, and what remains is wound
+ * consistently, which is the promise windingGroups needs.
  *
- * Each ring is stepped off to either side at the middle of its longest edge, and the winding
- * number of the whole set is taken at both points. Filled on one side only is a boundary: the
- * ring is an outer when the filled side is its own inside, and a hole when the filled side is
- * out. Filled on neither side is nothing; filled on both is a seam inside material that another
- * ring already fills, and is dropped rather than painted over - overpainting is invisible at
- * full alpha and doubles the ink at any other.
+ * Going through the silhouette rather than reading each ring on its own is what makes a shared
+ * boundary work. Two subpaths that meet along an edge and run opposite ways are both filled -
+ * each is wound once - but that shared edge is interior to the pair, and a ring is not one thing
+ * or the other: part of its outline is silhouette and part is seam. Only the pieces can be
+ * classified, and unionBoundary classifies pieces.
  *
- * Self-crossings are cut out first (see simpleLoops), so every ring reaching the triangulator is
- * a simple polygon - which is the one part of this that grows as the SQUARE of a ring's point
- * count, since every pair of its edges is asked whether it crosses. It runs once per outline, at
- * the write that set one; a path dense enough for that to show is one to flatten at a coarser
- * tolerance. Rings that TOUCH are the one case this reads by luck rather than by rule:
- * the step off an edge lands on the neighbouring ring's boundary, where a winding number is
- * undefined. The longest edge is chosen for the sample because it is the one least likely to be
- * that edge.
+ * It also leaves no overlap behind. Two solids drawn over each other paint the same triangle
+ * twice, which is invisible at full alpha and doubles the ink at any other; the silhouette has
+ * one boundary and fills once.
+ *
+ * A set whose silhouette comes back empty - everything cancelled, or geometry too degenerate to
+ * walk - falls back to the rings as they were written, which is the reading that at least draws
+ * something.
+ *
+ * The walk is skipped entirely for rings that never meet, where containment says the same thing
+ * for less - see edgesMeet and containmentRegions below, and the case table in nonzero.test.ts,
+ * which covers both readings under both rules.
  */
-export function nonzeroGroups(contours: readonly Contour[]): ContourGroup[] {
-  const rings = contours
-    .flatMap((contour) => simpleLoops(contour.points))
-    .filter((ring) => ring.length >= 3)
+function fillRegions(contours: readonly Contour[], rule: FillRule): ContourGroup[] {
+  const rings = contours.filter((c) => c.points.length >= 3).map((c) => c.points as Vector2Like[])
   if (rings.length === 0) return []
 
-  // A box per ring, and the whole outline's. The boxes are what keeps this from being
-  // quadratic in the total point count: a point outside a closed ring's box is outside the ring,
-  // so that ring adds nothing to the winding number there and its edges need not be walked. A
-  // drawing is mostly rings that are nowhere near each other, so almost every pair is rejected
-  // on four comparisons - 240 paths of the Ghostscript tiger group in a millisecond rather than
-  // in thirty.
-  const boxes = rings.map((ring) => {
-    let loX = Infinity, loY = Infinity, hiX = -Infinity, hiY = -Infinity
-    for (const p of ring) {
-      if (p.x < loX) loX = p.x
-      if (p.y < loY) loY = p.y
-      if (p.x > hiX) hiX = p.x
-      if (p.y > hiY) hiY = p.y
-    }
-    return { loX, loY, hiX, hiY }
-  })
-  const extent = Math.max(
-    Math.max(...boxes.map((b) => b.hiX - b.loX)),
-    Math.max(...boxes.map((b) => b.hiY - b.loY)),
-  )
-  // How far to step off an edge, relative to the outline's own size - this is asked of paths in
-  // whatever units the caller uses, from a 36-unit emoji to a 2048-unit em.
-  const step = Math.max((extent || 1) * 1e-6, Number.MIN_VALUE)
+  // NOTHING MEETING ANYTHING IS THE ORDINARY CASE, and it does not need a walk. Where no edge
+  // crosses or touches another, every ring is a simple polygon that is wholly inside another or
+  // wholly outside it - an icon is a ring with two counters in it, a letter is a bowl and a
+  // stem - and the rule can be read from what contains what. The walk below exists for the
+  // arrangements containment cannot describe, and those are the minority of a drawing.
+  if (!edgesMeet(rings)) return containmentRegions(rings, rule)
 
-  const filledAt = (px: number, py: number): boolean => {
-    let winding = 0
-    for (let i = 0; i < rings.length; i++) {
-      const box = boxes[i]
-      if (px < box.loX || px > box.hiX || py < box.loY || py > box.hiY) continue
-      winding += windingAt(px, py, [rings[i]])
-    }
-    return winding !== 0
-  }
+  const silhouette = unionBoundary(contours.filter((c) => c.points.length >= 3), rule)
+  const outline = silhouette.length > 0 ? silhouette : contours.filter((c) => c.points.length >= 3)
+  return windingGroups(outline.flatMap((contour) => simpleLoops(contour.points)))
+}
 
-  const outers: Vector2Like[][] = []
-  const holes: { ring: Vector2Like[]; on: Vector2Like }[] = []
-  for (const ring of rings) {
-    // The longest edge, and the point halfway along it.
-    let best = 0
-    let bestLength = -1
+/**
+ * Whether any two edges of the set meet - cross, or run into one another end-on - counting a
+ * ring against itself as well as against its neighbours. Adjacent edges of one ring share a
+ * vertex by construction and are not a meeting.
+ *
+ * This is the question that decides whether containment can answer the fill: rings that never
+ * meet are nested or apart, and nothing else. It is the same pairwise pass unionBoundary opens
+ * with, stopping at the first hit rather than collecting them, and every pair whose boxes miss
+ * is rejected on four comparisons - which is nearly every pair, since the edges of a flattened
+ * curve are short and mostly nowhere near each other.
+ */
+function edgesMeet(rings: readonly (readonly Vector2Like[])[]): boolean {
+  interface Edge { a: Vector2Like; b: Vector2Like; ring: number; index: number; last: number
+    loX: number; loY: number; hiX: number; hiY: number }
+  const edges: Edge[] = []
+  let extent = 0
+  rings.forEach((raw, r) => {
+    // Consecutive repeats first, and the closing point where a path drew back to its start before
+    // saying `z`. They are edges of no length, and they push the ring's real first and last edges
+    // apart in the index space the adjacency test below reads - which would report an ordinary
+    // ring as touching itself at the vertex it closes on.
+    const ring = raw.filter((p, i) => i === 0 || p.x !== raw[i - 1].x || p.y !== raw[i - 1].y)
+    while (ring.length > 1 && ring[ring.length - 1].x === ring[0].x && ring[ring.length - 1].y === ring[0].y) {
+      ring.pop()
+    }
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i]
       const b = ring[(i + 1) % ring.length]
-      const length = Math.hypot(b.x - a.x, b.y - a.y)
-      if (length > bestLength) {
-        bestLength = length
-        best = i
-      }
+      edges.push({
+        a, b, ring: r, index: i, last: ring.length - 1,
+        loX: Math.min(a.x, b.x), loY: Math.min(a.y, b.y),
+        hiX: Math.max(a.x, b.x), hiY: Math.max(a.y, b.y),
+      })
+      extent = Math.max(extent, Math.abs(a.x), Math.abs(a.y))
     }
-    if (!(bestLength > 0)) continue
-    const a = ring[best]
-    const b = ring[(best + 1) % ring.length]
-    const on = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-    const nx = ((a.y - b.y) / bestLength) * step
-    const ny = ((b.x - a.x) / bestLength) * step
+  })
+  const touch = Math.max(extent * 1e-9, Number.MIN_VALUE)
 
-    const one = { x: on.x + nx, y: on.y + ny }
-    const two = { x: on.x - nx, y: on.y - ny }
-    const oneFilled = filledAt(one.x, one.y)
-    const twoFilled = filledAt(two.x, two.y)
-    if (oneFilled === twoFilled) continue
-
-    const filled = oneFilled ? one : two
-    if (pointInPolygon(filled.x, filled.y, ring)) outers.push(ring)
-    else holes.push({ ring, on })
+  /**
+   * Whether either end of `two` lies ON `one`, ENDPOINTS INCLUDED - which is what a crossing test
+   * cannot see and what a shared boundary is made of. Two rings that run along each other, or
+   * meet at a corner, or are written twice, touch only at points a crossing rejects as a shared
+   * endpoint, and reading those from containment is exactly what goes wrong: the point a
+   * containment test samples can land on the other ring's boundary, where inside and outside are
+   * the same answer.
+   */
+  const meetsEndOn = (one: Edge, two: Edge): boolean => {
+    const dx = one.b.x - one.a.x
+    const dy = one.b.y - one.a.y
+    const lengthSquared = dx * dx + dy * dy
+    // A segment of no length - which a flattened curve leaves at a seam - is a point, and a point
+    // is no boundary to share. Whether it lies on the OTHER edge is the same call the other way
+    // round, which the caller makes.
+    if (lengthSquared === 0) return false
+    const length = Math.sqrt(lengthSquared)
+    for (const vertex of [two.a, two.b]) {
+      const at = ((vertex.x - one.a.x) * dx + (vertex.y - one.a.y) * dy) / lengthSquared
+      if (at < 0 || at > 1) continue
+      const off = Math.abs((vertex.x - one.a.x) * dy - (vertex.y - one.a.y) * dx) / length
+      if (off <= touch) return true
+    }
+    return false
   }
 
-  const groups: ContourGroup[] = outers.map((outer) => ({ outer, holes: [] }))
-  const areas = outers.map((outer) => Math.abs(signedArea(outer)))
-  for (const hole of holes) {
-    // The smallest solid the ring sits in. A hole inside nothing is dropped: earcut takes a hole
-    // its outer ring contains, and one it does not produces triangles that are neither.
+  for (let i = 0; i < edges.length; i++) {
+    for (let k = i + 1; k < edges.length; k++) {
+      const one = edges[i]
+      const two = edges[k]
+      if (one.hiX < two.loX || two.hiX < one.loX || one.hiY < two.loY || two.hiY < one.loY) continue
+      if (one.ring === two.ring) {
+        // Consecutive edges share a vertex, and so do the last and the first.
+        const step = Math.abs(one.index - two.index)
+        if (step === 1 || step === one.last) continue
+      }
+      if (crossing(one.a, one.b, two.a, two.b)) return true
+      if (meetsEndOn(one, two) || meetsEndOn(two, one)) return true
+    }
+  }
+  return false
+}
+
+/**
+ * The fill of rings that never meet, read from what contains what.
+ *
+ * Every ring here is simple, and every pair is nested or apart, so the region just inside a ring
+ * and the region just outside it each have one answer: under 'evenodd' whether the number of
+ * rings around the point is odd, under 'nonzero' whether their windings sum to something other
+ * than zero. A ring with material on one side of it is a boundary - an outer where the material
+ * is within, a hole where it is without - and a ring with the same answer on both sides bounds
+ * nothing and is dropped.
+ *
+ * THIS READING IS ONLY GOOD IN THAT REGIME. Where two rings share a boundary, part of a ring's
+ * outline has material on both sides and part does not, so the ring is not one thing or the
+ * other and no per-ring answer exists - see fillRegions, which sends those to the walk.
+ */
+function containmentRegions(rings: readonly Vector2Like[][], rule: FillRule): ContourGroup[] {
+  const areas = rings.map((ring) => signedArea(ring))
+  // The midpoint of a ring's first edge: for rings that never meet it lies inside exactly the
+  // rings that contain this one.
+  const samples = rings.map((ring) => ({ x: (ring[0].x + ring[1].x) / 2, y: (ring[0].y + ring[1].y) / 2 }))
+
+  const around: number[][] = rings.map((_, i) =>
+    rings.map((_, j) => j).filter((j) => j !== i && pointInPolygon(samples[i].x, samples[i].y, rings[j])),
+  )
+
+  const material = (containing: readonly number[], own: number | null): boolean => {
+    if (rule === 'evenodd') return (containing.length + (own === null ? 0 : 1)) % 2 === 1
+    let winding = own === null ? 0 : Math.sign(own)
+    for (const j of containing) winding += Math.sign(areas[j])
+    return winding !== 0
+  }
+
+  const groups: ContourGroup[] = []
+  const outerOf = new Map<number, number>()
+  const holes: number[] = []
+  rings.forEach((ring, i) => {
+    const outside = material(around[i], null)
+    const inside = material(around[i], areas[i])
+    if (inside === outside) return
+    if (inside) {
+      outerOf.set(i, groups.length)
+      groups.push({ outer: ring, holes: [] })
+    } else {
+      holes.push(i)
+    }
+  })
+
+  for (const i of holes) {
+    // The smallest solid the ring sits in. A hole inside nothing has no region to be absent from,
+    // and earcut takes a hole its outer ring contains.
     let parent = -1
     let parentArea = Infinity
-    for (let i = 0; i < outers.length; i++) {
-      if (areas[i] >= parentArea || !pointInPolygon(hole.on.x, hole.on.y, outers[i])) continue
-      parent = i
-      parentArea = areas[i]
+    for (const j of around[i]) {
+      const area = Math.abs(areas[j])
+      if (!outerOf.has(j) || area >= parentArea) continue
+      parent = j
+      parentArea = area
     }
-    if (parent >= 0) groups[parent].holes.push(hole.ring)
+    if (parent >= 0) groups[outerOf.get(parent)!].holes.push(rings[i])
   }
   return groups
+}
+
+/**
+ * The regions a set of contours fills under the NONZERO rule - material wherever the winding
+ * number is not zero. SVG's default, and the rule a font is drawn with.
+ */
+export function nonzeroGroups(contours: readonly Contour[]): ContourGroup[] {
+  return fillRegions(contours, 'nonzero')
+}
+
+/**
+ * The regions a set of contours fills under the EVEN-ODD rule - material wherever a point sits
+ * inside an odd number of the rings, whichever way any of them runs.
+ *
+ * classifyContours in contours.ts answers the same question by NESTING, and gives the same answer
+ * wherever one ring contains another or misses it entirely - a donut, a nested donut, a letter
+ * with a counter. Where two rings OVERLAP without either containing the other it has nowhere to
+ * put the lens between them: the lens is inside both, so it is not filled, and what remains is
+ * neither ring but the two crescents around it. That is a region with a boundary rather than a
+ * ring with a hole, which is what this walk produces and a depth count cannot.
+ */
+export function evenOddGroups(contours: readonly Contour[]): ContourGroup[] {
+  return fillRegions(contours, 'evenodd')
 }

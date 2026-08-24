@@ -15,8 +15,8 @@ import type { MeshSink } from '../render/meshFormat'
 import { contoursLength, pointAtLength } from '../render/arcLength'
 import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
-import { classifyContours, type ContourGroup, type FillRule } from '../render/contours'
-import { nonzeroGroups } from '../render/nonzero'
+import type { ContourGroup, FillRule } from '../render/contours'
+import { evenOddGroups, nonzeroGroups } from '../render/nonzero'
 import { triangulateGroup } from '../svg/triangulate'
 
 export interface PathOptions extends ShapeOptions {
@@ -104,7 +104,7 @@ export class Path extends Shape {
   /** The outline read as regions, by whichever rule this path fills with. */
   private regroup(): void {
     this._groups =
-      this._fillRule === 'evenodd' ? classifyContours(this._contours) : nonzeroGroups(this._contours)
+      this._fillRule === 'evenodd' ? evenOddGroups(this._contours) : nonzeroGroups(this._contours)
   }
 
   /**
