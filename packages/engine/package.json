@@ -1,6 +1,6 @@
 {
   "name": "@mvpaint/engine",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "A 2D scene-graph renderer for the browser, built natively for WebGPU with a WebGL2 fallback.",
   "keywords": [
     "webgpu",
