@@ -488,8 +488,15 @@ specification it leans on.
 `loadSvgDocument()` (`svg/loadSvg.ts`) parses a document into `Path` nodes under a `Group`,
 flattening curves against a tolerance and carrying across fills, gradients, strokes and
 transforms. Shape elements are converted to path data first (`svg/shapeToPath.ts`), and fills go
-through the same contour classification and triangulation (`svg/triangulate.ts`) the rest of the
-engine uses.
+through the same contour grouping and triangulation (`svg/triangulate.ts`) the rest of the
+engine uses, by the `fill-rule` the document asks for.
+
+Paint arrives through the CSS cascade rather than off the attribute alone: the rules in the
+document's `<style>` blocks are resolved onto the elements that match them (`svg/css.ts`), with
+a presentation attribute the weakest of the three levels and the element's inline `style` the
+strongest. A document that paints through classes - which is how an editor writes a shared
+palette - would otherwise draw entirely in SVG's initial fill, which is black rather than
+nothing.
 
 What comes out is ordinary scene content. The nodes are `Path`s like any other, so they pick,
 cull, z-sort, take shadows and can be transformed or restyled individually after the load — the
@@ -503,13 +510,31 @@ that was clicked. The nested groups carry no transform — each element's CTM is
 points on the way down, so they mark structure and place nothing.
 
 ```ts
-const svg = loadSvgDocument(text, { rootMatrix: flipY })
-handle.scene.root.addChild(svg)
+const doc = loadSvgDocument(text, { fit: { width: 120, height: 120 } });
+handle.scene.root.addChild(doc.root);
+if (doc.notes.length > 0) console.warn(doc.notes);
 ```
 
-The parser covers `svg`, `g`, `a`, `switch` as containers and `path`, `rect`, `circle`,
-`ellipse`, `line`, `polyline`, `polygon` as geometry, plus `linearGradient` / `radialGradient`.
-Anything outside that set is skipped rather than approximated.
+The result carries the document's own geometry - `viewBox`, `width`, `height`,
+`preserveAspectRatio` - so a caller placing an asset at a size does not have to parse the markup
+a second time to find out how big it thinks it is. `fit` does that placement, mapping the
+viewBox onto a box of the given size (`svg/viewBox.ts`) and writing the result to the returned
+group's own x/y/scale rather than into the points, so a resize costs a scale write instead of
+re-flattening every curve.
+
+The parser covers `svg` (nested ones as their own viewports), `g`, `a`, `switch` as containers,
+`use`/`symbol` as references, and `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`,
+`polygon` as geometry, plus `linearGradient` / `radialGradient` and the `<style>` cascade.
+Anything outside that set is skipped rather than approximated - and **reported**: every element,
+property, selector or reference the loader passed over is counted onto `notes`. A group that is
+missing things is otherwise indistinguishable from a group that was always going to look like
+that, which is what turns an unread construct into a bug report about the wrong colour weeks
+later.
+
+What comes back is not listening. A drag walks up to the nearest enclosing `Group` and stops at
+the first one that is not draggable, so artwork dropped into a draggable object would otherwise
+stand between the pointer and the object that owns it - the drag dies while selection goes on
+working. `listening: true` opts in where the paths themselves should be pickable.
 
 #### Method 2 — rasterizing (`handle.images.fromSvg`)
 
@@ -537,7 +562,7 @@ falls back to whatever font is already available. Everything the document needs 
 | **Pro** | Faster to render — triangles are native to the GPU and no texture is bound | Fully supported: the browser draws it, so every SVG feature works |
 | | Stays sharp at any zoom — it is geometry, not pixels | No post-load preprocessing — SVG in, image out |
 | | Less memory: vertices only | One node and one draw, however complex the document |
-| **Con** | Not every SVG feature is supported — no filters, clipping, masks or `<use>` | Not sharp: fixed at the resolution it was rasterized at, and blurs when zoomed in |
+| **Con** | Not every SVG feature is supported — no filters, clipping or masks (`notes` says which were skipped) | Not sharp: fixed at the resolution it was rasterized at, and blurs when zoomed in |
 | | Curves are flattened at load, against a fixed tolerance | Requires a texture, and the upload that goes with it |
 | | Per-element nodes cost more scene bookkeeping than one image | Slower to render, and uses more memory |
 

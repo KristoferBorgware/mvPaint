@@ -1,8 +1,11 @@
 // Polygon nesting: which of a set of flattened rings are solids and which are holes, by
 // even-odd containment - a contour nested inside an even number of others is a solid (its own
 // region), inside an odd number is a hole of its immediate (smallest) containing solid. This
-// robustly covers well-defined shapes with holes (donuts, nested donuts). Nonzero-winding fill
-// rule is a possible follow-up.
+// robustly covers well-defined shapes with holes (donuts, nested donuts).
+//
+// That is the EVEN-ODD rule. The other one a path can be filled with is nonzero, which decides
+// solid from hole by the direction a ring is wound rather than by what contains it - see
+// nonzero.ts, and FillRule below for which of the two a shape asks for.
 //
 // It lives beside the mesh formats rather than under svg/ because three unrelated things need
 // it: filling an SVG path, filling a glyph outline, and deciding which side of a contour a
@@ -15,6 +18,18 @@ export interface ContourGroup {
   outer: Vector2Like[]
   holes: Vector2Like[][]
 }
+
+/**
+ * Which rule decides what a set of rings fills.
+ *
+ * 'nonzero' reads the direction each ring is wound in: a ring laid over another wound the same
+ * way is more solid, and only one wound the other way is a hole. It is SVG's own default and
+ * the rule a font is drawn with. 'evenodd' reads containment: a ring inside another is a hole,
+ * whichever way either is wound. The two agree on a shape whose holes are wound against its
+ * outers, which is what an editor emits, and differ on same-winding nesting and on a ring that
+ * crosses itself.
+ */
+export type FillRule = 'nonzero' | 'evenodd'
 
 /** Shoelace signed area; positive = counter-clockwise. */
 export function signedArea(points: readonly Vector2Like[]): number {
@@ -64,10 +79,17 @@ export function nestingDepths(rings: readonly (readonly Vector2Like[])[]): numbe
   return depth
 }
 
+/**
+ * The even-odd grouping of a set of contours: each solid region with the holes inside it.
+ *
+ * A contour of three or more points is a region whether or not it is closed. Filling closes an
+ * open subpath implicitly (SVG 1.1 §11.4, and ShapeContext.fill() reads it the same way), so
+ * `closed` speaks for the stroke - where the closing segment is drawn or is not - and says
+ * nothing about the area.
+ */
 export function classifyContours(contours: readonly Contour[]): ContourGroup[] {
-  // Only closed contours with real area participate in fill.
   const rings = contours
-    .filter((c) => c.closed && c.points.length >= 3)
+    .filter((c) => c.points.length >= 3)
     .map((c) => c.points as Vector2Like[])
   const n = rings.length
   if (n === 0) return []

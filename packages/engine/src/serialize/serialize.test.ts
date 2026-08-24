@@ -8,6 +8,7 @@ import { Group } from '../shapes/Group'
 import { Image } from '../shapes/Image'
 import { Layer } from '../shapes/Layer'
 import { Rect } from '../shapes/Rect'
+import { UniformVectorText } from '../shapes/UniformVectorText'
 import type { ShapeContext } from '../shapes/ShapeContext'
 import { nextZIndex, peekZIndex } from '../shapes/zOrder'
 import type { ImageTexture } from '../image/ImageTexture'
@@ -63,6 +64,20 @@ it('a document round-trips to an equal scene', () => {
     JSON.stringify(toObject(restored)) === JSON.stringify(toObject(original)),
     'and writing it back out again gives the same document',
   )
+})
+
+it('a uniform text node is written as the attributes it takes back', () => {
+  // Its content is `text`, and the run list underneath is derived from it. Writing the list as
+  // well would name the content twice - and a uniform text node refuses `runs` in its
+  // constructor, so a document carrying one cannot be read at all.
+  const original = new UniformVectorText({ text: 'hello', fontSize: 18, fontStyle: 'bold' })
+  const snapshot = toObject(original)
+  assert(snapshot.attrs.text === 'hello', 'the string is in the document')
+  assert(!('runs' in snapshot.attrs), 'and the runs it is rebuilt into are not')
+
+  const restored = fromObject(JSON.parse(JSON.stringify(snapshot))) as UniformVectorText
+  assert(restored.text === 'hello' && restored.fontSize === 18, 'so it reads back as what it was')
+  assert(restored.fontStyle === 'bold' && restored.runs[0].style?.fontStyle === 'bold', 'with the run rebuilt from it')
 })
 
 it('reading a document winds the stacking counter past it', () => {

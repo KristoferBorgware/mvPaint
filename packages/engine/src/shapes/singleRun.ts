@@ -27,7 +27,7 @@ import type { RGBA } from '../render/meshFormat'
 import type { ColorInput } from '../render/color'
 import { layoutText, type FontProvider, type TextRunStyle } from '../text/layout'
 import type { FontStyle } from '../text/msdfProvider'
-import { Text } from './Text'
+import { Text, textAttrDefaults } from './Text'
 
 /** The size a uniform text node starts at. Deliberately not the engine's 32 - see the class headers. */
 export const UNIFORM_TEXT_FONT_SIZE = 12
@@ -37,6 +37,38 @@ export const UNIFORM_TEXT_FILL: RGBA = [0, 0, 0, 1]
 
 /** A `fill` of null paints nothing, which for glyphs means transparent rather than absent. */
 const NO_PAINT: RGBA = [0, 0, 0, 0]
+
+/** See Node.attrDefaults. */
+let cachedUniformTextAttrDefaults: Readonly<Record<string, unknown>> | undefined
+
+/**
+ * What a uniform text node's attributes go back to on reset - a Text's, with `runs` taken out
+ * and the five this class adds put in.
+ *
+ * `runs` is absent because it is not an attribute here: the run list is derived from `text` and
+ * the style, rebuilt on every write, so a document carrying both would name the content twice and
+ * a reset would restore a list the next re-shape overwrites. It is also what a uniform node
+ * refuses in its constructor, so a serialised one has to be readable without it.
+ *
+ * Built on FIRST USE, for the reason textAttrDefaults() is - see the note there.
+ */
+export function uniformTextAttrDefaults(): Readonly<Record<string, unknown>> {
+  if (!cachedUniformTextAttrDefaults) {
+    const base: Record<string, unknown> = { ...textAttrDefaults() }
+    delete base.runs
+    cachedUniformTextAttrDefaults = Object.freeze({
+      ...base,
+      // A uniform text node paints black rather than a Shape's nothing - see the constructor.
+      fill: UNIFORM_TEXT_FILL,
+      text: '',
+      fontSize: UNIFORM_TEXT_FONT_SIZE,
+      fontStyle: 'normal',
+      textDecoration: '',
+      letterSpacing: 0,
+    })
+  }
+  return cachedUniformTextAttrDefaults
+}
 
 /** A measured block: what `measureSize` reports. */
 export interface TextSize {
@@ -181,7 +213,32 @@ export function withSingleRun<T extends TextClass>(
       this.syncRun()
     }
 
+    // --- the attribute manifest ---------------------------------------------------------------
+    //
+    // The five below are attributes like any other: `node.attrs` enumerates them, a property
+    // inspector walks them, resetAttr puts one back, and toObject writes them. `runs` is dropped
+    // in the same breath, because on this node it is derived rather than held - see
+    // uniformTextAttrDefaults.
+
+    protected override attrKeys(): readonly string[] {
+      return [
+        ...super.attrKeys().filter((key) => key !== 'runs'),
+        'text',
+        'fontSize',
+        'fontStyle',
+        'textDecoration',
+        'letterSpacing',
+      ]
+    }
+
+    protected override attrDefaults(): Readonly<Record<string, unknown>> {
+      return uniformTextAttrDefaults()
+    }
+
     // --- the attributes ---------------------------------------------------------------------
+    //
+    // Each announces itself, like every other attribute on a node: a property inspector watching
+    // 'textChange' hears `node.text = 'hi'` and `node.setAttr('text', 'hi')` alike.
 
     /** The string this node draws. */
     get text(): string {
@@ -189,8 +246,10 @@ export function withSingleRun<T extends TextClass>(
     }
     set text(value: string) {
       if (value === this.textValue) return
+      const previous = this.textValue
       this.textValue = value
       this.syncRun()
+      this.announce('text', previous, value)
     }
 
     /** Size in world px. */
@@ -199,8 +258,10 @@ export function withSingleRun<T extends TextClass>(
     }
     set fontSize(value: number) {
       if (value === this.fontSizeValue) return
+      const previous = this.fontSizeValue
       this.fontSizeValue = value
       this.syncRun()
+      this.announce('fontSize', previous, value)
     }
 
     /**
@@ -216,8 +277,10 @@ export function withSingleRun<T extends TextClass>(
       // Resolved before it is stored, so a typo throws at the assignment that made it rather
       // than at the next frame that tries to draw with it.
       toFontStyle(value)
+      const previous = this.fontStyleValue
       this.fontStyleValue = value
       this.syncRun()
+      this.announce('fontStyle', previous, value)
     }
 
     /** 'underline', 'line-through', both, or '' for neither. */
@@ -227,8 +290,10 @@ export function withSingleRun<T extends TextClass>(
     set textDecoration(value: string) {
       if (value === this.textDecorationValue) return
       toDecorations(value)
+      const previous = this.textDecorationValue
       this.textDecorationValue = value
       this.syncRun()
+      this.announce('textDecoration', previous, value)
     }
 
     /** Extra tracking between glyphs, world px. */
@@ -237,8 +302,10 @@ export function withSingleRun<T extends TextClass>(
     }
     set letterSpacing(value: number) {
       if (value === this.letterSpacingValue) return
+      const previous = this.letterSpacingValue
       this.letterSpacingValue = value
       this.syncRun()
+      this.announce('letterSpacing', previous, value)
     }
 
     // --- the inherited ones this node actually draws from -------------------------------------

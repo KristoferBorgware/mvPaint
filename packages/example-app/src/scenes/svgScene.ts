@@ -7,9 +7,12 @@ import { EXAMPLE_SVG } from '../svg/exampleSvg'
 import type { SceneContent } from './types'
 
 export function buildSvgScene(scene: Scene): SceneContent {
-  // The root matrix flips Y (SVG is y-down, the scene is y-up) and centres the 0..200
-  // artwork in the view.
-  const svgDoc = loadSvgDocument(EXAMPLE_SVG, { rootMatrix: [1.6, 0, 0, 1.6, -160, -160] })
-  scene.root.addChild(svgDoc)
+  // `fit` maps the document's own viewBox onto a 320-unit square and lands on the returned
+  // group's transform, so the placement below is a write rather than a second parse. SVG is
+  // y-down and so is the scene, so nothing is flipped.
+  const svgDoc = loadSvgDocument(EXAMPLE_SVG, { fit: { width: 320, height: 320 } })
+  svgDoc.root.x -= 160
+  svgDoc.root.y -= 160
+  scene.root.addChild(svgDoc.root)
   return {}
 }

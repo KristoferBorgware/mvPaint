@@ -281,6 +281,25 @@ function makeAttrsView(node: Node): Record<string, unknown> {
   })
 }
 
+/**
+ * Whether `object[key] = value` would land somewhere the object can read back - an accessor
+ * with a setter, or a data field, its own or anywhere up the prototype chain.
+ *
+ * What setAttr consults to stay symmetric with getAttr. The two cases it says no to are the ones
+ * where an assignment does not work: a getter with no setter (which throws under strict mode, and
+ * every module here is one), and a name the class does not carry at all.
+ */
+function isWritableProperty(object: object, key: string): boolean {
+  for (let level: object | null = object; level !== null; level = Object.getPrototypeOf(level)) {
+    const descriptor = Object.getOwnPropertyDescriptor(level, key)
+    if (!descriptor) continue
+    return descriptor.get !== undefined || descriptor.set !== undefined
+      ? descriptor.set !== undefined
+      : descriptor.writable === true
+  }
+  return false
+}
+
 /** An AABB as the x/y/width/height a caller measures with. */
 function rectOf(box: AABB): ClientRect {
   return { x: box.min.x, y: box.min.y, width: box.max.x - box.min.x, height: box.max.y - box.min.y }
@@ -800,14 +819,27 @@ export class Node {
    * announce), so this raises nothing of its own and `node.x = 5` and `node.setAttr('x', 5)`
    * are indistinguishable to a watcher.
    *
-   * The exception is an attribute backed by a set<Key>() METHOD rather than a property - some
-   * are read-only properties paired with a method that also invalidates a cache - which is
-   * preferred when the class declares one. A method cannot announce from an assignment that
-   * never happens, so the comparison is made here for that path alone.
+   * THE PROPERTY WINS, which is what makes this and getAttr() inverses: getAttr reads `this[key]`
+   * and so, wherever `this[key]` can be written, does this. A set<Key>() METHOD is the fallback
+   * for a key the property cannot take - `runs` is a read-only property paired with setRuns(),
+   * which also invalidates the cached shaping - and it is reached only when there is no writable
+   * property of that name. A method cannot announce from an assignment that never happens, so
+   * the comparison is made here for that path alone.
+   *
+   * Deciding it the other way round is a trap, and a silent one. Where a class pairs a writable
+   * property with a similarly-named method that does something ELSE - setText(text, style)
+   * replaces a text node's runs rather than setting its `text` - the write lands in one field
+   * while getAttr reads the other: the value never arrives, and no change event goes out, since
+   * the two halves compare equal.
    */
   setAttr(key: string, value: unknown): this {
-    const setterName = 'set' + key.charAt(0).toUpperCase() + key.slice(1)
     const target = this as unknown as Record<string, unknown>
+    if (isWritableProperty(this, key)) {
+      target[key] = value
+      return this
+    }
+
+    const setterName = 'set' + key.charAt(0).toUpperCase() + key.slice(1)
     const setter = target[setterName]
     if (typeof setter !== 'function') {
       target[key] = value

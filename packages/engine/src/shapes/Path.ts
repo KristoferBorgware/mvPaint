@@ -15,7 +15,8 @@ import type { MeshSink } from '../render/meshFormat'
 import { contoursLength, pointAtLength } from '../render/arcLength'
 import { strokeContours, type Contour } from '../render/stroke'
 import { flattenPathData } from '../svg/flattenPath'
-import { classifyContours, type ContourGroup } from '../render/contours'
+import { classifyContours, type ContourGroup, type FillRule } from '../render/contours'
+import { nonzeroGroups } from '../render/nonzero'
 import { triangulateGroup } from '../svg/triangulate'
 
 export interface PathOptions extends ShapeOptions {
@@ -27,6 +28,8 @@ export interface PathOptions extends ShapeOptions {
   tolerance?: number
   /** When false, the fill triangles are not emitted (e.g. SVG fill="none"). Default true. */
   filled?: boolean
+  /** Which rule decides what the outline fills. Default 'nonzero', as in SVG. See FillRule. */
+  fillRule?: FillRule
 }
 
 
@@ -46,6 +49,7 @@ function pathAttrDefaults(): Readonly<Record<string, unknown>> {
     ...shapeAttrDefaults(),
     contours: Object.freeze([]),
     filled: true,
+    fillRule: 'nonzero',
   }))
 }
 
@@ -56,6 +60,7 @@ function dataPathAttrDefaults(): Readonly<Record<string, unknown>> {
     d: undefined,
     tolerance: undefined,
     filled: true,
+    fillRule: 'nonzero',
   }))
 }
 
@@ -90,10 +95,33 @@ export class Path extends Shape {
     if (value === this._contours) return
     const previous = this._contours
     this._contours = value
-    this._groups = classifyContours(value)
+    this.regroup()
     this.extentCache = undefined
     this.markGeometryDirty()
     this.announce('contours', previous, value)
+  }
+
+  /** The outline read as regions, by whichever rule this path fills with. */
+  private regroup(): void {
+    this._groups =
+      this._fillRule === 'evenodd' ? classifyContours(this._contours) : nonzeroGroups(this._contours)
+  }
+
+  /**
+   * Which rule decides what the outline fills - 'nonzero' (the default, and SVG's) or 'evenodd'.
+   * See FillRule for what the two do differently. Assigning it regroups and re-tessellates.
+   */
+  private _fillRule: FillRule = 'nonzero'
+  get fillRule(): FillRule {
+    return this._fillRule
+  }
+  set fillRule(value: FillRule) {
+    if (value === this._fillRule) return
+    const previous = this._fillRule
+    this._fillRule = value
+    this.regroup()
+    this.markGeometryDirty()
+    this.announce('fillRule', previous, value)
   }
 
   /**
@@ -148,6 +176,9 @@ export class Path extends Shape {
     // earcut triangulation itself happens in buildGeometry(), which Shape's tessellate() only
     // calls on a cache miss - so it runs once per shape, lazily rather than eagerly.
     this._tolerance = options.tolerance
+    // The field rather than the accessor, so the outline below is grouped once, by the rule this
+    // path is being built with rather than by the default and then again.
+    this._fillRule = options.fillRule ?? 'nonzero'
     if (options.contours) this.contours = options.contours
     else this.d = options.d
     this.filled = options.filled ?? true
@@ -161,8 +192,8 @@ export class Path extends Shape {
    */
   protected override attrKeys(): readonly string[] {
     return this._d !== undefined
-      ? [...super.attrKeys(), 'd', 'tolerance', 'filled']
-      : [...super.attrKeys(), 'contours', 'filled']
+      ? [...super.attrKeys(), 'd', 'tolerance', 'filled', 'fillRule']
+      : [...super.attrKeys(), 'contours', 'filled', 'fillRule']
   }
 
   protected override attrDefaults(): Readonly<Record<string, unknown>> {
