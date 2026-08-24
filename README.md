@@ -482,8 +482,22 @@ generation, loading, shaping, both render paths, and runtime font switching — 
 
 ### SVG
 
-`loadSvg()` parses a document into `Path` nodes, flattening curves and carrying across fills,
-gradients and strokes.
+`loadSvgDocument()` parses a document into `Path` nodes, flattening curves and carrying across
+fills, gradients, strokes, the rules in its `<style>` blocks and what its `<use>` elements point
+at.
+
+```ts
+const doc = loadSvgDocument(text, { fit: { width: 120, height: 120 } })
+scene.root.addChild(doc.root)
+
+doc.viewBox; // the rectangle the document says it is, or null
+doc.notes; // what the loader could not read, counted - empty when it read all of it
+```
+
+`fit` maps the document's `viewBox` onto a box of the given size, honouring its
+`preserveAspectRatio`, and lands on the returned group's own transform - so resizing a loaded
+document is a scale write rather than a re-parse. What comes back does not listen: it is a
+picture, and what may be clicked is the application's decision (`listening: true` opts in).
 
 ## Animation
 

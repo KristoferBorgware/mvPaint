@@ -1090,9 +1090,11 @@ it('getAttr/setAttr/attrs: string-keyed access to a node\'s typed fields', () =>
     assert(view.x === 100, 'attrs is a live view, so a held reference follows the node')
     assert(rect.attrs === view, 'and it is one object per node rather than a new one per read')
 
-    // A class that declares a dedicated setFoo() alongside a plain foo field: setAttr must
-    // call it rather than assign foo directly, since some real attributes (Text.runs,
-    // just below) only exist as a read-only property paired with such a method.
+    // The two ways an attribute can be backed, and which one setAttr picks. `foo` is a writable
+    // property that also has a set<Key>() method meaning something else - setFoo takes a
+    // diameter, which is not what `foo` holds - and the property is what a write must reach, or
+    // getAttr and setAttr are not inverses. `bar` is a getter with no setter, which is the real
+    // case below (Text.runs), and there the method is all there is.
     class Widget extends Node {
       foo = 1
       setFooCalls = 0
@@ -1100,13 +1102,25 @@ it('getAttr/setAttr/attrs: string-keyed access to a node\'s typed fields', () =>
         this.setFooCalls++
         this.foo = value * 2
       }
+      private barValue = 0
+      setBarCalls = 0
+      get bar(): number {
+        return this.barValue
+      }
+      setBar(value: number): void {
+        this.setBarCalls++
+        this.barValue = value
+      }
       protected override attrKeys(): readonly string[] {
-        return [...super.attrKeys(), 'foo']
+        return [...super.attrKeys(), 'foo', 'bar']
       }
     }
     const widget = new Widget()
     widget.setAttr('foo', 5)
-    assert(widget.setFooCalls === 1 && widget.foo === 10, 'setAttr prefers a declared set<Key>() method over a direct assignment')
+    assert(widget.foo === 5 && widget.setFooCalls === 0, 'setAttr writes the property, whatever a similarly named method would have done')
+    assert(widget.getAttr('foo') === 5, 'so the value that was written is the value that reads back')
+    widget.setAttr('bar', 7)
+    assert(widget.bar === 7 && widget.setBarCalls === 1, 'a property that cannot be written falls back to its set<Key>() method')
 
     // Text.runs is exactly that real case: a getter with no setter, paired with
     // setRuns() (which also invalidates the shaping cache) - a plain assignment would throw.

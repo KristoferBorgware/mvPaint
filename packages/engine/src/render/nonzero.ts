@@ -11,19 +11,22 @@
 // worse, because earcut takes a simple polygon and a self-crossing one is not one, so the fill
 // comes back as an arbitrary mess of triangles.
 //
-// Two steps here answer the question the way the outline was drawn:
+// Three steps here answer the question the way the outline was drawn:
 //
 //   simpleLoops    cut a ring at its self-crossings into loops that cross nothing, so what
 //                  reaches the triangulator is always a simple polygon;
 //   windingGroups  decide solid from hole by DIRECTION rather than by nesting, so a piece laid
-//                  over another is a second solid and only a ring wound the other way is a hole.
+//                  over another is a second solid and only a ring wound the other way is a hole;
+//   nonzeroGroups  the same decision made by the winding number itself, for an outline whose
+//                  rings share no one direction - which a glyph's do and an SVG path's do not.
 //
 // Overlapping solids are left overlapping. Two triangulations painting the same pixel twice in
 // the same colour is the union, which is what the nonzero rule asks for, and finding the true
 // outline of that union is polygon-boolean work this does not need to do.
 //
 // The limit is winding numbers beyond ±1: a ring wound the other way INSIDE an overlap is a hole
-// here and is filled under a strict nonzero reading. No text face does that.
+// in windingGroups and is filled under a strict nonzero reading. No text face does that, and
+// nonzeroGroups reads the number rather than the direction, so it holds there too.
 
 import type { Vector2Like } from '../math/Vector2'
 import { pointInPolygon, signedArea, type ContourGroup } from './contours'
@@ -92,6 +95,23 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
   if (n < 3) return []
 
   const cuts: { at: number; point: Vector2Like }[][] = points.map(() => [])
+  // A box per edge, so the pass below rejects almost every pair on four comparisons. The pass is
+  // over every pair of edges either way, and a flattened curve is hundreds of short edges nearly
+  // none of which are anywhere near each other - the work saved is the crossing solve, which is
+  // two subtractions per coordinate, a determinant and two divisions.
+  const loX = new Float64Array(n)
+  const loY = new Float64Array(n)
+  const hiX = new Float64Array(n)
+  const hiY = new Float64Array(n)
+  for (let i = 0; i < n; i++) {
+    const a = points[i]
+    const b = points[(i + 1) % n]
+    loX[i] = Math.min(a.x, b.x)
+    loY[i] = Math.min(a.y, b.y)
+    hiX[i] = Math.max(a.x, b.x)
+    hiY[i] = Math.max(a.y, b.y)
+  }
+
   let found = false
   for (let i = 0; i < n; i++) {
     const a = points[i]
@@ -100,6 +120,7 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
       // The last edge runs back to the first vertex, so it is adjacent to edge 0 and the two
       // share that vertex rather than crossing at it.
       if (i === 0 && k === n - 1) continue
+      if (hiX[i] < loX[k] || hiX[k] < loX[i] || hiY[i] < loY[k] || hiY[k] < loY[i]) continue
       const c = points[k]
       const d = points[(k + 1) % n]
       const hit = crossing(a, b, c, d)
@@ -416,5 +437,120 @@ export function windingGroups(rings: readonly (readonly Vector2Like[])[]): Conto
     if (parent >= 0) groups[groupOfRing.get(parent)!].holes.push(ring as Vector2Like[])
   })
 
+  return groups
+}
+
+/**
+ * The nonzero grouping of a set of contours: each solid region with the holes inside it, decided
+ * by the WINDING NUMBER rather than by the direction the rings happen to run in.
+ *
+ * windingGroups above answers the same question for a glyph, where every outer boundary is wound
+ * the same way and the largest ring says which way that is. An SVG path carries no such promise -
+ * two unrelated subpaths of one `d` are often wound against each other, and reading the second as
+ * a hole of nothing makes it vanish - so this asks the rule directly instead.
+ *
+ * Each ring is stepped off to either side at the middle of its longest edge, and the winding
+ * number of the whole set is taken at both points. Filled on one side only is a boundary: the
+ * ring is an outer when the filled side is its own inside, and a hole when the filled side is
+ * out. Filled on neither side is nothing; filled on both is a seam inside material that another
+ * ring already fills, and is dropped rather than painted over - overpainting is invisible at
+ * full alpha and doubles the ink at any other.
+ *
+ * Self-crossings are cut out first (see simpleLoops), so every ring reaching the triangulator is
+ * a simple polygon - which is the one part of this that grows as the SQUARE of a ring's point
+ * count, since every pair of its edges is asked whether it crosses. It runs once per outline, at
+ * the write that set one; a path dense enough for that to show is one to flatten at a coarser
+ * tolerance. Rings that TOUCH are the one case this reads by luck rather than by rule:
+ * the step off an edge lands on the neighbouring ring's boundary, where a winding number is
+ * undefined. The longest edge is chosen for the sample because it is the one least likely to be
+ * that edge.
+ */
+export function nonzeroGroups(contours: readonly Contour[]): ContourGroup[] {
+  const rings = contours
+    .flatMap((contour) => simpleLoops(contour.points))
+    .filter((ring) => ring.length >= 3)
+  if (rings.length === 0) return []
+
+  // A box per ring, and the whole outline's. The boxes are what keeps this from being
+  // quadratic in the total point count: a point outside a closed ring's box is outside the ring,
+  // so that ring adds nothing to the winding number there and its edges need not be walked. A
+  // drawing is mostly rings that are nowhere near each other, so almost every pair is rejected
+  // on four comparisons - 240 paths of the Ghostscript tiger group in a millisecond rather than
+  // in thirty.
+  const boxes = rings.map((ring) => {
+    let loX = Infinity, loY = Infinity, hiX = -Infinity, hiY = -Infinity
+    for (const p of ring) {
+      if (p.x < loX) loX = p.x
+      if (p.y < loY) loY = p.y
+      if (p.x > hiX) hiX = p.x
+      if (p.y > hiY) hiY = p.y
+    }
+    return { loX, loY, hiX, hiY }
+  })
+  const extent = Math.max(
+    Math.max(...boxes.map((b) => b.hiX - b.loX)),
+    Math.max(...boxes.map((b) => b.hiY - b.loY)),
+  )
+  // How far to step off an edge, relative to the outline's own size - this is asked of paths in
+  // whatever units the caller uses, from a 36-unit emoji to a 2048-unit em.
+  const step = Math.max((extent || 1) * 1e-6, Number.MIN_VALUE)
+
+  const filledAt = (px: number, py: number): boolean => {
+    let winding = 0
+    for (let i = 0; i < rings.length; i++) {
+      const box = boxes[i]
+      if (px < box.loX || px > box.hiX || py < box.loY || py > box.hiY) continue
+      winding += windingAt(px, py, [rings[i]])
+    }
+    return winding !== 0
+  }
+
+  const outers: Vector2Like[][] = []
+  const holes: { ring: Vector2Like[]; on: Vector2Like }[] = []
+  for (const ring of rings) {
+    // The longest edge, and the point halfway along it.
+    let best = 0
+    let bestLength = -1
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      if (length > bestLength) {
+        bestLength = length
+        best = i
+      }
+    }
+    if (!(bestLength > 0)) continue
+    const a = ring[best]
+    const b = ring[(best + 1) % ring.length]
+    const on = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    const nx = ((a.y - b.y) / bestLength) * step
+    const ny = ((b.x - a.x) / bestLength) * step
+
+    const one = { x: on.x + nx, y: on.y + ny }
+    const two = { x: on.x - nx, y: on.y - ny }
+    const oneFilled = filledAt(one.x, one.y)
+    const twoFilled = filledAt(two.x, two.y)
+    if (oneFilled === twoFilled) continue
+
+    const filled = oneFilled ? one : two
+    if (pointInPolygon(filled.x, filled.y, ring)) outers.push(ring)
+    else holes.push({ ring, on })
+  }
+
+  const groups: ContourGroup[] = outers.map((outer) => ({ outer, holes: [] }))
+  const areas = outers.map((outer) => Math.abs(signedArea(outer)))
+  for (const hole of holes) {
+    // The smallest solid the ring sits in. A hole inside nothing is dropped: earcut takes a hole
+    // its outer ring contains, and one it does not produces triangles that are neither.
+    let parent = -1
+    let parentArea = Infinity
+    for (let i = 0; i < outers.length; i++) {
+      if (areas[i] >= parentArea || !pointInPolygon(hole.on.x, hole.on.y, outers[i])) continue
+      parent = i
+      parentArea = areas[i]
+    }
+    if (parent >= 0) groups[parent].holes.push(hole.ring)
+  }
   return groups
 }

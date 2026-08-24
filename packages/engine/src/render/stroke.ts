@@ -433,8 +433,9 @@ function strokeRun(
  * So hole rings are stroked with the alignment flipped, and the ribbon lands on the fill in
  * both cases - a donut with an inside stroke keeps both of its silhouettes exactly.
  *
- * Which rings are holes is the same even-odd nesting question the fill answers (see
- * contours.ts), asked here only when the answer can matter.
+ * Which rings are holes is the even-odd nesting question (see contours.ts), asked here only
+ * when the answer can matter. It is asked of the rings as they were written, whichever rule the
+ * fill is being read by: a stroke follows the outline, and the outline does not move.
  */
 export function strokeContours(contours: readonly Contour[], sink: MeshSink, options: StrokeOptions): void {
   const align = options.align ?? 'center'

@@ -8,7 +8,9 @@
 import { expect, it } from 'vitest'
 import type { Vector2Like } from '../math/Vector2'
 import { flattenPathData } from './flattenPath'
+import type { ContourGroup } from '../render/contours'
 import { classifyContours, signedArea, pointInPolygon } from '../render/contours'
+import { nonzeroGroups } from '../render/nonzero'
 import { triangulateGroup } from './triangulate'
 import { applyPoint, multiply, parseTransform, scaleFactor, transformContours, IDENTITY } from './matrix'
 import { parseColor } from './color'
@@ -80,6 +82,61 @@ it('triangulate: covers (outer - hole) area, no triangle centroid inside the hol
       if (pointInPolygon(cx, cy, hole)) anyInHole = true
     }
     assert(!anyInHole, 'no triangle centroid falls inside the hole')
+})
+
+// The area a group of rings fills, triangulated.
+function groupArea(group: ContourGroup): number {
+    const { vertices, indices } = triangulateGroup(group)
+    return trianglesArea(vertices, indices)
+}
+
+it('classify: an unclosed subpath is filled as if it were closed', () => {
+    // Twemoji draws a face as one unclosed arc, and a fifth of the set is written that way. `z`
+    // says the OUTLINE joins up; SVG closes an open subpath implicitly when it FILLS one (1.1
+    // 11.4), so reading `z` as a condition of the fill loses the face and keeps the eyes that
+    // are drawn on top of it.
+    const face = 'M36 18c0 9.941-8.059 18-18 18S0 27.941 0 18 8.059 0 18 0s18 8.059 18 18'
+    const open = flattenPathData(face)
+    assert(open.length === 1 && !open[0].closed, 'the subpath is open, as the document wrote it')
+
+    const groups = classifyContours(open)
+    assert(groups.length === 1, 'and is one region all the same')
+    const area = groupArea(groups[0])
+    assert(area > 1000 && area < 1030, 'covering the disc it draws (pi * 18^2 = 1017.9)')
+
+    // The control: the same path with the `z` the document left out.
+    const closed = classifyContours(flattenPathData(`${face} Z`))
+    assert(near(area, groupArea(closed[0]), 1e-6), 'the same region either way, which is the point')
+
+    // So a Path built from it draws, where before it had no fill triangles and no valid extent.
+    const path = new Path({ d: face, fill: [1, 0, 0, 1] })
+    const { sink, verts } = capturingSink()
+    path.tessellate(sink)
+    assert(verts.some((v) => v.isFill), 'the shape fills')
+})
+
+it('fill rules: the same two rings, read two ways', () => {
+    // Wound the SAME way, which is where nesting and winding genuinely disagree. An editor winds
+    // a hole against its outer and there the two rules agree, so this is the case that says
+    // which of them is being applied.
+    const contours = flattenPathData('M0 0 L100 0 L100 100 L0 100 Z M25 25 L75 25 L75 75 L25 75 Z')
+
+    const nested = classifyContours(contours)
+    assert(nested.length === 1 && nested[0].holes.length === 1, 'even-odd: a ring inside another is a hole')
+    assert(near(groupArea(nested[0]), 7500, 1e-3), 'so the fill is the outer less the inner')
+
+    const wound = nonzeroGroups(contours)
+    assert(wound.length === 1 && wound[0].holes.length === 0, 'nonzero: the inner ring adds winding rather than cancelling it')
+    assert(near(groupArea(wound[0]), 10000, 1e-3), 'so the region is solid')
+
+    // Where the two DO agree - a hole wound against its outer - they agree exactly.
+    const donut = nonzeroGroups(flattenPathData(SQUARE_WITH_HOLE))
+    assert(donut.length === 1 && donut[0].holes.length === 1, 'a hole wound the other way is a hole under either rule')
+
+    // Two rings wound against each other but nested in nothing are two solids. Reading the
+    // second as a hole of nothing is what makes half a drawing disappear.
+    const apart = nonzeroGroups(flattenPathData('M0 0 L10 0 L10 10 L0 10 Z M20 0 L20 10 L30 10 L30 0 Z'))
+    assert(apart.length === 2, 'nonzero: both are solid, whichever way each one runs')
 })
 
 it('matrix: parseTransform and CTM baking (matrix baked at flatten time)', () => {

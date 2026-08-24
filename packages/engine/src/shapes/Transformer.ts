@@ -49,7 +49,7 @@ import type { Node } from './Node'
 import type { TransformableNode } from './Group'
 import { hasListener } from '../events/listenerCensus'
 import type { RGBA } from '../render/meshFormat'
-import { MV_GREEN } from '../render/color'
+import { MV_GREEN, parseColor, type ColorInput } from '../render/color'
 import {
   RESIZE_ANCHORS,
   anchorPosition,
@@ -129,16 +129,16 @@ export interface TransformerOptions {
   boundBoxFunc?: BoundBoxFunc
   /** Constrains where a handle drag is read from, in world space - see AnchorDragBoundFunc. */
   anchorDragBoundFunc?: AnchorDragBoundFunc
-  /** The four border bars. Default the mv green. */
-  borderColor?: RGBA
-  /** The inside of each handle. Default the mv green. */
-  anchorFill?: RGBA
+  /** The four border bars. Default the mv green. Live - see the accessor. */
+  borderColor?: ColorInput
+  /** The inside of each handle. Default the mv green. Live - see the accessor. */
+  anchorFill?: ColorInput
   /**
    * The ring around each handle. Default white. Named for what it looks like rather than
    * how it is drawn - it is the outer disc showing past the inner one, not a real stroke
-   * (see makeAnchor on why a stroke could not follow the zoom).
+   * (see makeAnchor on why a stroke could not follow the zoom). Live - see the accessor.
    */
-  anchorStroke?: RGBA
+  anchorStroke?: ColorInput
 }
 
 const WHITE: RGBA = [1, 1, 1, 1]
@@ -193,6 +193,11 @@ export class Transformer extends Container {
    * rotate drags, so a frame around several nodes turns with them and stays turned.
    */
   private frameRotation = 0
+  // The frame's paint, held here as well as in the parts that draw with it: a part's `fill` is a
+  // copy of what it was given (see makeEdge), and a handle's two discs carry two of the three.
+  private borderColorValue: RGBA
+  private anchorFillValue: RGBA
+  private anchorStrokeValue: RGBA
   private activeAnchor: TransformerAnchor | null = null
   private gestureHost: TransformerGestureHost | null = null
 
@@ -226,12 +231,15 @@ export class Transformer extends Container {
     this.boundBoxFunc = options.boundBoxFunc
     this.anchorDragBoundFunc = options.anchorDragBoundFunc
 
-    const borderColor = options.borderColor ?? DEFAULT_BORDER
-    const anchorFill = options.anchorFill ?? DEFAULT_ANCHOR_FILL
-    const anchorStroke = options.anchorStroke ?? DEFAULT_ANCHOR_STROKE
+    this.borderColorValue =
+      options.borderColor === undefined ? DEFAULT_BORDER : parseColor(options.borderColor)
+    this.anchorFillValue =
+      options.anchorFill === undefined ? DEFAULT_ANCHOR_FILL : parseColor(options.anchorFill)
+    this.anchorStrokeValue =
+      options.anchorStroke === undefined ? DEFAULT_ANCHOR_STROKE : parseColor(options.anchorStroke)
 
     for (const edge of EDGES) {
-      const rect = this.makeEdge(`__transformer-${edge}`, borderColor)
+      const rect = this.makeEdge(`__transformer-${edge}`, this.borderColorValue)
       this.edges.set(edge, rect)
     }
 
@@ -242,8 +250,8 @@ export class Transformer extends Container {
     // the frame appearing in the first place.
     for (const name of [...RESIZE_ANCHORS, 'rotate' as const]) {
       this.anchors.set(name, {
-        outer: this.makeAnchor(`__transformer-${name}-border`, anchorStroke, TRANSFORMER_Z_INDEX + 1),
-        inner: this.makeAnchor(`__transformer-${name}`, anchorFill, TRANSFORMER_Z_INDEX + 2),
+        outer: this.makeAnchor(`__transformer-${name}-border`, this.anchorStrokeValue, TRANSFORMER_Z_INDEX + 1),
+        inner: this.makeAnchor(`__transformer-${name}`, this.anchorFillValue, TRANSFORMER_Z_INDEX + 2),
       })
     }
 
@@ -261,6 +269,58 @@ export class Transformer extends Container {
   set enabledAnchors(value: readonly ResizeAnchor[]) {
     this.enabled = value
   }
+
+  // --- the frame's paint ---------------------------------------------------------------------
+  //
+  // Live, so a themed application restyles the frame when the theme changes rather than building
+  // a second one. Each write reaches the parts that draw with it and shows on the next frame: the
+  // colour is a fill on a unit quad or disc, and a fill needs no geometry rebuild.
+  //
+  // Each takes any form a colour can be written in and reads back as the parsed RGBA. A write is
+  // compared on the form it ARRIVES in, the rule Shape.fill follows, so a freshly built tuple is
+  // a new value even when its four numbers match the last one's.
+
+  /** The four border bars. */
+  get borderColor(): RGBA {
+    return this.borderColorValue
+  }
+  set borderColor(value: ColorInput) {
+    if (value === this.borderColorWritten) return
+    const previous = this.borderColorValue
+    this.borderColorValue = parseColor(value)
+    this.borderColorWritten = value
+    for (const edge of this.edges.values()) edge.fill = [...this.borderColorValue]
+    this.announce('borderColor', previous, this.borderColorValue)
+  }
+  private borderColorWritten: ColorInput | null = null
+
+  /** The inside of each handle. */
+  get anchorFill(): RGBA {
+    return this.anchorFillValue
+  }
+  set anchorFill(value: ColorInput) {
+    if (value === this.anchorFillWritten) return
+    const previous = this.anchorFillValue
+    this.anchorFillValue = parseColor(value)
+    this.anchorFillWritten = value
+    for (const anchor of this.anchors.values()) anchor.inner.fill = [...this.anchorFillValue]
+    this.announce('anchorFill', previous, this.anchorFillValue)
+  }
+  private anchorFillWritten: ColorInput | null = null
+
+  /** The ring around each handle - the outer disc showing past the inner one. */
+  get anchorStroke(): RGBA {
+    return this.anchorStrokeValue
+  }
+  set anchorStroke(value: ColorInput) {
+    if (value === this.anchorStrokeWritten) return
+    const previous = this.anchorStrokeValue
+    this.anchorStrokeValue = parseColor(value)
+    this.anchorStrokeWritten = value
+    for (const anchor of this.anchors.values()) anchor.outer.fill = [...this.anchorStrokeValue]
+    this.announce('anchorStroke', previous, this.anchorStrokeValue)
+  }
+  private anchorStrokeWritten: ColorInput | null = null
 
   /** The resize handles that are both enabled and switched on, plus the rotate handle. */
   private shownAnchors(): readonly TransformerAnchor[] {
@@ -327,8 +387,43 @@ export class Transformer extends Container {
       'useFirstNodeRotation',
       'rotationSnaps',
       'rotationSnapTolerance',
+      'borderColor',
+      'anchorFill',
+      'anchorStroke',
     ]
   }
+
+  /**
+   * See Node.attrDefaults. Built on the first call and kept, so the spread of the base class's
+   * own table happens long after every module has finished evaluating.
+   *
+   * `boundBoxFunc` and `anchorDragBoundFunc` are absent, as they are from attrKeys(): a
+   * constraint is a function, which no document holds and no reset has a stand-in for.
+   */
+  protected override attrDefaults(): Readonly<Record<string, unknown>> {
+    return (Transformer.attrDefaultsTable ??= Object.freeze({
+      ...super.attrDefaults(),
+      anchorSize: 10,
+      rotateAnchorOffset: 24,
+      padding: 4,
+      borderWidth: 1.5,
+      anchorBorderWidth: 1.5,
+      enabledAnchors: RESIZE_ANCHORS,
+      resizeEnabled: true,
+      rotateEnabled: true,
+      keepRatio: true,
+      flipEnabled: true,
+      centeredScaling: false,
+      useFirstNodeRotation: true,
+      rotationSnaps: undefined,
+      rotationSnapTolerance: 7,
+      borderColor: DEFAULT_BORDER,
+      anchorFill: DEFAULT_ANCHOR_FILL,
+      anchorStroke: DEFAULT_ANCHOR_STROKE,
+    }))
+  }
+
+  private static attrDefaultsTable: Readonly<Record<string, unknown>> | undefined
 
   /**
    * One border bar: a unit quad, fill only, never stroked or resized, so it costs no

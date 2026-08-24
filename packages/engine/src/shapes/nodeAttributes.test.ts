@@ -18,6 +18,8 @@ import { Image } from './Image'
 import { Layer } from './Layer'
 import { MSDFText } from './MSDFText'
 import { Node } from './Node'
+import { Transformer } from './Transformer'
+import { UniformVectorText } from './UniformVectorText'
 import { SharedLifetime } from '../resources/SharedLifetime'
 import type { ImageTexture } from '../image/ImageTexture'
 import { Path } from './Path'
@@ -227,6 +229,8 @@ it('every attribute has a default, and every default is an attribute', () => {
     new Path(),
     new Blob(),
     new MSDFText(),
+    new UniformVectorText(),
+    new Transformer(),
     new Image({ texture: stubTexture(4, 4) }),
   ]
   for (const node of nodes) {
@@ -307,4 +311,69 @@ it('absolutePosition is where x/y land in the world, and setting it is the exact
   assert(loose.absolutePosition.x === 2 && loose.absolutePosition.y === 3, 'and a node with no parent is its own world')
   loose.absolutePosition = { x: 8, y: 9 }
   assert(loose.x === 8 && loose.y === 9, 'writing one straight through')
+})
+
+/**
+ * A uniform text node's attributes are the flat ones it is written in terms of - `text`,
+ * `fontSize` - rather than the run list they are rebuilt into on every write. The list is
+ * DERIVED: it is not settable (a re-shape overwrites what a caller put there), it is not
+ * resettable (there is no run list a node goes back to), and a document carrying both would name
+ * the content twice and read back differently depending on which was applied last.
+ */
+it('a uniform text node declares the attributes it actually has', () => {
+  const text = new UniformVectorText({ text: 'before', fontSize: 20 })
+  const keys = Object.keys(text.attrs)
+  for (const key of ['text', 'fontSize', 'fontStyle', 'textDecoration', 'letterSpacing']) {
+    assert(keys.includes(key), `a uniform text node reports '${key}'`)
+  }
+  assert(!keys.includes('runs'), 'and not the run list it derives from them')
+  assert(keys.includes('align') && keys.includes('lineHeight'), 'while the block options it inherits stay')
+
+  // The write lands, and reads back through the same name it was written under. Routing it to
+  // setText() instead - a method that replaces the RUNS - left `text` stale, so the value never
+  // arrived and the next re-shape overwrote what did.
+  const heard: { oldVal: unknown; newVal: unknown }[] = []
+  text.on('textChange', (e) => heard.push(e as unknown as { oldVal: unknown; newVal: unknown }))
+  text.setAttr('text', 'after')
+  assert(text.getAttr('text') === 'after' && text.text === 'after', 'setAttr and getAttr are the same attribute')
+  assert(text.runs.length === 1 && text.runs[0].text === 'after', 'and the run it draws is rebuilt from it')
+  assert(heard.length === 1 && heard[0].oldVal === 'before' && heard[0].newVal === 'after', 'the write announces itself')
+
+  // Every one of them has a default to go back to, which is what resetAttr needs.
+  text.fontSize = 30
+  text.resetAttr('fontSize')
+  assert(text.fontSize === 12, 'resetAttr restores the size a uniform text node starts at')
+  text.resetAttr('text')
+  assert(text.text === '', 'and the empty string')
+  assert(JSON.stringify(text.attributeDefaults().fill) === '[0,0,0,1]', 'its fill goes back to black, unlike a Shape')
+})
+
+/**
+ * The selection frame's paint. Baked into its parts at construction and settable nowhere, a
+ * themed application could not restyle the frame when the theme changed - the handles kept the
+ * inner fill of whichever theme the board opened in.
+ */
+it("a Transformer's colours are attributes, and reach the parts", () => {
+  const frame = new Transformer()
+  const keys = Object.keys(frame.attrs)
+  for (const key of ['borderColor', 'anchorFill', 'anchorStroke']) {
+    assert(keys.includes(key), `the frame reports '${key}'`)
+  }
+
+  const edge = frame.findOne('.__transformer-top')
+  const inner = frame.findOne('.__transformer-top-left')
+  const ring = frame.findOne('.__transformer-top-left-border')
+  assert(edge !== null && inner !== null && ring !== null, 'the parts the three colours are drawn on')
+
+  frame.borderColor = 'red'
+  frame.anchorFill = [0, 1, 0, 1]
+  frame.anchorStroke = '#0000ff'
+  const fillOf = (node: Node) => JSON.stringify((node as unknown as { fill: unknown }).fill)
+  assert(fillOf(edge!) === '[1,0,0,1]', 'the border bars take the border colour')
+  assert(fillOf(inner!) === '[0,1,0,1]', 'the inner disc of a handle takes the anchor fill')
+  assert(fillOf(ring!) === '[0,0,1,1]', 'and the outer disc, which is what the ring is')
+  assert(JSON.stringify(frame.borderColor) === '[1,0,0,1]', 'each reads back as the parsed colour')
+
+  frame.resetAttr('anchorFill')
+  assert(fillOf(inner!) === JSON.stringify(frame.attributeDefaults().anchorFill), 'and goes back to the default it was built with')
 })
