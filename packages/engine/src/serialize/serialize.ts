@@ -22,6 +22,7 @@ import { Container } from '../shapes/Container'
 import type { Node } from '../shapes/Node'
 import { createNode } from './nodeRegistry'
 import { reserveZIndex } from '../shapes/zOrder'
+import { SharedLifetime, type Shared } from '../resources/SharedLifetime'
 
 /** One node as plain data - the shape a document is made of. */
 export interface NodeSnapshot {
@@ -168,9 +169,21 @@ export function fromObject(snapshot: NodeSnapshot, options: FromObjectOptions = 
   return node
 }
 
+/** True for a value that carries its own holder count - an ImageTexture, a SharedValue. */
+function isShared(value: unknown): value is Shared {
+  return typeof value === 'object' && value !== null && (value as { lifetime?: unknown }).lifetime instanceof SharedLifetime
+}
+
 /**
  * A live copy of a node and its subtree, sharing whatever it holds rather than rebuilding it -
  * two Images from one clone() draw the same texture, and the texture is loaded once.
+ *
+ * An attribute that carries its own holder count - an ImageTexture, most often - is retained
+ * once more for the copy, so the two nodes are two holders of one resource rather than one
+ * holder that two nodes happen to point at. destroy()ing each node's texture once each then
+ * frees it correctly, on the second call rather than the first. An attribute named in
+ * `overrides` is the caller's own object and is left alone - only what clone() itself copies
+ * gains a hold.
  *
  * That is the difference from `fromObject(toObject(node))`, and the reason both exist: a
  * document is data and cannot hold a GPU object, while a copy is a second node in the same
@@ -184,6 +197,10 @@ export function fromObject(snapshot: NodeSnapshot, options: FromObjectOptions = 
  * closes over it, so copying one gives two nodes whose handlers both talk about the first.
  */
 export function clone<T extends Node>(node: T, overrides: Readonly<Record<string, unknown>> = {}): T {
+  for (const [key, value] of Object.entries(node.attrs)) {
+    if (!(key in overrides) && isShared(value)) value.lifetime.retain()
+  }
+
   const copy = createNode(node.nodeName, { ...node.attrs, ...overrides }) as T
   if (node instanceof Container && copy instanceof Container) {
     for (const child of node.children) copy.addChild(clone(child))

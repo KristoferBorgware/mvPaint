@@ -5,10 +5,13 @@ import { Circle } from '../shapes/Circle'
 import { Container } from '../shapes/Container'
 import { CustomShape } from '../shapes/CustomShape'
 import { Group } from '../shapes/Group'
+import { Image } from '../shapes/Image'
 import { Layer } from '../shapes/Layer'
 import { Rect } from '../shapes/Rect'
 import type { ShapeContext } from '../shapes/ShapeContext'
 import { nextZIndex, peekZIndex } from '../shapes/zOrder'
+import type { ImageTexture } from '../image/ImageTexture'
+import { SharedLifetime } from '../resources/SharedLifetime'
 import { registerNodeType } from './nodeRegistry'
 import { clone, fromObject, toObject, type NodeSnapshot } from './serialize'
 
@@ -137,4 +140,36 @@ it('clone copies a subtree live, sharing what it holds', () => {
   const front = clone(rect, { zIndex: nextZIndex(), x: 50 })
   assert(front.zIndex > rect.zIndex && front.x === 50, 'an override lands on the copy only')
   assert(rect.x === 0, 'and not on the original')
+})
+
+it('clone retains a texture it copies, so each node frees it independently', () => {
+  class FakeTexture implements ImageTexture {
+    readonly lifetime = new SharedLifetime()
+    readonly width = 4
+    readonly height = 4
+    freed = false
+    destroy(): void {
+      if (this.lifetime.release()) this.freed = true
+    }
+  }
+
+  const texture = new FakeTexture()
+  const original = new Image({ texture })
+  const copy = clone(original)
+
+  assert(texture.lifetime.holderCount === 2, 'the copy is a second holder, not a second name for the first')
+
+  original.destroy()
+  texture.destroy()
+  assert(!texture.freed, 'one holder letting go leaves the texture the other node still draws intact')
+
+  copy.destroy()
+  texture.destroy()
+  assert(texture.freed, 'the second holder letting go is what actually frees it')
+
+  // An override supplying its own texture is the caller's object, on the caller's own terms -
+  // clone() gains it no extra hold.
+  const other = new FakeTexture()
+  clone(new Image({ texture }), { texture: other })
+  assert(other.lifetime.holderCount === 1, 'an overridden attribute is left exactly as the caller gave it')
 })
