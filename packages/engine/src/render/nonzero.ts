@@ -100,7 +100,16 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
   const n = points.length
   if (n < 3) return []
 
-  const cuts: { at: number; point: Vector2Like }[][] = points.map(() => [])
+  // Built only where a crossing is actually found. A ring that crosses nothing is the common
+  // case - two thirds of a text face, and nearly every subpath of a drawing - and it goes through
+  // here without allocating a list per vertex to leave empty.
+  type Cut = { at: number; point: Vector2Like }
+  const cuts: (Cut[] | undefined)[] = new Array(points.length)
+  const cutAt = (i: number, cut: Cut): void => {
+    const list = cuts[i]
+    if (list) list.push(cut)
+    else cuts[i] = [cut]
+  }
   // A box per edge, so the pass below rejects almost every pair on four comparisons. The pass is
   // over every pair of edges either way, and a flattened curve is hundreds of short edges nearly
   // none of which are anywhere near each other - the work saved is the crossing solve, which is
@@ -133,8 +142,8 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
       if (!hit) continue
       // The SAME point object on both edges, so the walk below matches them up exactly rather
       // than to within a rounding error.
-      cuts[i].push({ at: parameterOf(a, b, hit), point: hit })
-      cuts[k].push({ at: parameterOf(c, d, hit), point: hit })
+      cutAt(i, { at: parameterOf(a, b, hit), point: hit })
+      cutAt(k, { at: parameterOf(c, d, hit), point: hit })
       found = true
     }
   }
@@ -143,8 +152,10 @@ export function simpleLoops(points: readonly Vector2Like[]): Vector2Like[][] {
   const walk: Vector2Like[] = []
   for (let i = 0; i < n; i++) {
     walk.push(points[i])
-    cuts[i].sort((x, y) => x.at - y.at)
-    for (const cut of cuts[i]) walk.push(cut.point)
+    const list = cuts[i]
+    if (!list) continue
+    list.sort((x, y) => x.at - y.at)
+    for (const cut of list) walk.push(cut.point)
   }
 
   const loops: Vector2Like[][] = []
@@ -492,51 +503,55 @@ export function windingGroups(rings: readonly (readonly Vector2Like[])[]): Conto
  * which covers both readings under both rules.
  */
 function fillRegions(contours: readonly Contour[], rule: FillRule): ContourGroup[] {
-  const rings = contours.filter((c) => c.points.length >= 3).map((c) => c.points as Vector2Like[])
+  const usable = contours.filter((contour) => contour.points.length >= 3)
+  const rings = usable.map((contour) => contour.points as Vector2Like[])
   if (rings.length === 0) return []
 
-  // NOTHING MEETING ANYTHING IS THE ORDINARY CASE, and it does not need a walk. Where no edge
-  // crosses or touches another, every ring is a simple polygon that is wholly inside another or
-  // wholly outside it - an icon is a ring with two counters in it, a letter is a bowl and a
-  // stem - and the rule can be read from what contains what. The walk below exists for the
-  // arrangements containment cannot describe, and those are the minority of a drawing.
-  if (!edgesMeet(rings)) return containmentRegions(rings, rule)
+  // A ring that crosses ITSELF is cut where it does, and the loops that come off carry the same
+  // rule between them as the ring did: a ray crosses the same edges either way, and each loop
+  // winds once. So a self-crossing is answered here, and is not what the walk below is for.
+  const loops = rings.flatMap((ring) => simpleLoops(ring))
+  if (loops.length === 0) return []
 
-  const silhouette = unionBoundary(contours.filter((c) => c.points.length >= 3), rule)
-  const outline = silhouette.length > 0 ? silhouette : contours.filter((c) => c.points.length >= 3)
+  // WHAT THE WALK IS FOR is two rings meeting EACH OTHER - sharing a boundary, or overlapping -
+  // where no per-ring answer exists because part of a ring's outline has material on both sides
+  // and part does not. Rings that only ever meet themselves are each a simple polygon wholly
+  // inside another or wholly outside it, and the rule reads off what contains what.
+  //
+  // A thin ribbon is why this line draws where it does. An outline hand-drawn as a wobbling
+  // stroke crosses itself many times over, and rebuilding one from hundreds of boundary pieces
+  // asks the walk to make hundreds of decisions where the two sides of the ribbon are a fraction
+  // of a unit apart - while containment asks one question per loop and cannot lose the inside of
+  // a ring it never has to reassemble.
+  if (!ringsMeet(rings)) return containmentRegions(loops, rule)
+
+  const silhouette = unionBoundary(usable, rule)
+  const outline = silhouette.length > 0 ? silhouette : usable
   return windingGroups(outline.flatMap((contour) => simpleLoops(contour.points)))
 }
 
 /**
- * Whether any two edges of the set meet - cross, or run into one another end-on - counting a
- * ring against itself as well as against its neighbours. Adjacent edges of one ring share a
- * vertex by construction and are not a meeting.
+ * Whether any two rings meet each other - cross, or run into one another end-on. A ring against
+ * ITSELF is not asked about: a self-crossing is cut out before this (see simpleLoops), and the
+ * loops it leaves are what the rule is then read from.
  *
  * This is the question that decides whether containment can answer the fill: rings that never
- * meet are nested or apart, and nothing else. It is the same pairwise pass unionBoundary opens
- * with, stopping at the first hit rather than collecting them, and every pair whose boxes miss
- * is rejected on four comparisons - which is nearly every pair, since the edges of a flattened
- * curve are short and mostly nowhere near each other.
+ * meet another ring are nested or apart, and nothing else. It is the pairwise pass unionBoundary
+ * opens with, stopping at the first hit rather than collecting them, and every pair whose boxes
+ * miss is rejected on four comparisons - which is nearly every pair, since the edges of a
+ * flattened curve are short and mostly nowhere near each other.
  */
-function edgesMeet(rings: readonly (readonly Vector2Like[])[]): boolean {
-  interface Edge { a: Vector2Like; b: Vector2Like; ring: number; index: number; last: number
+function ringsMeet(rings: readonly (readonly Vector2Like[])[]): boolean {
+  interface Edge { a: Vector2Like; b: Vector2Like; ring: number
     loX: number; loY: number; hiX: number; hiY: number }
   const edges: Edge[] = []
   let extent = 0
-  rings.forEach((raw, r) => {
-    // Consecutive repeats first, and the closing point where a path drew back to its start before
-    // saying `z`. They are edges of no length, and they push the ring's real first and last edges
-    // apart in the index space the adjacency test below reads - which would report an ordinary
-    // ring as touching itself at the vertex it closes on.
-    const ring = raw.filter((p, i) => i === 0 || p.x !== raw[i - 1].x || p.y !== raw[i - 1].y)
-    while (ring.length > 1 && ring[ring.length - 1].x === ring[0].x && ring[ring.length - 1].y === ring[0].y) {
-      ring.pop()
-    }
+  rings.forEach((ring, r) => {
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i]
       const b = ring[(i + 1) % ring.length]
       edges.push({
-        a, b, ring: r, index: i, last: ring.length - 1,
+        a, b, ring: r,
         loX: Math.min(a.x, b.x), loY: Math.min(a.y, b.y),
         hiX: Math.max(a.x, b.x), hiY: Math.max(a.y, b.y),
       })
@@ -575,12 +590,8 @@ function edgesMeet(rings: readonly (readonly Vector2Like[])[]): boolean {
     for (let k = i + 1; k < edges.length; k++) {
       const one = edges[i]
       const two = edges[k]
+      if (one.ring === two.ring) continue
       if (one.hiX < two.loX || two.hiX < one.loX || one.hiY < two.loY || two.hiY < one.loY) continue
-      if (one.ring === two.ring) {
-        // Consecutive edges share a vertex, and so do the last and the first.
-        const step = Math.abs(one.index - two.index)
-        if (step === 1 || step === one.last) continue
-      }
       if (crossing(one.a, one.b, two.a, two.b)) return true
       if (meetsEndOn(one, two) || meetsEndOn(two, one)) return true
     }
@@ -589,14 +600,14 @@ function edgesMeet(rings: readonly (readonly Vector2Like[])[]): boolean {
 }
 
 /**
- * The fill of rings that never meet, read from what contains what.
+ * The fill of loops that never meet another ring, read from what contains what.
  *
- * Every ring here is simple, and every pair is nested or apart, so the region just inside a ring
- * and the region just outside it each have one answer: under 'evenodd' whether the number of
- * rings around the point is odd, under 'nonzero' whether their windings sum to something other
- * than zero. A ring with material on one side of it is a boundary - an outer where the material
- * is within, a hole where it is without - and a ring with the same answer on both sides bounds
- * nothing and is dropped.
+ * Every loop here is simple - self-crossings were cut out before it - and every pair is nested,
+ * apart, or touching at a point, so the region just inside a loop and the region just outside it
+ * each have one answer: under 'evenodd' whether the number of loops around the point is odd,
+ * under 'nonzero' whether their windings sum to something other than zero. A loop with material
+ * on one side of it is a boundary - an outer where the material is within, a hole where it is
+ * without - and a loop with the same answer on both sides bounds nothing and is dropped.
  *
  * THIS READING IS ONLY GOOD IN THAT REGIME. Where two rings share a boundary, part of a ring's
  * outline has material on both sides and part does not, so the ring is not one thing or the

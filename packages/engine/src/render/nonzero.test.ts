@@ -292,6 +292,84 @@ it('a subpath is not dropped for sharing a boundary with the one beside it', () 
   )
 })
 
+/**
+ * A sketchy ribbon: a wobbling closed centreline offset along its own normals, with the
+ * half-width jittered per point so the two sides pinch through each other where the stroke is
+ * thin. That is what a hand-drawn outline is, and what makes a ring cross itself many times over
+ * rather than once or twice.
+ *
+ * Seeded, so the shapes are the same every run - a case that fails is a case that can be looked
+ * at rather than a number that moved.
+ */
+function sketchyRibbon(seed: number, points: number, thickness: number, wobble: number): Vector2Like[][] {
+  let state = (seed * 2654435761) >>> 0
+  const random = (): number => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 4294967296
+  }
+
+  const centre: Vector2Like[] = Array.from({ length: points }, (_, i) => {
+    const t = (i / points) * Math.PI * 2
+    const r = 20 + (random() - 0.5) * wobble * 3
+    return { x: 30 + Math.cos(t) * r, y: 30 + Math.sin(t) * r }
+  })
+
+  const outer: Vector2Like[] = []
+  const inner: Vector2Like[] = []
+  for (let i = 0; i < points; i++) {
+    const prev = centre[(i - 1 + points) % points]
+    const next = centre[(i + 1) % points]
+    const length = Math.hypot(next.x - prev.x, next.y - prev.y) || 1
+    const nx = -(next.y - prev.y) / length
+    const ny = (next.x - prev.x) / length
+    outer.push({
+      x: centre[i].x + nx * (thickness / 2 + (random() - 0.5) * wobble),
+      y: centre[i].y + ny * (thickness / 2 + (random() - 0.5) * wobble),
+    })
+    inner.push({
+      x: centre[i].x - nx * (thickness / 2 + (random() - 0.5) * wobble),
+      y: centre[i].y - ny * (thickness / 2 + (random() - 0.5) * wobble),
+    })
+  }
+  return [outer, inner.reverse()]
+}
+
+/** The area where the rule says there is material, by integrating over a grid. */
+function ruledArea(rings: Vector2Like[][], steps: number): number {
+  const cell = 60 / steps
+  let inside = 0
+  for (let i = 0; i < steps; i++) {
+    for (let j = 0; j < steps; j++) {
+      if (windingNumber((i + 0.5) * cell, (j + 0.5) * cell, rings) !== 0) inside++
+    }
+  }
+  return inside * cell * cell
+}
+
+it('a stroke drawn as a thin ribbon fills the ribbon, not its inside', () => {
+  // The shape an illustrated icon is made of: an outline whose two sides are a fraction of a unit
+  // apart, wobbling enough to cross itself repeatedly. What makes it worth its own test is the
+  // failure it has: a ribbon that loses the boundary between its sides fills as its own interior,
+  // which is a solid blob where the drawing was a line.
+  for (const seed of [3, 11, 29]) {
+    for (const [points, thickness, wobble] of [[20, 1.2, 1.2], [41, 0.6, 1.2], [41, 2.5, 2.5]] as const) {
+      const rings = sketchyRibbon(seed, points, thickness, wobble)
+      const fill = pathFill(rings)
+      const want = ruledArea(rings, 240)
+      const got = meshArea(fill)
+      const where = `seed ${seed}, ${points} points, ${thickness} thick`
+
+      // The grid is coarse against a ribbon a unit wide, so the tolerance is the grid's own
+      // resolution rather than a claim about the fill: what this catches is a ribbon that has
+      // become its interior, which is several times its own area rather than a few percent of it.
+      assert(
+        Math.abs(got - want) < Math.max(4, want * 0.15),
+        `${where}: fills ${want.toFixed(0)} square units, the ribbon itself (got ${got.toFixed(0)})`,
+      )
+    }
+  }
+})
+
 it('the silhouette of overlapping pieces has no seam in it', () => {
   // Two squares crossing: the union is one ring, and the four stretches of edge buried inside
   // the other square are gone. Stroking the pieces instead would draw both squares in full.
