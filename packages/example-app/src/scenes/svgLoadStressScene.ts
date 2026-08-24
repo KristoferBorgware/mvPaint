@@ -20,10 +20,11 @@
 //     and it is why the raster side is rasterized at 2x rather than at 1x - a fair fight puts
 //     the texture at the resolution an application would actually pick, and it still goes soft
 //     a couple of zoom steps in.
-//   - The loader covers geometry, paint, gradients and transforms. It does not do <use>,
-//     <clipPath> or <filter>, all of which Tux uses, so the vector Tux is missing its soft
-//     shadows and highlights while the raster one has them. The tiger uses none of those and
-//     the two halves of its row should be hard to tell apart.
+//   - The loader covers geometry, paint, gradients, transforms, CSS and <use>. It does not do
+//     <clipPath> or <filter>, both of which Tux leans on, so the vector Tux is missing its soft
+//     shadows and its clipped highlights while the raster one has them - and it says so, on
+//     `notes`, which this scene prints to the console. The tiger uses neither and the two
+//     halves of its row should be hard to tell apart.
 //
 // The vector side is re-parsed and re-tessellated on every build, so "Reload scene" in the
 // options pane re-measures it. The textures are rasterized once in prepare() and memoized
@@ -39,7 +40,7 @@ import {
   loadSvgDocument,
   svgIntrinsicSize,
   svgViewBox,
-  type Container,
+  type Group,
   type ImageTexture,
   type MeshSink,
   type Scene,
@@ -149,7 +150,7 @@ function countingSink(count: MeshCount): MeshSink {
 }
 
 interface VectorLoad {
-  doc: Container
+  doc: Group
   paths: number
   triangles: number
   parseMs: number
@@ -166,36 +167,33 @@ interface VectorLoad {
  * flattening. Tolerance moves both, in opposite proportions.
  */
 function loadVector(asset: AssetSpec, center: { x: number; y: number }): VectorLoad {
-  const rect = documentRect(asset.svg, asset.title)
-  const { scale } = fitToBox(rect.width, rect.height)
-
-  // SVG is y-down and so is the scene, so the matrix only scales; e and f then put the
-  // middle of the document's own rectangle at the middle of the cell.
+  // The document's own viewBox onto the cell's square, uniformly and centred, which is what
+  // `fit` does with the preserveAspectRatio both of these leave at the default. It lands on the
+  // returned group's transform rather than in the points, so moving the result to its cell is
+  // two writes and not a second parse.
   const parseStart = performance.now()
-  const doc = loadSvgDocument(asset.svg, {
-    rootMatrix: [
-      scale,
-      0,
-      0,
-      scale,
-      center.x - (rect.x + rect.width / 2) * scale,
-      center.y - (rect.y + rect.height / 2) * scale,
-    ],
-  })
+  const doc = loadSvgDocument(asset.svg, { fit: { width: BOX, height: BOX } })
   const parseMs = performance.now() - parseStart
+  if (!doc.viewBox) throw new Error(`${asset.title}.svg has neither a viewBox nor a size to scale it by`)
+  doc.root.x += center.x - BOX / 2
+  doc.root.y += center.y - BOX / 2
+  // What the loader could not read, said out loud - which for Tux is its filters and clips.
+  if (doc.notes.length > 0) {
+    console.warn(`${asset.title}.svg: ${doc.notes.map((n) => `${n.detail} x${n.count}`).join(', ')}`)
+  }
 
   const count: MeshCount = { vertices: 0, triangles: 0 }
   const sink = countingSink(count)
   let paths = 0
   const tessellateStart = performance.now()
-  doc.traversePreOrder((node) => {
+  doc.root.traversePreOrder((node) => {
     if (!(node instanceof Path)) return
     paths++
     node.tessellate(sink)
   })
   const tessellateMs = performance.now() - tessellateStart
 
-  return { doc, paths, triangles: count.triangles, parseMs, tessellateMs }
+  return { doc: doc.root, paths, triangles: count.triangles, parseMs, tessellateMs }
 }
 
 interface RasterLoad {
@@ -373,7 +371,7 @@ export function buildSvgLoadStressScene(scene: Scene): SceneContent {
         },
         {
           text:
-            'loadSvgDocument() reads geometry, paint, gradients and transforms, but not <filter>, <clipPath> or <use>. Tux uses all three, so its polygon half has none of the blurred shadows and clipped highlights its image half shows. The tiger uses none of them, and its two halves should be hard to tell apart.',
+            'loadSvgDocument() reads geometry, paint, gradients, transforms, CSS and <use>, but not <filter> or <clipPath>. Tux leans on both, so its polygon half has none of the blurred shadows and clipped highlights its image half shows - and reports them on doc.notes, which this scene prints to the console. The tiger uses neither, and its two halves should be hard to tell apart.',
           style: { fontSize: 15, color: withAlpha(DARK, 0.7) },
         },
       ],

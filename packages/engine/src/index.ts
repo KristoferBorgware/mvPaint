@@ -66,6 +66,7 @@ export type { RGBA, FillPriority, GradientStop, MeshMaterial, MeshSink } from '.
 export { parseColor, MV_GREEN, type ColorInput, type ColorStopInput } from './render/color'
 
 export * from './svg/loadSvg'
+export * from './svg/viewBox'
 
 export * from './image/ImageTexture'
 export * from './resources/cachingImageFactory'

@@ -15,6 +15,7 @@ import { buildShapesScene } from './shapesScene'
 import { buildStrokeScaleScene } from './strokeScaleScene'
 import { buildShapeStressScene } from './shapeStressScene'
 import { buildStressScene } from './stressScene'
+import { buildSvgFeaturesScene } from './svgFeaturesScene'
 import { buildSvgScene } from './svgScene'
 import { buildSvgLoadStressScene, prepareSvgLoadStressScene } from './svgLoadStressScene'
 import { buildTextScene } from './textScene'
@@ -174,8 +175,15 @@ export const EXAMPLE_SCENES: ExampleScene[] = [
     id: 'svg',
     title: 'SVG document',
     description:
-      'loadSvgDocument() turning a document into Path nodes under one container: an even-odd hole, linear and radial gradient fills, and a stroked open curve - so the loader and the tessellation/stroke geometry are exercised together. rootMatrix only scales and places, since SVG is y-down and so is the scene.',
+      'loadSvgDocument() turning a document into Path nodes under one container: a fill-rule="evenodd" hole, linear and radial gradient fills, and a stroked open curve - so the loader and the tessellation/stroke geometry are exercised together. The document is placed by fit, which maps its viewBox onto a square and writes the result to the returned group rather than into the points.',
     build: buildSvgScene,
+  },
+  {
+    id: 'svg-features',
+    title: 'SVG loader features',
+    description:
+      "Six documents, each said twice: paint resolved from a <style> block next to the same document with no rules to resolve (which draws in SVG's initial black rather than not at all), a subpath with no `z` next to the same path with one, two same-wound rings under each fill-rule, one document fitted into three boxes by three preserveAspectRatio values, a <symbol> instanced three times by <use> over a dashed baseline, and a document of things the loader does not draw with its doc.notes printed beside it.",
+    build: buildSvgFeaturesScene,
   },
   {
     id: 'zindex',
